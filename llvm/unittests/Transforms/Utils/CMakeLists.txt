@@ -1,0 +1,19 @@
+set(LLVM_LINK_COMPONENTS
+  Analysis
+  AsmParser
+  Core
+  Support
+  TransformUtils
+  )
+
+add_llvm_unittest(UtilsTests
+  ASanStackFrameLayoutTest.cpp
+  BasicBlockUtilsTest.cpp
+  CloningTest.cpp
+  CodeExtractorTest.cpp
+  FunctionComparatorTest.cpp
+  IntegerDivisionTest.cpp
+  LocalTest.cpp
+  SSAUpdaterBulkTest.cpp
+  ValueMapperTest.cpp
+  )
