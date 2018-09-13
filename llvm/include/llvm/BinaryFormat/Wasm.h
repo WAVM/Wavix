@@ -47,8 +47,8 @@ struct WasmExport {
 
 struct WasmLimits {
   uint8_t Flags;
-  uint32_t Initial;
-  uint32_t Maximum;
+  uint64_t Initial;
+  uint64_t Maximum;
 };
 
 struct WasmTable {
@@ -217,6 +217,7 @@ enum : unsigned {
 
 enum : unsigned {
   WASM_LIMITS_FLAG_HAS_MAX = 0x1,
+  WASM_LIMITS_FLAG_SHARED = 0x2
 };
 
 // Subset of types that a value can have
@@ -230,8 +231,14 @@ enum class ValType {
 
 // Kind codes used in the custom "name" section
 enum : unsigned {
+  WASM_NAMES_MODULE = 0x0,
   WASM_NAMES_FUNCTION = 0x1,
   WASM_NAMES_LOCAL = 0x2,
+  WASM_NAMES_LABEL = 0x3,
+  WASM_NAMES_TYPE = 0x4,
+  WASM_NAMES_TABLE = 0x5,
+  WASM_NAMES_MEMORY = 0x6,
+  WASM_NAMES_GLOBAL = 0x7,
 };
 
 // Kind codes used in the custom "linking" section

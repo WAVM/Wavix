@@ -35,6 +35,7 @@ static sys::Mutex* getManagedStaticMutex() {
 void ManagedStaticBase::RegisterManagedStatic(void *(*Creator)(),
                                               void (*Deleter)(void*)) const {
   assert(Creator);
+#if LLVM_ENABLE_THREADS
   if (llvm_is_multithreaded()) {
     MutexGuard Lock(*getManagedStaticMutex());
 
@@ -48,7 +49,10 @@ void ManagedStaticBase::RegisterManagedStatic(void *(*Creator)(),
       Next = StaticList;
       StaticList = this;
     }
-  } else {
+  }
+  else
+#endif
+  {
     assert(!Ptr && !DeleterFn && !Next &&
            "Partially initialized ManagedStatic!?");
     Ptr = Creator();

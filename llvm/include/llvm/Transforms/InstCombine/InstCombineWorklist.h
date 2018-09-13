@@ -26,7 +26,7 @@ namespace llvm {
 /// InstCombine.
 class InstCombineWorklist {
   SmallVector<Instruction*, 256> Worklist;
-  DenseMap<Instruction*, unsigned> WorklistMap;
+  DenseMap<Instruction*, size_t> WorklistMap;
 
 public:
   InstCombineWorklist() = default;
@@ -59,7 +59,7 @@ public:
     WorklistMap.reserve(List.size());
     LLVM_DEBUG(dbgs() << "IC: ADDING: " << List.size()
                       << " instrs to worklist\n");
-    unsigned Idx = 0;
+    size_t Idx = 0;
     for (Instruction *I : reverse(List)) {
       WorklistMap.insert(std::make_pair(I, Idx++));
       Worklist.push_back(I);
@@ -68,7 +68,7 @@ public:
 
   // Remove - remove I from the worklist if it exists.
   void Remove(Instruction *I) {
-    DenseMap<Instruction*, unsigned>::iterator It = WorklistMap.find(I);
+    DenseMap<Instruction*, size_t>::iterator It = WorklistMap.find(I);
     if (It == WorklistMap.end()) return; // Not in worklist.
 
     // Don't bother moving everything down, just null out the slot.

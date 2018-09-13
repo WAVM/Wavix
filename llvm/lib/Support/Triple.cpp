@@ -210,6 +210,7 @@ StringRef Triple::getOSTypeName(OSType Kind) {
   case Contiki: return "contiki";
   case AMDPAL: return "amdpal";
   case HermitCore: return "hermit";
+  case Wavix: return "wavix";
   }
 
   llvm_unreachable("Invalid OSType");
@@ -504,6 +505,7 @@ static Triple::OSType parseOS(StringRef OSName) {
     .StartsWith("contiki", Triple::Contiki)
     .StartsWith("amdpal", Triple::AMDPAL)
     .StartsWith("hermit", Triple::HermitCore)
+    .StartsWith("wavix", Triple::Wavix)
     .Default(Triple::UnknownOS);
 }
 
@@ -683,7 +685,12 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
 
   case Triple::wasm32:
   case Triple::wasm64:
-    return Triple::Wasm;
+    if(T.getOS() == Triple::Wavix) {
+      return Triple::Wasm;
+    } else {
+      return Triple::ELF;
+    }
+
   }
   llvm_unreachable("unknown architecture");
 }

@@ -40,7 +40,9 @@ using namespace lld::wasm;
 
 static constexpr int kStackAlignment = 16;
 static constexpr int kInitialTableOffset = 1;
-static constexpr const char *kFunctionTableName = "__indirect_function_table";
+static constexpr const char *kFunctionTableName = "__table";
+static constexpr const char *kMemoryName = "__memory";
+
 
 namespace {
 
@@ -84,6 +86,7 @@ private:
   void createExportSection();
   void createImportSection();
   void createMemorySection();
+  void createStartSection();
   void createElemSection();
   void createCodeSection();
   void createDataSection();
@@ -144,29 +147,30 @@ void Writer::createImportSection() {
 
   writeUleb128(OS, NumImports, "import count");
 
-  if (Config->ImportMemory) {
-    WasmImport Import;
-    Import.Module = "env";
-    Import.Field = "memory";
-    Import.Kind = WASM_EXTERNAL_MEMORY;
-    Import.Memory.Flags = 0;
-    Import.Memory.Initial = NumMemoryPages;
-    if (MaxMemoryPages != 0) {
-      Import.Memory.Flags |= WASM_LIMITS_FLAG_HAS_MAX;
-      Import.Memory.Maximum = MaxMemoryPages;
-    }
-    writeImport(OS, Import);
+  if (Config->ImportTable) {
+    WasmImport TableImport;
+    TableImport.Module = "env";
+    TableImport.Field = "table";
+    TableImport.Kind = WASM_EXTERNAL_TABLE;
+    TableImport.Table.ElemType = WASM_TYPE_ANYFUNC;
+    TableImport.Table.Limits.Flags = WASM_LIMITS_FLAG_SHARED | WASM_LIMITS_FLAG_HAS_MAX;
+    TableImport.Table.Limits.Initial = kInitialTableOffset;
+    TableImport.Table.Limits.Maximum = uint64_t(UINT32_MAX) + 1;
+    writeImport(OS, TableImport);
   }
 
-  if (Config->ImportTable) {
-    uint32_t TableSize = kInitialTableOffset + IndirectFunctions.size();
-    WasmImport Import;
-    Import.Module = "env";
-    Import.Field = kFunctionTableName;
-    Import.Kind = WASM_EXTERNAL_TABLE;
-    Import.Table.ElemType = WASM_TYPE_ANYFUNC;
-    Import.Table.Limits = {WASM_LIMITS_FLAG_HAS_MAX, TableSize, TableSize};
-    writeImport(OS, Import);
+  if (Config->ImportMemory) {
+    WasmImport MemoryImport;
+    MemoryImport.Module = "env";
+    MemoryImport.Field = "memory";
+    MemoryImport.Kind = WASM_EXTERNAL_MEMORY;
+    MemoryImport.Memory.Flags = WASM_LIMITS_FLAG_SHARED | WASM_LIMITS_FLAG_HAS_MAX;
+    MemoryImport.Memory.Initial = NumMemoryPages;
+    if (MaxMemoryPages != 0) {
+      MemoryImport.Memory.Flags |= WASM_LIMITS_FLAG_HAS_MAX;
+      MemoryImport.Memory.Maximum = MaxMemoryPages;
+    }
+    writeImport(OS, MemoryImport);
   }
 
   for (const Symbol *Sym : ImportedSymbols) {
@@ -214,7 +218,9 @@ void Writer::createMemorySection() {
 
   bool HasMax = MaxMemoryPages != 0;
   writeUleb128(OS, 1, "memory count");
-  writeUleb128(OS, HasMax ? static_cast<unsigned>(WASM_LIMITS_FLAG_HAS_MAX) : 0,
+  writeUleb128(OS, HasMax
+    ? static_cast<unsigned>(WASM_LIMITS_FLAG_SHARED | WASM_LIMITS_FLAG_HAS_MAX)
+    : 0,
                "memory limits flags");
   writeUleb128(OS, NumMemoryPages, "initial pages");
   if (HasMax)
@@ -259,7 +265,7 @@ void Writer::createTableSection() {
   raw_ostream &OS = Section->getStream();
 
   writeUleb128(OS, 1, "table count");
-  WasmLimits Limits = {WASM_LIMITS_FLAG_HAS_MAX, TableSize, TableSize};
+  WasmLimits Limits = {WASM_LIMITS_FLAG_SHARED | WASM_LIMITS_FLAG_HAS_MAX, TableSize, uint64_t(UINT32_MAX)+1};
   writeTableType(OS, WasmTable{WASM_TYPE_ANYFUNC, Limits});
 }
 
@@ -273,6 +279,13 @@ void Writer::createExportSection() {
   writeUleb128(OS, Exports.size(), "export count");
   for (const WasmExport &Export : Exports)
     writeExport(OS, Export);
+}
+
+void Writer::createStartSection() {
+  if(WasmSym::CallCtors->hasFunctionIndex()) {
+    SyntheticSection *Section = createSyntheticSection(WASM_SEC_START);
+    writeUleb128(Section->getStream(), WasmSym::CallCtors->getFunctionIndex(), "start function");
+  }
 }
 
 void Writer::calculateCustomSections() {
@@ -529,42 +542,89 @@ void Writer::createLinkingSection() {
 
 // Create the custom "name" section containing debug symbol names.
 void Writer::createNameSection() {
-  unsigned NumNames = NumImportedFunctions;
-  for (const InputFunction *F : InputFunctions)
-    if (!F->getName().empty() || !F->getDebugName().empty())
-      ++NumNames;
-
-  if (NumNames == 0)
-    return;
-
   SyntheticSection *Section = createSyntheticSection(WASM_SEC_CUSTOM, "name");
 
-  SubSection Sub(WASM_NAMES_FUNCTION);
-  writeUleb128(Sub.OS, NumNames, "name count");
+  // Write the function names subsection.
+  unsigned NumFunctionNames = NumImportedFunctions;
+  for (const InputFunction *F : InputFunctions)
+    if (!F->getName().empty() || !F->getDebugName().empty())
+      ++NumFunctionNames;
 
-  // Names must appear in function index order.  As it happens ImportedSymbols
-  // and InputFunctions are numbered in order with imported functions coming
-  // first.
-  for (const Symbol *S : ImportedSymbols) {
-    if (auto *F = dyn_cast<FunctionSymbol>(S)) {
-      writeUleb128(Sub.OS, F->getFunctionIndex(), "func index");
-      Optional<std::string> Name = demangleItanium(F->getName());
-      writeStr(Sub.OS, Name ? StringRef(*Name) : F->getName(), "symbol name");
-    }
-  }
-  for (const InputFunction *F : InputFunctions) {
-    if (!F->getName().empty()) {
-      writeUleb128(Sub.OS, F->getFunctionIndex(), "func index");
-      if (!F->getDebugName().empty()) {
-        writeStr(Sub.OS, F->getDebugName(), "symbol name");
-      } else {
+  if (NumFunctionNames) {
+    SubSection FunctionSubsection(WASM_NAMES_FUNCTION);
+    writeUleb128(FunctionSubsection.OS, NumFunctionNames, "name count");
+
+    // Names must appear in function index order.  As it happens ImportedSymbols
+    // and InputFunctions are numbered in order with imported functions coming
+    // first.
+    for (const Symbol *S : ImportedSymbols) {
+      if (auto *F = dyn_cast<FunctionSymbol>(S)) {
+        writeUleb128(FunctionSubsection.OS, F->getFunctionIndex(), "func index");
         Optional<std::string> Name = demangleItanium(F->getName());
-        writeStr(Sub.OS, Name ? StringRef(*Name) : F->getName(), "symbol name");
+        writeStr(FunctionSubsection.OS, Name ? StringRef(*Name) : F->getName(), "symbol name");
       }
     }
+    for (const InputFunction *F : InputFunctions) {
+      if (!F->getName().empty()) {
+        writeUleb128(FunctionSubsection.OS, F->getFunctionIndex(), "func index");
+        if (!F->getDebugName().empty()) {
+          writeStr(FunctionSubsection.OS, F->getDebugName(), "symbol name");
+        } else {
+          Optional<std::string> Name = demangleItanium(F->getName());
+          writeStr(FunctionSubsection.OS, Name ? StringRef(*Name) : F->getName(), "symbol name");
+        }
+      }
+    }
+
+    FunctionSubsection.writeTo(Section->getStream());
   }
 
-  Sub.writeTo(Section->getStream());
+  // Write the table names subsection.
+  {
+    SubSection TableSubsection(WASM_NAMES_TABLE);
+    writeUleb128(TableSubsection.OS, 1, "name count");
+
+    writeUleb128(TableSubsection.OS, 0, "table index");
+    writeStr(TableSubsection.OS, "__table", "symbol name");
+
+    TableSubsection.writeTo(Section->getStream());
+  }
+
+  // Write the memory names subsection.
+  {
+    SubSection MemorySubsection(WASM_NAMES_MEMORY);
+    writeUleb128(MemorySubsection.OS, 1, "name count");
+
+    writeUleb128(MemorySubsection.OS, 0, "memory index");
+    writeStr(MemorySubsection.OS, "__memory", "symbol name");
+
+    MemorySubsection.writeTo(Section->getStream());
+  }
+
+  // Write the global names subsection.
+  unsigned NumGlobalNames = NumImportedGlobals;
+  for (const InputGlobal *G : InputGlobals)
+    if (!G->getName().empty())
+      ++NumGlobalNames;
+
+  if(NumGlobalNames) {
+    SubSection GlobalSubsection(WASM_NAMES_GLOBAL);
+    writeUleb128(GlobalSubsection.OS, NumGlobalNames, "name count");
+
+    for (const Symbol *S : ImportedSymbols) {
+      if (auto *G = dyn_cast<GlobalSymbol>(S)) {
+        writeUleb128(GlobalSubsection.OS, G->getGlobalIndex(), "global index");
+        writeStr(GlobalSubsection.OS, G->getName(), "symbol name");
+      }
+    }
+
+    for (const InputGlobal *G : InputGlobals) {
+      writeUleb128(GlobalSubsection.OS, G->getGlobalIndex(), "global index");
+      writeStr(GlobalSubsection.OS, G->getName(), "symbol name");
+    }
+
+    GlobalSubsection.writeTo(Section->getStream());
+  }
 }
 
 void Writer::writeHeader() {
@@ -685,6 +745,7 @@ void Writer::createSections() {
   createMemorySection();
   createGlobalSection();
   createExportSection();
+  createStartSection();
   createElemSection();
   createCodeSection();
   createDataSection();
@@ -732,9 +793,9 @@ void Writer::calculateExports() {
     return;
 
   if (!Config->Relocatable && !Config->ImportMemory)
-    Exports.push_back(WasmExport{"memory", WASM_EXTERNAL_MEMORY, 0});
+    Exports.push_back(WasmExport{kMemoryName, WASM_EXTERNAL_MEMORY, 0});
 
-  if (!Config->Relocatable && Config->ExportTable)
+  if (!Config->Relocatable && !Config->ImportTable)
     Exports.push_back(WasmExport{kFunctionTableName, WASM_EXTERNAL_TABLE, 0});
 
   unsigned FakeGlobalIndex = NumImportedGlobals + InputGlobals.size();

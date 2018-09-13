@@ -27,17 +27,9 @@ import tempfile
 
 verbose = False
 
-DIR_BLACKLIST = ['misc', 'ldso']
+DIR_BLACKLIST = ['ldso']
 BLACKLIST = [
-    'puts.c', # Prefer the JS version for now
-    'abort.c', # Perfer the JS version for now
-    '_Exit.c', # Perfer the JS version for now
-    '__init_tls.c',
-]
-# Files that contain weak reference which are not suppoered by s2wasm
-WEAK_BLACKLIST = [
-    'exit.c',
-    '__libc_start_main.c',
+#    '__init_tls.c',
 ]
 CFLAGS = ['-std=c99',
           '-D_XOPEN_SOURCE=700',
@@ -74,8 +66,8 @@ def change_extension(path, new_extension):
 
 def create_version(musl, outdir):
   """musl's Makefile creates version.h"""
-  script = os.path.join(musl, 'tools', 'version.sh')
-  version = check_output(['sh', script], cwd=musl).strip()
+  script = os.path.join('tools', 'version.sh').replace('\\', '/')
+  version = check_output(['bash', script], cwd=musl).strip()
   outroot = os.path.join(outdir, 'src', 'internal')
   if not os.path.exists(outroot):
     os.makedirs(outroot)
@@ -88,21 +80,21 @@ def build_headers(musl, arch, outdir):
   outroot = os.path.join(outdir, 'include', 'bits')
   if not os.path.exists(outroot):
     os.makedirs(outroot)
-  mkalltypes = os.path.join(musl, 'tools', 'mkalltypes.sed')
-  inbits = os.path.join(musl, 'arch', arch, 'bits', 'alltypes.h.in')
-  intypes = os.path.join(musl, 'include', 'alltypes.h.in')
-  out = check_output(['sed', '-f', mkalltypes, inbits, intypes])
+  mkalltypes = os.path.join('tools', 'mkalltypes.sed').replace('\\', '/')
+  inbits = os.path.join('arch', arch, 'bits', 'alltypes.h.in').replace('\\', '/')
+  intypes = os.path.join('include', 'alltypes.h.in').replace('\\', '/')
+  out = check_output(['bash', '-c', 'sed -f %s %s %s' % (mkalltypes, inbits, intypes)], cwd=musl)
   with open(os.path.join(outroot, 'alltypes.h'), 'w') as o:
     o.write(out)
 
-  insyscall = os.path.join(musl, 'arch', arch, 'bits', 'syscall.h.in')
-  out = check_output(['sed', '-n', '-e', 's/__NR_/SYS_/p', insyscall])
+  insyscall = os.path.join('arch', arch, 'bits', 'syscall.h.in')
+  out = check_output(['bash', '-c', 'sed -n -e s/__NR_/SYS_/p %s' % insyscall.replace('\\', '/')], cwd=musl)
   with open(os.path.join(outroot, 'syscall.h'), 'w') as o:
-    o.write(open(insyscall).read())
+    o.write(open(os.path.join(musl,insyscall)).read())
     o.write(out)
 
 
-def musl_sources(musl_root, include_weak):
+def musl_sources(musl_root):
   """musl sources to be built."""
   sources = []
   for d in os.listdir(os.path.join(musl_root, 'src')):
@@ -113,9 +105,7 @@ def musl_sources(musl_root, include_weak):
     for f in glob.glob(pattern):
       if os.path.basename(f) in BLACKLIST:
         continue
-      if not include_weak and os.path.basename(f) in WEAK_BLACKLIST:
-        continue
-      sources.append(f)
+      sources.append(os.path.join(d, os.path.basename(f)))
   return sorted(sources)
 
 
@@ -143,6 +133,11 @@ class Compiler(object):
     self.compiled = []
 
   def compile(self, sources):
+    for source in sources:
+      obj_dir = os.path.join(self.tmpdir, os.path.dirname(source))
+      if not os.path.isdir(obj_dir):
+        os.mkdir(obj_dir)
+
     if verbose:
       self.compiled = sorted([self(source) for source in sources])
     else:
@@ -157,13 +152,14 @@ class ObjCompiler(Compiler):
     super(ObjCompiler, self).__init__(out, clang_dir, musl, arch, tmpdir)
 
   def __call__(self, src):
-    target = 'wasm32-unknown-unknown-wasm'
+    target = 'wasm32-unknown-wavix'
     compile_cmd = [os.path.join(self.clang_dir, 'clang'), '-target', target,
                    '-Os', '-c', '-nostdinc']
     compile_cmd += includes(self.musl, self.arch, self.tmpdir)
     compile_cmd += CFLAGS
-    check_output(compile_cmd + [src], cwd=self.tmpdir)
-    return os.path.basename(src)[:-1] + 'o'  # .c -> .o
+    obj = src[:-1] + 'o' # .c -> .o
+    check_output(compile_cmd + [os.path.join(self.musl, 'src', src), '-o', obj], cwd=self.tmpdir)
+    return obj
 
   def binary(self):
     if os.path.exists(self.out):
@@ -172,44 +168,7 @@ class ObjCompiler(Compiler):
                   cwd=self.tmpdir)
 
 
-class AsmCompiler(Compiler):
-  def __init__(self, out, clang_dir, musl, arch, tmpdir, binaryen_dir,
-      sexpr_wasm):
-    super(AsmCompiler, self).__init__(out, clang_dir, musl, arch, tmpdir)
-    self.binaryen_dir = binaryen_dir
-    self.sexpr_wasm = sexpr_wasm
-
-  def __call__(self, src):
-    target = 'wasm32-unknown-unknown'
-    compile_cmd = [os.path.join(self.clang_dir, 'clang'), '-target', target,
-                   '-Os', '-emit-llvm', '-S', '-nostdinc']
-    compile_cmd += includes(self.musl, self.arch, self.tmpdir)
-    compile_cmd += CFLAGS
-    check_output(compile_cmd + [src], cwd=self.tmpdir)
-    return os.path.basename(src)[:-1] + 'll'  # .c -> .ll
-
-  def binary(self):
-    max_memory = str(16 * 1024 * 1024)
-    bytecode = change_extension(self.out, '.bc')
-    assembly = os.path.join(self.tmpdir, self.outbase + '.s')
-    check_output([os.path.join(self.clang_dir, 'llvm-link'),
-                  '-o', bytecode] + self.compiled,
-                 cwd=self.tmpdir)
-    check_output([os.path.join(self.clang_dir, 'llc'),
-                  bytecode, '-o', assembly],
-                 cwd=self.tmpdir)
-    check_output([os.path.join(self.binaryen_dir, 's2wasm'),
-                  assembly, '--ignore-unknown', '-o', self.out,
-                  '--import-memory', '-m', max_memory],
-                 cwd=self.tmpdir)
-
-    if self.sexpr_wasm:
-      check_output([self.sexpr_wasm,
-                    self.out, '-o', change_extension(self.out, '.wasm')],
-                   cwd=self.tmpdir)
-
-
-def run(clang_dir, binaryen_dir, sexpr_wasm, musl, arch, out, compile_to_wasm):
+def run(clang_dir, musl, arch, out):
   objdir = os.path.join(os.path.dirname(out), 'obj')
   if os.path.isdir(objdir):
     shutil.rmtree(objdir)
@@ -217,28 +176,19 @@ def run(clang_dir, binaryen_dir, sexpr_wasm, musl, arch, out, compile_to_wasm):
 
   create_version(musl, objdir)
   build_headers(musl, arch, objdir)
-  sources = musl_sources(musl, include_weak=compile_to_wasm)
-  if compile_to_wasm:
-    compiler = ObjCompiler(out, clang_dir, musl, arch, objdir)
-  else:
-    compiler = AsmCompiler(out, clang_dir, musl, arch, objdir, binaryen_dir,
-                           sexpr_wasm)
+  sources = musl_sources(musl)
+  compiler = ObjCompiler(out, clang_dir, musl, arch, objdir)
   compiler.compile(sources)
   compiler.binary()
-  if compile_to_wasm:
-    compiler.compile([os.path.join(musl, 'crt', 'crt1.c')])
-    shutil.copy(os.path.join(objdir, compiler.compiled[0]),
-                os.path.dirname(out))
+  compiler.compile([os.path.join(musl, 'crt', 'crt1.c')])
+  shutil.copy(os.path.join(objdir, compiler.compiled[0]),
+              os.path.dirname(out))
 
 
 def getargs():
   parser = argparse.ArgumentParser(description='Build a hacky wasm libc.')
   parser.add_argument('--clang_dir', type=str, required=True,
                       help='Clang binary directory')
-  parser.add_argument('--binaryen_dir', type=str, required=True,
-                      help='binaryen binary directory')
-  parser.add_argument('--sexpr_wasm', type=str, required=False,
-                      help='sexpr-wasm binary')
   parser.add_argument('--musl', type=str, required=True,
                       help='musl libc root directory')
   parser.add_argument('--arch', type=str, default='wasm32',
@@ -248,8 +198,6 @@ def getargs():
                       help='Output file')
   parser.add_argument('--verbose', default=False, action='store_true',
                       help='Verbose')
-  parser.add_argument('--compile-to-wasm', default=False, action='store_true',
-                      help='Use clang to compile directly to wasm')
   return parser.parse_args()
 
 
@@ -258,8 +206,7 @@ def main():
   args = getargs()
   if args.verbose:
     verbose = True
-  return run(args.clang_dir, args.binaryen_dir, args.sexpr_wasm,
-             args.musl, args.arch, args.out, args.compile_to_wasm)
+  return run(args.clang_dir, args.musl, args.arch, args.out)
 
 
 if __name__ == '__main__':

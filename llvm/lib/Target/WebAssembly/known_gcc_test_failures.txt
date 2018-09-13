@@ -15,12 +15,13 @@
 920501-4.c
 920501-5.c
 comp-goto-1.c
-980526-1.c
 990208-1.c
 label13.C O0
 label13a.C O0
 label3.C
 pr42462.C O0
+pr70460.c
+pr71494.c
 
 # WebAssembly hasn't implemented (will never?) __builtin_return_address
 20010122-1.c
@@ -117,3 +118,6 @@ vbase8-21.C
 vbase8-22.C
 vbase8-4.C
 vector1.C
+
+# GCC decimal type extension not supported
+pr80692.c

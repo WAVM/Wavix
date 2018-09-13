@@ -14,7 +14,12 @@
 #ifndef LLVM_SUPPORT_MANAGEDSTATIC_H
 #define LLVM_SUPPORT_MANAGEDSTATIC_H
 
+#include "llvm/Config/llvm-config.h"
+
+#if LLVM_ENABLE_THREADS
 #include <atomic>
+#endif
+
 #include <cstddef>
 
 namespace llvm {
@@ -38,7 +43,11 @@ class ManagedStaticBase {
 protected:
   // This should only be used as a static variable, which guarantees that this
   // will be zero initialized.
+#if LLVM_ENABLE_THREADS
   mutable std::atomic<void *> Ptr;
+#else
+  mutable void* Ptr;
+#endif
   mutable void (*DeleterFn)(void*);
   mutable const ManagedStaticBase *Next;
 
@@ -62,21 +71,37 @@ class ManagedStatic : public ManagedStaticBase {
 public:
   // Accessors.
   C &operator*() {
+#if LLVM_ENABLE_THREADS
     void *Tmp = Ptr.load(std::memory_order_acquire);
     if (!Tmp)
       RegisterManagedStatic(Creator::call, Deleter::call);
 
     return *static_cast<C *>(Ptr.load(std::memory_order_relaxed));
+#else
+    void *Tmp = Ptr;
+    if (!Tmp)
+      RegisterManagedStatic(Creator::call, Deleter::call);
+
+    return *static_cast<C *>(Ptr);
+#endif
   }
 
   C *operator->() { return &**this; }
 
   const C &operator*() const {
+#if LLVM_ENABLE_THREADS
     void *Tmp = Ptr.load(std::memory_order_acquire);
     if (!Tmp)
       RegisterManagedStatic(Creator::call, Deleter::call);
 
     return *static_cast<C *>(Ptr.load(std::memory_order_relaxed));
+#else
+    void *Tmp = Ptr;
+    if (!Tmp)
+      RegisterManagedStatic(Creator::call, Deleter::call);
+
+    return *static_cast<C *>(Ptr);
+#endif
   }
 
   const C *operator->() const { return &**this; }

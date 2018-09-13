@@ -44,13 +44,11 @@ void __init_libc(char **envp, char *pn)
 		&& !aux[AT_SECURE]) return;
 
 	struct pollfd pfd[3] = { {.fd=0}, {.fd=1}, {.fd=2} };
-	int r =
 #ifdef SYS_poll
 	__syscall(SYS_poll, pfd, 3, 0);
 #else
 	__syscall(SYS_ppoll, pfd, 3, &(struct timespec){0}, 0, _NSIG/8);
 #endif
-	if (r<0) a_crash();
 	for (i=0; i<3; i++) if (pfd[i].revents&POLLNVAL)
 		if (__sys_open("/dev/null", O_RDWR)<0)
 			a_crash();
@@ -67,15 +65,13 @@ static void libc_start_init(void)
 
 weak_alias(libc_start_init, __libc_start_init);
 
-int __libc_start_main(int (*main)(int,char **,char **), int argc, char **argv,
-	void(*init)(), void(*fini)())
+int __libc_start_main(int (*main)(int,char **), int argc, char **argv,
+	char **envp, void(*init)(), void(*fini)())
 {
-	char **envp = argv+argc+1;
-
 	__init_libc(envp, argv[0]);
 	__libc_start_init();
 
 	/* Pass control to the application */
-	exit(main(argc, argv, envp));
+	exit(main(argc, argv));
 	return 0;
 }

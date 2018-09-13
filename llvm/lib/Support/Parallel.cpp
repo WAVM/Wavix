@@ -10,9 +10,9 @@
 #include "llvm/Support/Parallel.h"
 #include "llvm/Config/llvm-config.h"
 
-#if LLVM_ENABLE_THREADS
-
 #include "llvm/Support/Threading.h"
+
+#if LLVM_ENABLE_THREADS
 
 #include <atomic>
 #include <stack>

@@ -40,12 +40,12 @@ void wasm::debugWrite(uint64_t Offset, const Twine &Msg) {
   LLVM_DEBUG(dbgs() << format("  | %08lld: ", Offset) << Msg << "\n");
 }
 
-void wasm::writeUleb128(raw_ostream &OS, uint32_t Number, const Twine &Msg) {
+void wasm::writeUleb128(raw_ostream &OS, uint64_t Number, const Twine &Msg) {
   debugWrite(OS.tell(), Msg + "[" + utohexstr(Number) + "]");
   encodeULEB128(Number, OS);
 }
 
-void wasm::writeSleb128(raw_ostream &OS, int32_t Number, const Twine &Msg) {
+void wasm::writeSleb128(raw_ostream &OS, int64_t Number, const Twine &Msg) {
   debugWrite(OS.tell(), Msg + "[" + utohexstr(Number) + "]");
   encodeSLEB128(Number, OS);
 }

@@ -30,14 +30,16 @@ class LLVM_LIBRARY_VISIBILITY WebAssemblyTargetInfo : public TargetInfo {
     SIMD128,
   } SIMDLevel;
 
+  bool HasAtomics;
   bool HasNontrappingFPToInt;
   bool HasSignExt;
   bool HasExceptionHandling;
 
 public:
   explicit WebAssemblyTargetInfo(const llvm::Triple &T, const TargetOptions &)
-      : TargetInfo(T), SIMDLevel(NoSIMD), HasNontrappingFPToInt(false),
-        HasSignExt(false), HasExceptionHandling(false) {
+      : TargetInfo(T), SIMDLevel(NoSIMD), HasAtomics(false), 
+        HasNontrappingFPToInt(false), HasSignExt(false),
+        HasExceptionHandling(false) {
     NoAsmVariants = true;
     SuitableAlign = 128;
     LargeArrayMinWidth = 128;
@@ -64,6 +66,7 @@ private:
                  StringRef CPU,
                  const std::vector<std::string> &FeaturesVec) const override {
     if (CPU == "bleeding-edge") {
+      Features["atomics"] = true;
       Features["simd128"] = true;
       Features["nontrapping-fptoint"] = true;
       Features["sign-ext"] = true;

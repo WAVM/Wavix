@@ -34,6 +34,9 @@ void wasm::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                                 const ArgList &Args,
                                 const char *LinkingOutput) const {
 
+  // Silence warnings when linking C code with a C++ '-stdlib' argument.
+  Args.ClaimAllArgs(options::OPT_stdlib_EQ);
+
   const ToolChain &ToolChain = getToolChain();
   const char *Linker = Args.MakeArgString(ToolChain.GetLinkerPath());
   ArgStringList CmdArgs;
@@ -130,6 +133,8 @@ void WebAssembly::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
 
 void WebAssembly::AddClangCXXStdlibIncludeArgs(const ArgList &DriverArgs,
                                                ArgStringList &CC1Args) const {
+  ToolChain::AddClangCXXStdlibIncludeArgs(DriverArgs,CC1Args);
+
   if (!DriverArgs.hasArg(options::OPT_nostdlibinc) &&
       !DriverArgs.hasArg(options::OPT_nostdincxx))
     addSystemInclude(DriverArgs, CC1Args,

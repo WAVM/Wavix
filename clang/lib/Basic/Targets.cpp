@@ -566,20 +566,25 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
   case llvm::Triple::wasm32:
     if (Triple.getSubArch() != llvm::Triple::NoSubArch ||
         Triple.getVendor() != llvm::Triple::UnknownVendor ||
-        Triple.getOS() != llvm::Triple::UnknownOS ||
         Triple.getEnvironment() != llvm::Triple::UnknownEnvironment ||
         !(Triple.isOSBinFormatELF() || Triple.isOSBinFormatWasm()))
       return nullptr;
-    return new WebAssemblyOSTargetInfo<WebAssembly32TargetInfo>(Triple, Opts);
+    if(os == llvm::Triple::Wavix) {
+      return new WavixOSTargetInfo<WebAssembly32TargetInfo>(Triple, Opts);
+    } else {
+      return new WebAssemblyOSTargetInfo<WebAssembly32TargetInfo>(Triple, Opts);
+    }
   case llvm::Triple::wasm64:
     if (Triple.getSubArch() != llvm::Triple::NoSubArch ||
         Triple.getVendor() != llvm::Triple::UnknownVendor ||
-        Triple.getOS() != llvm::Triple::UnknownOS ||
         Triple.getEnvironment() != llvm::Triple::UnknownEnvironment ||
         !(Triple.isOSBinFormatELF() || Triple.isOSBinFormatWasm()))
       return nullptr;
-    return new WebAssemblyOSTargetInfo<WebAssembly64TargetInfo>(Triple, Opts);
-
+    if(os == llvm::Triple::Wavix) {
+      return new WavixOSTargetInfo<WebAssembly64TargetInfo>(Triple, Opts);
+    } else {
+      return new WebAssemblyOSTargetInfo<WebAssembly64TargetInfo>(Triple, Opts);
+    }
   case llvm::Triple::renderscript32:
     return new LinuxTargetInfo<RenderScript32TargetInfo>(Triple, Opts);
   case llvm::Triple::renderscript64:

@@ -722,7 +722,7 @@ template <typename Target>
 class LLVM_LIBRARY_VISIBILITY WebAssemblyOSTargetInfo
     : public OSTargetInfo<Target> {
   void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
-                    MacroBuilder &Builder) const final {
+                    MacroBuilder &Builder) const override {
     // A common platform macro.
     if (Opts.POSIXThreads)
       Builder.defineMacro("_REENTRANT");
@@ -733,6 +733,30 @@ class LLVM_LIBRARY_VISIBILITY WebAssemblyOSTargetInfo
 
 public:
   explicit WebAssemblyOSTargetInfo(const llvm::Triple &Triple,
+                                   const TargetOptions &Opts)
+      : OSTargetInfo<Target>(Triple, Opts) {
+    this->MCountName = "__mcount";
+    this->TheCXXABI.set(TargetCXXABI::WebAssembly);
+  }
+};
+
+// Wavix target
+template <typename Target>
+class LLVM_LIBRARY_VISIBILITY WavixOSTargetInfo
+    : public OSTargetInfo<Target> {
+  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                    MacroBuilder &Builder) const override {
+    Builder.defineMacro("__WAVIX__");
+    // A common platform macro.
+    if (Opts.POSIXThreads)
+      Builder.defineMacro("_REENTRANT");
+    // Follow g++ convention and predefine _GNU_SOURCE for C++.
+    if (Opts.CPlusPlus)
+      Builder.defineMacro("_GNU_SOURCE");
+  }
+
+public:
+  explicit WavixOSTargetInfo(const llvm::Triple &Triple,
                                    const TargetOptions &Opts)
       : OSTargetInfo<Target>(Triple, Opts) {
     this->MCountName = "__mcount";

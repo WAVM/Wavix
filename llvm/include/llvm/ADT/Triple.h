@@ -183,7 +183,8 @@ public:
     Contiki,
     AMDPAL,     // AMD PAL Runtime
     HermitCore, // HermitCore Unikernel/Multikernel
-    LastOSType = HermitCore
+    Wavix,
+    LastOSType = Wavix
   };
   enum EnvironmentType {
     UnknownEnvironment,

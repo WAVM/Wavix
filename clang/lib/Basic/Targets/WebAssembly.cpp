@@ -34,6 +34,7 @@ static constexpr llvm::StringLiteral ValidCPUNames[] = {
 
 bool WebAssemblyTargetInfo::hasFeature(StringRef Feature) const {
   return llvm::StringSwitch<bool>(Feature)
+      .Case("atomics", HasAtomics)
       .Case("simd128", SIMDLevel >= SIMD128)
       .Case("nontrapping-fptoint", HasNontrappingFPToInt)
       .Case("sign-ext", HasSignExt)
@@ -60,6 +61,14 @@ void WebAssemblyTargetInfo::getTargetDefines(const LangOptions &Opts,
 bool WebAssemblyTargetInfo::handleTargetFeatures(
     std::vector<std::string> &Features, DiagnosticsEngine &Diags) {
   for (const auto &Feature : Features) {
+    if (Feature == "+atomics") {
+      HasAtomics = true;
+      continue;
+    }
+    if (Feature == "-atomics") {
+      HasAtomics = false;
+      continue;
+    }
     if (Feature == "+simd128") {
       SIMDLevel = std::max(SIMDLevel, SIMD128);
       continue;

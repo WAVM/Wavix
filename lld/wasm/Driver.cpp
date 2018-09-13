@@ -373,7 +373,6 @@ void LinkerDriver::link(ArrayRef<const char *> ArgsArr) {
   Config->DisableVerify = Args.hasArg(OPT_disable_verify);
   Config->Entry = getEntry(Args, Args.hasArg(OPT_relocatable) ? "" : "_start");
   Config->ExportAll = Args.hasArg(OPT_export_all);
-  Config->ExportTable = Args.hasArg(OPT_export_table);
   errorHandler().FatalWarnings =
       Args.hasFlag(OPT_fatal_warnings, OPT_no_fatal_warnings, false);
   Config->ImportMemory = Args.hasArg(OPT_import_memory);
@@ -431,9 +430,6 @@ void LinkerDriver::link(ArrayRef<const char *> ArgsArr) {
 
   if (Config->OutputFile.empty())
     error("no output file specified");
-
-  if (Config->ImportTable && Config->ExportTable)
-    error("--import-table and --export-table may not be used together");
 
   if (Config->Relocatable) {
     if (!Config->Entry.empty())

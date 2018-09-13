@@ -22,9 +22,9 @@ namespace wasm {
 
 void debugWrite(uint64_t Offset, const Twine &Msg);
 
-void writeUleb128(raw_ostream &OS, uint32_t Number, const Twine &Msg);
+void writeUleb128(raw_ostream &OS, uint64_t Number, const Twine &Msg);
 
-void writeSleb128(raw_ostream &OS, int32_t Number, const Twine &Msg);
+void writeSleb128(raw_ostream &OS, int64_t Number, const Twine &Msg);
 
 void writeBytes(raw_ostream &OS, const char *Bytes, size_t count,
                 const Twine &Msg);

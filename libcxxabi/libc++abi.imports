@@ -1,0 +1,3 @@
+# Exception handling
+_Unwind_RaiseException
+_Unwind_DeleteException

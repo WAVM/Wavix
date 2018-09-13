@@ -12,7 +12,7 @@ include(CheckCCompilerFlag)
 include(CheckCompilerVersion)
 include(HandleLLVMStdlib)
 
-if( UNIX AND NOT (BEOS OR HAIKU) )
+if( UNIX AND NOT (BEOS OR HAIKU OR WAVIX) )
   # Used by check_symbol_exists:
   list(APPEND CMAKE_REQUIRED_LIBRARIES "m")
 endif()

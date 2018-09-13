@@ -4,15 +4,13 @@
 
 #include "crt_arch.h"
 
-int main(int argc, char *argv[]);
+int main(int,char *argv[]);
 void _init(void) __attribute__((weak));
 void _fini(void) __attribute__((weak));
-_Noreturn int __libc_start_main(int (*)(), int, char **,
+_Noreturn int __libc_start_main(int (*)(int,char **), int, char **, char **,
 	void (*)(), void(*)());
 
-void _start_c(long *p)
+void _start_c(int argc,char *argv[],char *envp[])
 {
-	int argc = p[0];
-	char **argv = (void *)(p+1);
-	__libc_start_main(main, argc, argv, _init, _fini);
+	__libc_start_main(main, argc, argv, envp, _init, _fini);
 }

@@ -24,7 +24,6 @@ struct Configuration {
   bool Demangle;
   bool DisableVerify;
   bool ExportAll;
-  bool ExportTable;
   bool GcSections;
   bool ImportMemory;
   bool ImportTable;

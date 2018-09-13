@@ -14,6 +14,8 @@ function( get_host_triple var )
     else()
       set( value "i686-pc-windows-gnu" )
     endif()
+  elseif( WAVIX )
+    set( value "wasm32-unknown-wavix" )
   else( MSVC )
     set(config_guess ${LLVM_MAIN_SRC_DIR}/cmake/config.guess)
     execute_process(COMMAND sh ${config_guess}

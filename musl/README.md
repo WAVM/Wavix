@@ -39,7 +39,7 @@ everything yourself using the waterfall's [build.py][].
 Compile your program using LLVM:
 
 ```
-  clang -S -O2 --target=wasm32-unknown-unknown foo.c
+  clang -S -O2 --target=wasm32-unknown-wavix foo.c
 ```
 
 Creates a `.s` assembly file. Link it:
@@ -231,8 +231,8 @@ And `dlworld.c`:
 Compile the programs:
 
 ```
-  clang -S -O2 --target=wasm32-unknown-unknown ./dlhello.c
-  clang -S -O2 --target=wasm32-unknown-unknown ./dlworld.c
+  clang -S -O2 --target=wasm32-unknown-wavix ./dlhello.c
+  clang -S -O2 --target=wasm32-unknown-wavix ./dlworld.c
   s2wasm dlhello.s -o dlhello.wast
   s2wasm dlworld.s -o dlworld.wast
   sexpr-wasm dlhello.wast -o dlhello.wasm

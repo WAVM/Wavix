@@ -39,7 +39,7 @@ using namespace llvm;
 static cl::opt<bool>
     TemporaryWorkarounds("wasm-temporary-workarounds",
                          cl::desc("Apply certain temporary workarounds"),
-                         cl::init(true), cl::Hidden);
+                         cl::init(false), cl::Hidden);
 
 namespace {
 class FixFunctionBitcasts final : public ModulePass {
@@ -244,8 +244,8 @@ bool FixFunctionBitcasts::runOnModule(Module &M) {
     if (!TemporaryWorkarounds && !F.isDeclaration() && F.getName() == "main") {
       Main = &F;
       LLVMContext &C = M.getContext();
-      Type *MainArgTys[] = {PointerType::get(Type::getInt8PtrTy(C), 0),
-                            Type::getInt32Ty(C)};
+      Type *MainArgTys[] = {Type::getInt32Ty(C),
+                            PointerType::get(Type::getInt8PtrTy(C), 0)};
       FunctionType *MainTy = FunctionType::get(Type::getInt32Ty(C), MainArgTys,
                                                /*isVarArg=*/false);
       if (F.getFunctionType() != MainTy) {
@@ -291,14 +291,16 @@ bool FixFunctionBitcasts::runOnModule(Module &M) {
   // If we created a wrapper for main, rename the wrapper so that it's the
   // one that gets called from startup.
   if (CallMain) {
-    Main->setName("__original_main");
     Function *MainWrapper =
         cast<Function>(CallMain->getCalledValue()->stripPointerCasts());
-    MainWrapper->setName("main");
-    MainWrapper->setLinkage(Main->getLinkage());
-    MainWrapper->setVisibility(Main->getVisibility());
-    Main->setLinkage(Function::PrivateLinkage);
-    Main->setVisibility(Function::DefaultVisibility);
+    if (Main != MainWrapper) {
+      Main->setName("__original_main");
+      MainWrapper->setName("main");
+      MainWrapper->setLinkage(Main->getLinkage());
+      MainWrapper->setVisibility(Main->getVisibility());
+      Main->setLinkage(Function::PrivateLinkage);
+      Main->setVisibility(Function::DefaultVisibility);
+    }
     delete CallMain;
   }
 

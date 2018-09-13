@@ -111,9 +111,6 @@ defm export: Eq<"export">,
 def export_all: F<"export-all">,
   HelpText<"Export all symbols (normally combined with --no-gc-sections)">;
 
-def export_table: F<"export-table">,
-  HelpText<"Export function table to the environment">;
-
 def global_base: J<"global-base=">,
   HelpText<"Where to start to place global data">;
 
