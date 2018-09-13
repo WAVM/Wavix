@@ -387,8 +387,11 @@ def Bash():
       WAVIX_SRC_DIR.replace('\\', '/').replace('C:','/mnt/c') + '/bash/build-wavix-bash.sh',
       WAVIX_SRC_DIR.replace('\\', '/').replace('C:','/mnt/c'),
       BUILD_DIR.replace('\\', '/'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c'),
       BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/clang'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ar')
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ar'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ranlib'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/clang-cpp')
       ], cwd=BASH_OUT_DIR)
 
 def CoreUtils():
@@ -401,8 +404,11 @@ def CoreUtils():
       WAVIX_SRC_DIR.replace('\\', '/').replace('C:','/mnt/c') + '/coreutils/build-wavix-coreutils.sh',
       WAVIX_SRC_DIR.replace('\\', '/').replace('C:','/mnt/c'),
       BUILD_DIR.replace('\\', '/'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c'),
       BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/clang'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ar')
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ar'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ranlib'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/clang-cpp')
       ], cwd=COREUTILS_OUT_DIR)
 
 
