@@ -1,0 +1,55 @@
+# Expected failures from running the assembled GCC torture tests.
+
+# Syntax: Each line has a single test to be marked as a 'known failure' (or
+# 'exclusion'. Known failures are expected to fail, and will cause an error if
+# they pass. (Known failures that do not run at all will not cause an
+# error). The format is
+# <name> <attributes> # comment
+# where <name> matches the file name (no directory) passed to the test runner,
+# and <attributes> is a comma-separated list of filter attributes. Each run of
+# the test runner is said to have " a set of "attributes" that represent the
+# configuration: e.g. which compiler, optimization level, JS engine etc is used
+# for that run. A test will be excluded if the configuration has all of the
+# attributes in the exclusion line. For example if a configuration has
+# ['asm2wasm', 'O2', 'd8'] then the exclusion will apply if it has the
+# attributes 'asm2wasm' or 'O2,d8' or no attributes, but not if it has 'bare' or
+# 'asm2wasm,d8'. A test can be listed multiple times with different attribute
+# sets, but not with the same (or a subset).
+
+#
+# Files with a .o.wasm extension are built using clang and lld native backends.
+#
+# Near-term TODO: Add different optimization levels, with their own attributes.
+# A possible TODO: Allow wildcard matching to combine the corresponding bare and
+# emscripten entry into a single line. This may not be worth it, as there isn't
+# a huge amount of overlap.
+
+# printf or other libc feature missing
+920501-8.c.o.wasm
+pr56982.c.o.wasm
+struct-ret-1.c.o.wasm
+930513-1.c.o.wasm
+pr39228.c.o.wasm
+pr47237.c.o.wasm
+
+# Clang optimizing loop into infinite loop for -O2
+930529-1.c.o.wasm O2
+
+# mmap
+loop-2f.c.o.wasm
+loop-2g.c.o.wasm
+
+# missing import __builtin_malloc
+20071018-1.c.o.wasm
+20071120-1.c.o.wasm
+pr36765.c.o.wasm
+pr43008.c.o.wasm
+
+# Indirect call type mismatch
+pr67037.c.o.wasm
+
+# relies on handling a SIGFPE signal
+20101011-1.c.o.wasm O0
+
+# not sure why this fails
+pr23135.c.o.wasm O0

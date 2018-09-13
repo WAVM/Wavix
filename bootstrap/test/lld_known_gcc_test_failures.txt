@@ -1,0 +1,17 @@
+# Expected failures from using lld to link on clang-generated .o files generated
+# from the GCC torture tests, and linked with the musl libc.a
+
+# undefined symbol: bar
+# This seems to be clang bug because it occurs for native clang too.
+va-arg-pack-1.c.o
+
+# undefined symbol: link_error
+# Don't care. The test case is faulty. link_error() does not exist.
+medce-1.c.o O0
+
+# undefined symbol: __builtin_sprintf
+pr78586.c.o
+pr79327.c.o
+
+# LLVM ERROR: LEB is outside Varint32 range
+pr79286.c.o O0
