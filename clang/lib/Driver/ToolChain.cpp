@@ -503,8 +503,7 @@ bool ToolChain::isThreadModelSupported(const StringRef Model) const {
            Triple.getArch() == llvm::Triple::wasm32 ||
            Triple.getArch() == llvm::Triple::wasm64;
   } else if (Model == "posix") {
-    return Triple.getArch() != llvm::Triple::wasm32 &&
-              Triple.getArch() != llvm::Triple::wasm64;
+    return true;
   }
 
   return false;
