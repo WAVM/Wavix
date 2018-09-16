@@ -15,7 +15,7 @@ static inline int a_cas(volatile int *p, int t, int s)
   return old;
 }
 
-#define a_crash() abort()
+#define a_crash() __builtin_trap()
 
 #define a_ctz_32(x) __builtin_ctzl(x)
 #define a_ctz_64(x) __builtin_ctzll(x)
