@@ -52,9 +52,9 @@ BASH_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'bash')
 COREUTILS_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'coreutils')
 WAVM_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'wavm')
 
-BOOTSTRAP_LLVM_OUT_DIR = os.path.join(BUILD_DIR, 'bootstrap-llvm')
+HOST_LLVM_OUT_DIR = os.path.join(BUILD_DIR, 'host-llvm')
 LLVM_OUT_DIR = os.path.join(BUILD_DIR, 'llvm')
-BOOTSTRAP_WAVM_OUT_DIR = os.path.join(BUILD_DIR, 'bootstrap-wavm')
+HOST_WAVM_OUT_DIR = os.path.join(BUILD_DIR, 'host-wavm')
 WAVM_OUT_DIR = os.path.join(BUILD_DIR, 'wavm')
 MUSL_OUT_DIR = os.path.join(BUILD_DIR, 'musl')
 BASH_OUT_DIR = os.path.join(BUILD_DIR, 'bash')
@@ -67,8 +67,8 @@ TORTURE_O_OUT_DIR = os.path.join(BUILD_DIR, 'torture-o')
 HELLOWORLD_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'helloworld')
 HELLOWORLD_OUT_DIR = os.path.join(BUILD_DIR, 'helloworld')
 
-BOOTSTRAP_DIR = os.path.join(BUILD_DIR, 'bootstrap')
-BOOTSTRAP_BIN = os.path.join(BOOTSTRAP_DIR, 'bin')
+HOST_DIR = os.path.join(BUILD_DIR, 'host')
+HOST_BIN = os.path.join(HOST_DIR, 'bin')
 
 SYSROOT_DIR = os.path.join(BUILD_DIR, 'sys')
 SYSROOT_LIB = os.path.join(SYSROOT_DIR, 'lib')
@@ -80,8 +80,8 @@ CMAKE_GENERATOR = 'Ninja'
 def AllBuilds():
   return [
       # Host tools
-      Build('bootstrap-llvm', BootstrapLLVM),
-      Build('bootstrap-wavm', BootstrapWAVM),
+      Build('host-llvm', HostLLVM),
+      Build('host-wavm', HostWAVM),
       # Target libs
       Build('musl', Musl),
       Build('compiler-rt', CompilerRT),
@@ -139,22 +139,6 @@ TEST_OPT_FLAGS = ['O0', 'O2']
 
 NPROC = multiprocessing.cpu_count()
 
-def CopyBinaryToArchive(binary, prefix=''):
-  """All binaries are archived in the same tar file."""
-  bootstrap_bin = os.path.join(BOOTSTRAP_DIR, prefix, 'bin')
-  print 'Copying binary %s to %s' % (binary, bootstrap_bin)
-  Mkdir(bootstrap_bin)
-  shutil.copy2(binary, bootstrap_bin)
-
-
-def CopyLibraryToArchive(library, prefix=''):
-  """All libraries are archived in the same tar file."""
-  bootstrap_bin = os.path.join(BOOTSTRAP_DIR, prefix, 'lib')
-  print 'Copying library %s to archive %s' % (library, bootstrap_bin)
-  Mkdir(sysroot_lib)
-  shutil.copy2(library, sysroot_lib)
-
-
 def CopyLibraryToSysroot(sysroot_dir,library):
   """All libraries are archived in the same tar file."""
   sysroot_lib = os.path.join(sysroot_dir, 'lib')
@@ -166,15 +150,15 @@ def Clobber():
   buildbot.Step('Clobbering work dir')
   #if os.path.isdir(BUILD_DIR):
   #  Remove(BUILD_DIR)
-  Remove(BOOTSTRAP_DIR)
+  Remove(HOST_DIR)
   Remove(SYSROOT_DIR)
   
 
 # Build rules
 
-def BootstrapLLVM():
-  buildbot.Step('bootstrap-llvm')
-  Mkdir(BOOTSTRAP_LLVM_OUT_DIR)
+def HostLLVM():
+  buildbot.Step('host-llvm')
+  Mkdir(HOST_LLVM_OUT_DIR)
   build_dylib = 'ON' if not IsWindows() else 'OFF'
   command = [CMAKE_BIN, '-G', CMAKE_GENERATOR, LLVM_SRC_DIR,
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
@@ -185,7 +169,7 @@ def BootstrapLLVM():
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
              '-DLLVM_BUILD_TESTS=OFF',
              '-DCMAKE_BUILD_TYPE=Release', #'-DCMAKE_BUILD_TYPE=RelWithDebInfo',
-             '-DCMAKE_INSTALL_PREFIX=' + BOOTSTRAP_DIR,
+             '-DCMAKE_INSTALL_PREFIX=' + HOST_DIR,
              '-DCLANG_INCLUDE_TESTS=OFF',
              '-DCLANG_INCLUDE_DOCS=OFF',
              '-DLLVM_INCLUDE_EXAMPLES=OFF',
@@ -199,22 +183,22 @@ def BootstrapLLVM():
              '-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly',
              '-DLLVM_TARGETS_TO_BUILD=X86']
 
-  proc.check_call(command, cwd=BOOTSTRAP_LLVM_OUT_DIR)
-  proc.check_call([NINJA_BIN, 'install'], cwd=BOOTSTRAP_LLVM_OUT_DIR)
+  proc.check_call(command, cwd=HOST_LLVM_OUT_DIR)
+  proc.check_call([NINJA_BIN, 'install'], cwd=HOST_LLVM_OUT_DIR)
   shutil.copy2(os.path.join(SCRIPT_DIR, 'wasm_standalone.cmake'),
-               BOOTSTRAP_DIR)
+               HOST_DIR)
 
-def BootstrapWAVM():
-  buildbot.Step('BootstrapWAVM')
-  Mkdir(BOOTSTRAP_WAVM_OUT_DIR)
+def HostWAVM():
+  buildbot.Step('HostWAVM')
+  Mkdir(HOST_WAVM_OUT_DIR)
   command = [CMAKE_BIN, '-G', CMAKE_GENERATOR, WAVM_SRC_DIR, 
              '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
-             '-DCMAKE_INSTALL_PREFIX=' + BOOTSTRAP_DIR,
-             '-DLLVM_DIR=' + os.path.join(BOOTSTRAP_DIR, 'lib/cmake/llvm') ]
+             '-DCMAKE_INSTALL_PREFIX=' + HOST_DIR,
+             '-DLLVM_DIR=' + os.path.join(HOST_DIR, 'lib/cmake/llvm') ]
 
-  proc.check_call(command, cwd=BOOTSTRAP_WAVM_OUT_DIR)
-  proc.check_call([NINJA_BIN, 'install'], cwd=BOOTSTRAP_WAVM_OUT_DIR)
+  proc.check_call(command, cwd=HOST_WAVM_OUT_DIR)
+  proc.check_call([NINJA_BIN, 'install'], cwd=HOST_WAVM_OUT_DIR)
 
 def CompilerRT():
   # TODO(sbc): Figure out how to do this step as part of the llvm build.
@@ -237,7 +221,7 @@ def CompilerRT():
              #'-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_BUILD_TYPE=Debug',
              '-DCMAKE_TOOLCHAIN_FILE=' +
-             WindowsFSEscape(os.path.join(BOOTSTRAP_DIR, 'wasm_standalone.cmake')),
+             WindowsFSEscape(os.path.join(HOST_DIR, 'wasm_standalone.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              '-DCMAKE_C_COMPILER_WORKS=ON',
              '-DCOMPILER_RT_BAREMETAL_BUILD=On',
@@ -246,10 +230,10 @@ def CompilerRT():
              '-DCOMPILER_RT_ENABLE_IOS=OFF',
              '-DCOMPILER_RT_DEFAULT_TARGET_ONLY=On',
              '-DLLVM_CONFIG_PATH=' +
-             WindowsFSEscape(os.path.join(BOOTSTRAP_DIR, 'bin', 'llvm-config')),
+             WindowsFSEscape(os.path.join(HOST_DIR, 'bin', 'llvm-config')),
              '-DCOMPILER_RT_OS_DIR=wavix',
              '-DCMAKE_INSTALL_PREFIX=' +
-             WindowsFSEscape(os.path.join(BOOTSTRAP_DIR, 'lib', 'clang', '8.0.0'))]
+             WindowsFSEscape(os.path.join(HOST_DIR, 'lib', 'clang', '8.0.0'))]
 
   proc.check_call(command, cwd=COMPILER_RT_OUT_DIR)
   proc.check_call([NINJA_BIN, 'install'], cwd=COMPILER_RT_OUT_DIR)
@@ -268,7 +252,7 @@ def HelloWorld():
              HELLOWORLD_SRC_DIR,
              '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_TOOLCHAIN_FILE=' +
-             WindowsFSEscape(os.path.join(BOOTSTRAP_DIR, 'wasm_standalone.cmake')),
+             WindowsFSEscape(os.path.join(HOST_DIR, 'wasm_standalone.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              '-DCMAKE_INSTALL_PREFIX=' + WindowsFSEscape(SYSROOT_DIR)]
 
@@ -289,7 +273,7 @@ def LibCXXABI():
              LIBCXXABI_SRC_DIR,
              '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_TOOLCHAIN_FILE=' +
-             WindowsFSEscape(os.path.join(BOOTSTRAP_DIR, 'wasm_standalone.cmake')),
+             WindowsFSEscape(os.path.join(HOST_DIR, 'wasm_standalone.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              '-DLIBCXXABI_LIBCXX_PATH=' + LIBCXX_SRC_DIR,
              '-DLIBCXXABI_LIBCXX_INCLUDES=' + os.path.join(LIBCXX_SRC_DIR, 'include'),
@@ -319,7 +303,7 @@ def LibCXX():
              LIBCXX_SRC_DIR,
              '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_TOOLCHAIN_FILE=' +
-             WindowsFSEscape(os.path.join(BOOTSTRAP_DIR, 'wasm_standalone.cmake')),
+             WindowsFSEscape(os.path.join(HOST_DIR, 'wasm_standalone.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              # Make HandleLLVMOptions.cmake (it can't check for c++11 support
              # because no C++ programs can be linked until libc++abi is
@@ -351,7 +335,7 @@ def Musl():
     # Build musl directly to wasm object files in an ar library
     proc.check_call([
         os.path.join(MUSL_SRC_DIR, 'libc.py'),
-        '--clang_dir', BOOTSTRAP_BIN,
+        '--clang_dir', HOST_BIN,
         '--out', os.path.join(MUSL_OUT_DIR, 'libc.a'),
         '--musl', MUSL_SRC_DIR])
     CopyLibraryToSysroot(SYSROOT_DIR,os.path.join(MUSL_OUT_DIR, 'libc.a'))
@@ -385,10 +369,10 @@ def Bash():
       WAVIX_SRC_DIR.replace('\\', '/').replace('C:','/mnt/c'),
       BUILD_DIR.replace('\\', '/'),
       BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/clang'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ar'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ranlib'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/clang-cpp')
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/host/bin/clang'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/host/bin/llvm-ar'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/host/bin/llvm-ranlib'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/host/bin/clang-cpp')
       ], cwd=BASH_OUT_DIR)
 
 def CoreUtils():
@@ -402,18 +386,18 @@ def CoreUtils():
       WAVIX_SRC_DIR.replace('\\', '/').replace('C:','/mnt/c'),
       BUILD_DIR.replace('\\', '/'),
       BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/clang'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ar'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/llvm-ranlib'),
-      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/bootstrap/bin/clang-cpp')
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/host/bin/clang'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/host/bin/llvm-ar'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/host/bin/llvm-ranlib'),
+      BUILD_DIR.replace('\\', '/').replace('C:','/mnt/c') + Executable('/host/bin/clang-cpp')
       ], cwd=COREUTILS_OUT_DIR)
 
 
 def CompileLLVMTorture(outdir, opt):
   name = 'Compile LLVM Torture (%s)' % (opt)
   buildbot.Step(name)
-  c = Executable(os.path.join(BOOTSTRAP_BIN, 'clang'))
-  cxx = Executable(os.path.join(BOOTSTRAP_BIN, 'clang++'))
+  c = Executable(os.path.join(HOST_BIN, 'clang'))
+  cxx = Executable(os.path.join(HOST_BIN, 'clang++'))
   Remove(outdir)
   Mkdir(outdir)
   unexpected_result_count = compile_torture_tests.run(
@@ -492,7 +476,7 @@ class Build(object):
 def Summary(repos):
   buildbot.Step('Summary')
   info = {'repositories': repos}
-  info_file = os.path.join(BOOTSTRAP_DIR, 'buildinfo.json')
+  info_file = os.path.join(HOST_DIR, 'buildinfo.json')
 
   print 'Failed steps: %s.' % buildbot.Failed()
   for step in buildbot.FailedList():
@@ -540,7 +524,7 @@ def TestBare():
   for opt in TEST_OPT_FLAGS:
     LinkLLVMTorture(
         name='lld',
-        linker=Executable(os.path.join(BOOTSTRAP_BIN, 'clang')),
+        linker=Executable(os.path.join(HOST_BIN, 'clang')),
         fails=LLD_KNOWN_TORTURE_FAILURES,
         indir=GetTortureDir('o', opt),
         outdir=GetTortureDir('lld', opt),
@@ -551,7 +535,7 @@ def TestBare():
   for opt in TEST_OPT_FLAGS:
     ExecuteLLVMTorture(
         name='WAVM',
-        runner=Executable(os.path.join(BOOTSTRAP_BIN, 'wavix')),
+        runner=Executable(os.path.join(HOST_BIN, 'wavix')),
         indir=GetTortureDir('lld', opt),
         fails=RUN_KNOWN_TORTURE_FAILURES,
         attributes=['bare', 'lld'],
