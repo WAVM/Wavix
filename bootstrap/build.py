@@ -204,20 +204,17 @@ def BootstrapLLVM():
   shutil.copy2(os.path.join(SCRIPT_DIR, 'wasm_standalone.cmake'),
                BOOTSTRAP_DIR)
 
-def CopyWAVMTools(bin_dir, prefix=''):
-  CopyBinaryToArchive(os.path.join(bin_dir, Executable('wavix')), prefix)
-
 def BootstrapWAVM():
   buildbot.Step('BootstrapWAVM')
   Mkdir(BOOTSTRAP_WAVM_OUT_DIR)
   command = [CMAKE_BIN, '-G', CMAKE_GENERATOR, WAVM_SRC_DIR, 
              '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
+             '-DCMAKE_INSTALL_PREFIX=' + BOOTSTRAP_DIR,
              '-DLLVM_DIR=' + os.path.join(BOOTSTRAP_DIR, 'lib/cmake/llvm') ]
 
   proc.check_call(command, cwd=BOOTSTRAP_WAVM_OUT_DIR)
-  proc.check_call([NINJA_BIN], cwd=BOOTSTRAP_WAVM_OUT_DIR)
-  CopyWAVMTools(os.path.join(BOOTSTRAP_WAVM_OUT_DIR, 'bin'))
+  proc.check_call([NINJA_BIN, 'install'], cwd=BOOTSTRAP_WAVM_OUT_DIR)
 
 def CompilerRT():
   # TODO(sbc): Figure out how to do this step as part of the llvm build.
