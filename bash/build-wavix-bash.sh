@@ -11,3 +11,4 @@ export YACC=
 
 $1/bash/configure --host=wasm32-unknown-wavix --prefix $3/sys
 make install
+rm -rf $1/bash/autom4te.cache
