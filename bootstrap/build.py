@@ -82,6 +82,7 @@ def AllBuilds():
       # Host tools
       Build('host-llvm', HostLLVM),
       Build('host-wavm', HostWAVM),
+      Build('Toolchain', Toolchain),
       # Target libs
       Build('musl', Musl),
       Build('compiler-rt', CompilerRT),
@@ -185,8 +186,6 @@ def HostLLVM():
 
   proc.check_call(command, cwd=HOST_LLVM_OUT_DIR)
   proc.check_call([NINJA_BIN, 'install'], cwd=HOST_LLVM_OUT_DIR)
-  shutil.copy2(os.path.join(SCRIPT_DIR, 'wasm_standalone.cmake'),
-               HOST_DIR)
 
 def HostWAVM():
   buildbot.Step('HostWAVM')
@@ -199,6 +198,15 @@ def HostWAVM():
 
   proc.check_call(command, cwd=HOST_WAVM_OUT_DIR)
   proc.check_call([NINJA_BIN, 'install'], cwd=HOST_WAVM_OUT_DIR)
+
+def Toolchain():
+  buildbot.Step('Toolchain')
+  Mkdir(HOST_DIR)
+  Mkdir(os.path.join(HOST_DIR, 'cmake', 'Modules', 'Platform'))
+  shutil.copy2(os.path.join(SCRIPT_DIR, 'cmake', 'Modules', 'Platform', 'Wavix.cmake'),
+               os.path.join(HOST_DIR,   'cmake', 'Modules', 'Platform'))
+  shutil.copy2(os.path.join(SCRIPT_DIR, 'wavix_toolchain.cmake'),
+               HOST_DIR)
 
 def CompilerRT():
   # TODO(sbc): Figure out how to do this step as part of the llvm build.
@@ -221,7 +229,7 @@ def CompilerRT():
              #'-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_BUILD_TYPE=Debug',
              '-DCMAKE_TOOLCHAIN_FILE=' +
-             WindowsFSEscape(os.path.join(HOST_DIR, 'wasm_standalone.cmake')),
+             WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              '-DCMAKE_C_COMPILER_WORKS=ON',
              '-DCOMPILER_RT_BAREMETAL_BUILD=On',
@@ -252,7 +260,7 @@ def HelloWorld():
              HELLOWORLD_SRC_DIR,
              '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_TOOLCHAIN_FILE=' +
-             WindowsFSEscape(os.path.join(HOST_DIR, 'wasm_standalone.cmake')),
+             WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              '-DCMAKE_INSTALL_PREFIX=' + WindowsFSEscape(SYSROOT_DIR)]
 
@@ -273,7 +281,7 @@ def LibCXXABI():
              LIBCXXABI_SRC_DIR,
              '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_TOOLCHAIN_FILE=' +
-             WindowsFSEscape(os.path.join(HOST_DIR, 'wasm_standalone.cmake')),
+             WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              '-DLIBCXXABI_LIBCXX_PATH=' + LIBCXX_SRC_DIR,
              '-DLIBCXXABI_LIBCXX_INCLUDES=' + os.path.join(LIBCXX_SRC_DIR, 'include'),
@@ -303,7 +311,7 @@ def LibCXX():
              LIBCXX_SRC_DIR,
              '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_TOOLCHAIN_FILE=' +
-             WindowsFSEscape(os.path.join(HOST_DIR, 'wasm_standalone.cmake')),
+             WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              # Make HandleLLVMOptions.cmake (it can't check for c++11 support
              # because no C++ programs can be linked until libc++abi is
