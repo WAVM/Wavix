@@ -91,6 +91,7 @@ def AllBuilds():
       Build('bash', Bash),
       Build('coreutils', CoreUtils),
       Build('HelloWorld', HelloWorld),
+      Build('WAVM', WAVM),
   ]
 
 def AllTests():
@@ -207,6 +208,22 @@ def Toolchain():
                os.path.join(HOST_DIR,   'cmake', 'Modules', 'Platform'))
   shutil.copy2(os.path.join(SCRIPT_DIR, 'wavix_toolchain.cmake'),
                HOST_DIR)
+
+def WAVM():
+  buildbot.Step('WAVM')
+  Mkdir(WAVM_OUT_DIR)
+  command = [CMAKE_BIN, '-G', CMAKE_GENERATOR, WAVM_SRC_DIR, 
+             '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
+             '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
+             '-DCMAKE_INSTALL_PREFIX=' + SYSROOT_DIR,
+             '-DCMAKE_TOOLCHAIN_FILE=' +
+             WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
+             '-DENABLE_RUNTIME=OFF',
+             '-DENABLE_STATIC_LINKING=ON',
+             '-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON' ]
+
+  proc.check_call(command, cwd=WAVM_OUT_DIR)
+  proc.check_call([NINJA_BIN, 'install'], cwd=WAVM_OUT_DIR)
 
 def CompilerRT():
   # TODO(sbc): Figure out how to do this step as part of the llvm build.
