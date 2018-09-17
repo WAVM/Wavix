@@ -146,7 +146,13 @@ else()
 	add_definitions("-DWAVM_METRICS_OUTPUT=0")
 endif()
 
-option(ENABLE_RUNTIME "enables the runtime components of WAVM" ON)
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+	# Disable the runtime on 32-bit platforms.
+	set(ENABLE_RUNTIME OFF)
+else()
+	# Allow disabling the runtime on 64-bit platforms.
+	option(ENABLE_RUNTIME "enables the runtime components of WAVM" ON)
+endif()
 
 option(ENABLE_STATIC_LINKING "use static linking instead of dynamic for the WAVM libraries" OFF)
 
@@ -187,7 +193,6 @@ add_subdirectory(Programs/wavm-disas)
 add_subdirectory(Test)
 add_subdirectory(ThirdParty/dtoa)
 add_subdirectory(ThirdParty/xxhash)
-add_subdirectory(ThirdParty/libunwind)
 
 if(ENABLE_RUNTIME)
 	add_subdirectory(Lib/Emscripten)
@@ -197,6 +202,7 @@ if(ENABLE_RUNTIME)
 	add_subdirectory(Programs/wavix)
 	add_subdirectory(Programs/wavm)
 	add_subdirectory(Programs/wavm-compile)
+	add_subdirectory(ThirdParty/libunwind)
 endif()
 
 file(GLOB IncludeDirectories RELATIVE ${WAVM_SOURCE_DIR} ${WAVM_SOURCE_DIR}/Include/*)
@@ -211,9 +217,10 @@ add_custom_target(RootFiles SOURCES
 	.clang-format
 	.travis.yml
 	azure-pipelines.yml
-	azure-windows-build-job-template.yml
+	Build/azure-windows-build-job-template.yml
+	Build/notify-discord.sh
+	Build/travis-build.sh
 	LICENSE.md
 	README.md
 	run-clang-format.sh
-	travis-build.sh
 	WebAssembly.tmLanguage)
