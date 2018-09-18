@@ -3,21 +3,22 @@
 #include <utility>
 #include <vector>
 
-#include "IR/IR.h"
-#include "IR/Module.h"
-#include "IR/Operators.h"
-#include "IR/Types.h"
-#include "IR/Validate.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/Serialization.h"
-#include "Inline/Unicode.h"
-#include "Platform/Defines.h"
-#include "WASM/WASM.h"
+#include "WAVM/IR/IR.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/IR/Validate.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Serialization.h"
+#include "WAVM/Inline/Unicode.h"
+#include "WAVM/Platform/Defines.h"
+#include "WAVM/WASM/WASM.h"
 
-using namespace IR;
-using namespace Serialization;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::Serialization;
 
 static void throwIfNotValidUTF8(const std::string& string)
 {
@@ -49,8 +50,7 @@ FORCEINLINE void serializeOpcode(OutputStream& stream, Opcode opcode)
 
 // These serialization functions need to be declared in the IR namespace for the array serializer in
 // the Serialization namespace to find them.
-namespace IR
-{
+namespace WAVM { namespace IR {
 	static void serialize(InputStream& stream, ValueType& type)
 	{
 		U8 encodedValueType = 0;
@@ -281,7 +281,7 @@ namespace IR
 			serializeVarUInt32(stream, functionIndex);
 		});
 	}
-}
+}}
 
 enum
 {
@@ -435,7 +435,7 @@ void serialize(Stream& stream, GetOrSetVariableImm<isGlobal>& imm, const Functio
 	serializeVarUInt32(stream, imm.variableIndex);
 }
 
-template<typename Stream> void serialize(Stream& stream, CallImm& imm, const FunctionDef&)
+template<typename Stream> void serialize(Stream& stream, FunctionImm& imm, const FunctionDef&)
 {
 	serializeVarUInt32(stream, imm.functionIndex);
 }
@@ -443,7 +443,7 @@ template<typename Stream> void serialize(Stream& stream, CallImm& imm, const Fun
 template<typename Stream> void serialize(Stream& stream, CallIndirectImm& imm, const FunctionDef&)
 {
 	serializeVarUInt32(stream, imm.type.index);
-	serializeConstant(stream, "call_indirect immediate reserved field must be 0", U8(0));
+	serializeVarUInt32(stream, imm.tableIndex);
 }
 
 template<typename Stream, Uptr naturalAlignmentLog2>

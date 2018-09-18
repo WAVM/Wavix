@@ -1,10 +1,10 @@
 #pragma once
 
-#include "IR/Module.h"
-#include "IR/Types.h"
 #include "LLVMEmitContext.h"
 #include "LLVMEmitModuleContext.h"
 #include "LLVMJITPrivate.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Types.h"
 
 #include "LLVMPreInclude.h"
 
@@ -12,8 +12,7 @@
 
 #include "LLVMPostInclude.h"
 
-namespace LLVMJIT
-{
+namespace WAVM { namespace LLVMJIT {
 	struct EmitFunctionContext : EmitContext
 	{
 		typedef void Result;
@@ -72,9 +71,7 @@ namespace LLVMJIT
 							const IR::Module& inIRModule,
 							const IR::FunctionDef& inFunctionDef,
 							llvm::Function* inLLVMFunction)
-		: EmitContext(inLLVMContext,
-					  inModuleContext.defaultMemoryOffset,
-					  inModuleContext.defaultTableOffset)
+		: EmitContext(inLLVMContext, inModuleContext.defaultMemoryOffset)
 		, moduleContext(inModuleContext)
 		, irModule(inIRModule)
 		, functionDef(inFunctionDef)
@@ -282,4 +279,4 @@ namespace LLVMJIT
 
 		void unknown(IR::Opcode opcode) { Errors::unreachable(); }
 	};
-}
+}}

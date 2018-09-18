@@ -1,13 +1,13 @@
 #include <stdint.h>
 #include <string>
 
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/Floats.h"
 #include "Lexer.h"
 #include "Parse.h"
-#include "Platform/Defines.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Floats.h"
+#include "WAVM/Platform/Defines.h"
 
 // Include the David Gay's dtoa code.
 // #define strtod and dtoa to avoid conflicting with the C standard library versions
@@ -49,7 +49,8 @@
 #undef strtod
 #undef dtoa
 
-using namespace WAST;
+using namespace WAVM;
+using namespace WAVM::WAST;
 
 // Parses an optional + or - sign and returns true if a - sign was parsed.
 // If either a + or - sign is parsed, nextChar is advanced past it.

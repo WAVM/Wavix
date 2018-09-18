@@ -12,21 +12,21 @@ function(ADD_WAST_TESTS WAST_PATHS)
 	endforeach()
 endfunction()
 
-set(NonReferenceTypesWASTTests
+set(WASTTests
 	bulk_memory_ops.wast
 	exceptions.wast
 	misc.wast
+	reference_types.wast
 	simd.wast
 	threads.wast
 	trunc_sat.wast
 	wavm_atomic.wast
 )
-add_custom_target(WAVMTests SOURCES ${NonReferenceTypesWASTTests} reference_types.wast)
+add_custom_target(WAVMTests SOURCES ${WASTTests})
 set_target_properties(WAVMTests PROPERTIES FOLDER Testing)
 
-if(ENABLE_RUNTIME)
-	ADD_WAST_TESTS("${NonReferenceTypesWASTTests}")
-	ADD_WAST_TEST("reference_types.wast" --enable-reference-types)
+if(WAVM_ENABLE_RUNTIME)
+	ADD_WAST_TESTS("${WASTTests}")
 endif()
 
 add_subdirectory(Containers)

@@ -5,22 +5,24 @@
 #include <utility>
 #include <vector>
 
-#include "IR/IR.h"
-#include "IR/Module.h"
-#include "IR/Operators.h"
-#include "IR/Types.h"
-#include "IR/Validate.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/Hash.h"
-#include "Inline/HashMap.h"
-#include "Inline/Serialization.h"
-#include "Logging/Logging.h"
-#include "Runtime/Runtime.h"
+#include "WAVM/IR/IR.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/IR/Validate.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Config.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Hash.h"
+#include "WAVM/Inline/HashMap.h"
+#include "WAVM/Inline/Serialization.h"
+#include "WAVM/Logging/Logging.h"
+#include "WAVM/Runtime/Runtime.h"
 
-using namespace IR;
-using namespace Runtime;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::Runtime;
 
 // A stream that uses a combination of a PRNG and input data to produce pseudo-random values.
 struct RandomStream
@@ -89,6 +91,10 @@ static void generateImm(RandomStream& random, IR::Module& module, MemoryImm& out
 static void generateImm(RandomStream& random, IR::Module& module, TableImm& outImm)
 {
 	outImm.tableIndex = random.get(module.tables.size() - 1);
+}
+static void generateImm(RandomStream& random, IR::Module& module, FunctionImm& outImm)
+{
+	outImm.functionIndex = random.get(module.functions.size() - 1);
 }
 
 static void generateImm(RandomStream& random, IR::Module& module, LiteralImm<I32>& outImm)
@@ -696,10 +702,6 @@ void generateValidModule(IR::Module& module, const U8* inputBytes, Uptr numBytes
 
 	HashMap<FunctionType, Uptr> functionTypeMap;
 
-	// Manually turn on the reference type feature until it's on by default.
-	errorUnless(!module.featureSpec.referenceTypes);
-	module.featureSpec.referenceTypes = true;
-
 	// Generate some standard definitions that are the same for all modules.
 	module.memories.defs.push_back({{true, {1024, IR::maxMemoryPages}}});
 	module.tables.defs.push_back({{ReferenceType::anyfunc, true, {1024, IR::maxTableElems}}});
@@ -810,10 +812,10 @@ extern "C" I32 LLVMFuzzerTestOneInput(const U8* data, Uptr numBytes)
 	return 0;
 }
 
-#if !ENABLE_LIBFUZZER
+#if !WAVM_ENABLE_LIBFUZZER
 
-#include "Inline/CLI.h"
-#include "WASTPrint/WASTPrint.h"
+#include "WAVM/Inline/CLI.h"
+#include "WAVM/WASTPrint/WASTPrint.h"
 
 I32 main(int argc, char** argv)
 {

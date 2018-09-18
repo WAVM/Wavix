@@ -5,14 +5,15 @@
 #include <utility>
 #include <vector>
 
-#include "IR/Module.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/Timing.h"
-#include "LLVMJIT/LLVMJIT.h"
 #include "LLVMJITPrivate.h"
-#include "Logging/Logging.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Timing.h"
+#include "WAVM/LLVMJIT/LLVMJIT.h"
+#include "WAVM/Logging/Logging.h"
+#include "WAVM/Platform/Defines.h"
 
 #include "LLVMPreInclude.h"
 
@@ -36,8 +37,7 @@
 
 #include "LLVMPostInclude.h"
 
-namespace llvm
-{
+namespace llvm {
 	class MCContext;
 
 #if LLVM_VERSION_MAJOR >= 7
@@ -52,8 +52,9 @@ namespace llvm
 #define DUMP_OPTIMIZED_MODULE 0
 #define DUMP_OBJECT 0
 
-using namespace IR;
-using namespace LLVMJIT;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::LLVMJIT;
 
 static Uptr printedModuleId = 0;
 

@@ -1,12 +1,12 @@
 #include <stdint.h>
 
-#include "IR/Operators.h"
-#include "IR/Types.h"
-#include "Inline/BasicTypes.h"
 #include "LLVMEmitFunctionContext.h"
 #include "LLVMEmitModuleContext.h"
 #include "LLVMEmitWorkarounds.h"
 #include "LLVMJITPrivate.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/BasicTypes.h"
 
 #include "LLVMPreInclude.h"
 
@@ -18,14 +18,14 @@
 
 #include "LLVMPostInclude.h"
 
-namespace llvm
-{
+namespace llvm {
 	class Type;
 	class Value;
 }
 
-using namespace IR;
-using namespace LLVMJIT;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::LLVMJIT;
 
 #define EMIT_UNARY_OP(name, emitCode)                                                              \
 	void EmitFunctionContext::name(NoImm)                                                          \

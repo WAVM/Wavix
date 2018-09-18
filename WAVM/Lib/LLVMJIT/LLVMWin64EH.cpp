@@ -2,11 +2,11 @@
 #include <stdint.h>
 #include <string>
 
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
 #include "LLVMJITPrivate.h"
-#include "Logging/Logging.h"
-#include "Platform/Defines.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Logging/Logging.h"
+#include "WAVM/Platform/Defines.h"
 
 #include "LLVMPreInclude.h"
 
@@ -21,6 +21,8 @@
 #include "LLVMPostInclude.h"
 
 #define PRINT_SEH_TABLES 0
+
+using namespace WAVM;
 
 enum UnwindOpcode
 {
@@ -58,8 +60,7 @@ PACKED_STRUCT(struct UnwindCode {
 	U8 opInfo : 4;
 });
 
-namespace UnwindInfoFlags
-{
+namespace UnwindInfoFlags {
 	enum UnwindInfoFlags : U8
 	{
 		UNW_FLAG_EHANDLER = 0x1,

@@ -4,22 +4,23 @@
 #include <utility>
 #include <vector>
 
-#include "IR/Types.h"
-#include "IR/Value.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/IntrusiveSharedPtr.h"
-#include "Inline/Lock.h"
-#include "Platform/Mutex.h"
-#include "Platform/Thread.h"
-#include "Runtime/Intrinsics.h"
-#include "Runtime/Runtime.h"
-#include "Runtime/RuntimeData.h"
-#include "ThreadTest/ThreadTest.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/IR/Value.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/IntrusiveSharedPtr.h"
+#include "WAVM/Inline/Lock.h"
+#include "WAVM/Platform/Mutex.h"
+#include "WAVM/Platform/Thread.h"
+#include "WAVM/Runtime/Intrinsics.h"
+#include "WAVM/Runtime/Runtime.h"
+#include "WAVM/Runtime/RuntimeData.h"
+#include "WAVM/ThreadTest/ThreadTest.h"
 
-using namespace IR;
-using namespace Runtime;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::Runtime;
 
 enum
 {
@@ -112,33 +113,19 @@ static I64 threadEntry(void* threadVoid)
 	return invokeFunctionUnchecked(thread->context, thread->entryFunction, &thread->argument)->i64;
 }
 
-DEFINE_INTRINSIC_FUNCTION_WITH_MEM_AND_TABLE(threadTest,
-											 "createThread",
-											 I64,
-											 createThread,
-											 I32 entryFunctionIndex,
-											 I32 entryArgument)
+DEFINE_INTRINSIC_FUNCTION(threadTest,
+						  "createThread",
+						  I64,
+						  createThread,
+						  const AnyFunc* entryAnyFunc,
+						  I32 entryArgument)
 {
-	if(defaultTableId.id == UINT32_MAX)
-	{
-		// If createThread is called from a module that doesn't handle a default table, throw an
-		// exception.
-		throwException(Exception::tableIndexOutOfBoundsType);
-	}
-
-	// Look up the index provided in the default table to get the thread entry function.
-	TableInstance* defaultTable = getTableFromRuntimeData(contextRuntimeData, defaultTableId.id);
-	Object* entryObject = Runtime::getTableElement(defaultTable, entryFunctionIndex);
-	FunctionInstance* entryFunction = asFunctionNullable(entryObject);
-
-	// Validate that the entry function wasn't null, and it has the correct type (i32)->i64
-	if(!entryObject) { throwException(Runtime::Exception::uninitializedTableElementType); }
-	else if(!entryFunction
-			|| Runtime::getFunctionType(entryFunction)
-				   != FunctionType(TypeTuple{ValueType::i64}, TypeTuple{ValueType::i32}))
-	{
-		throwException(Runtime::Exception::indirectCallSignatureMismatchType);
-	}
+	// Validate that the entry function is non-null and has the correct type (i32)->i64
+	if(!entryAnyFunc
+	   || IR::FunctionType{entryAnyFunc->functionTypeEncoding}
+			  != FunctionType(TypeTuple{ValueType::i64}, TypeTuple{ValueType::i32}))
+	{ throwException(Runtime::Exception::indirectCallSignatureMismatchType); }
+	FunctionInstance* entryFunction = asFunction(entryAnyFunc->anyRef.object);
 
 	// Create a thread object that will expose its entry and error functions to the garbage
 	// collector as roots.
@@ -204,7 +191,6 @@ DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(threadTest, "forkThread", I64, for
 DEFINE_INTRINSIC_FUNCTION(threadTest, "exitThread", void, exitThread, I64 code)
 {
 	Platform::exitThread(code);
-	Errors::unreachable();
 }
 
 // Validates a thread ID, removes the corresponding thread from the threads array, and returns it.

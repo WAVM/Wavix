@@ -5,23 +5,24 @@
 #include <utility>
 #include <vector>
 
-#include "IR/IR.h"
-#include "IR/Module.h"
-#include "IR/Operators.h"
-#include "IR/Types.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/Floats.h"
-#include "Inline/Hash.h"
-#include "Inline/HashMap.h"
-#include "Inline/HashSet.h"
-#include "Inline/IsNameChar.h"
-#include "Inline/Serialization.h"
-#include "WASTPrint/WASTPrint.h"
+#include "WAVM/IR/IR.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Floats.h"
+#include "WAVM/Inline/Hash.h"
+#include "WAVM/Inline/HashMap.h"
+#include "WAVM/Inline/HashSet.h"
+#include "WAVM/Inline/IsNameChar.h"
+#include "WAVM/Inline/Serialization.h"
+#include "WAVM/WASTPrint/WASTPrint.h"
 
-using namespace IR;
-using namespace Serialization;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::Serialization;
 
 #define INDENT_STRING "\xE0\x01"
 #define DEDENT_STRING "\xE0\x02"
@@ -180,12 +181,23 @@ static void print(std::string& string, FunctionType functionType)
 	}
 }
 
+static void print(std::string& string, ReferenceType type)
+{
+	switch(type)
+	{
+	case ReferenceType::anyfunc: string += "anyfunc"; break;
+	case ReferenceType::anyref: string += "anyref"; break;
+	default: Errors::unreachable();
+	}
+}
+
 static void print(std::string& string, const TableType& type)
 {
 	string += ' ';
 	print(string, type.size);
 	if(type.isShared) { string += " shared"; }
-	string += " anyfunc";
+	string += ' ';
+	print(string, type.elementType);
 }
 
 static void print(std::string& string, const MemoryType& type)
@@ -258,12 +270,13 @@ struct ModulePrintContext
 		// and add the "$" sigil.
 		IR::getDisassemblyNames(module, names);
 		const Uptr numGlobalNames = names.types.size() + names.tables.size() + names.memories.size()
-									+ names.globals.size();
+									+ names.globals.size() + names.exceptionTypes.size();
 		NameScope globalNameScope('$', numGlobalNames);
 		for(auto& name : names.types) { globalNameScope.map(name); }
 		for(auto& name : names.tables) { globalNameScope.map(name); }
 		for(auto& name : names.memories) { globalNameScope.map(name); }
 		for(auto& name : names.globals) { globalNameScope.map(name); }
+		for(auto& name : names.exceptionTypes) { globalNameScope.map(name); }
 		for(auto& function : names.functions)
 		{
 			globalNameScope.map(function.name);
@@ -444,8 +457,14 @@ struct FunctionPrintContext
 		string += "\nset_global " + moduleContext.names.globals[imm.variableIndex];
 	}
 
-	void table_get(TableImm imm) { string += "\ntable.get"; }
-	void table_set(TableImm imm) { string += "\ntable.set"; }
+	void table_get(TableImm imm)
+	{
+		string += "\ntable.get " + moduleContext.names.tables[imm.tableIndex];
+	}
+	void table_set(TableImm imm)
+	{
+		string += "\ntable.set " + moduleContext.names.tables[imm.tableIndex];
+	}
 
 	void throw_(ExceptionTypeImm imm)
 	{
@@ -473,13 +492,14 @@ struct FunctionPrintContext
 		Errors::unreachable();
 	}
 
-	void call(CallImm imm)
+	void call(FunctionImm imm)
 	{
 		string += "\ncall " + moduleContext.names.functions[imm.functionIndex].name;
 	}
 	void call_indirect(CallIndirectImm imm)
 	{
-		string += "\ncall_indirect (type " + moduleContext.names.types[imm.type.index] + ')';
+		string += "\ncall_indirect " + moduleContext.names.tables[imm.tableIndex];
+		string += " (type " + moduleContext.names.types[imm.type.index] + ')';
 	}
 
 	void printControlSignature(IndexedBlockType indexedSignature)
@@ -490,7 +510,16 @@ struct FunctionPrintContext
 
 	void printImm(NoImm) {}
 	void printImm(MemoryImm imm) { errorUnless(imm.memoryIndex == 0); }
-	void printImm(TableImm imm) { errorUnless(imm.tableIndex == 0); }
+	void printImm(TableImm imm)
+	{
+		string += ' ';
+		string += moduleContext.names.tables[imm.tableIndex];
+	}
+	void printImm(FunctionImm imm)
+	{
+		string += ' ';
+		string += moduleContext.names.functions[imm.functionIndex].name;
+	}
 
 	void printImm(LiteralImm<I32> imm)
 	{
@@ -587,7 +616,7 @@ struct FunctionPrintContext
 		string += DEDENT_STRING;
 		controlStack.back().type = ControlContext::Type::catch_;
 		string += "\ncatch ";
-		string += moduleContext.names.functions[imm.exceptionTypeIndex].name;
+		string += moduleContext.names.exceptionTypes[imm.exceptionTypeIndex];
 		string += INDENT_STRING;
 	}
 	void catch_all(NoImm)
@@ -865,9 +894,9 @@ void ModulePrintContext::printModule()
 		for(Uptr offset = 0; offset < dataSegment.data.size(); offset += numBytesPerLine)
 		{
 			string += "\n\"";
-			string
-				+= escapeString((const char*)dataSegment.data.data() + offset,
-								std::min(Uptr(dataSegment.data.size()) - offset, Uptr(numBytesPerLine)));
+			string += escapeString(
+				(const char*)dataSegment.data.data() + offset,
+				std::min(Uptr(dataSegment.data.size()) - offset, Uptr(numBytesPerLine)));
 			string += "\"";
 		}
 	}

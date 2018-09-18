@@ -6,23 +6,24 @@
 #include <utility>
 #include <vector>
 
-#include "IR/IR.h"
-#include "IR/Module.h"
-#include "IR/Types.h"
-#include "IR/Validate.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/Hash.h"
-#include "Inline/HashMap.h"
-#include "Inline/Timing.h"
 #include "Lexer.h"
-#include "Logging/Logging.h"
 #include "Parse.h"
-#include "WASTParse/WASTParse.h"
+#include "WAVM/IR/IR.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/IR/Validate.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Hash.h"
+#include "WAVM/Inline/HashMap.h"
+#include "WAVM/Inline/Timing.h"
+#include "WAVM/Logging/Logging.h"
+#include "WAVM/WASTParse/WASTParse.h"
 
-using namespace IR;
-using namespace WAST;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::WAST;
 
 static bool tryParseSizeConstraints(CursorState* cursor,
 									U64 maxMax,
@@ -326,6 +327,7 @@ static void parseExport(CursorState* cursor)
 		case t_table: exportKind = ObjectKind::table; break;
 		case t_memory: exportKind = ObjectKind::memory; break;
 		case t_global: exportKind = ObjectKind::global; break;
+		case t_exception_type: exportKind = ObjectKind::exceptionType; break;
 		default:
 			parseErrorf(cursor->parseState, cursor->nextToken, "invalid export kind");
 			throw RecoverParseException();
@@ -368,6 +370,12 @@ static void parseExport(CursorState* cursor)
 				exportedObjectIndex = resolveRef(moduleState->parseState,
 												 moduleState->globalNameToIndexMap,
 												 moduleState->module.globals.size(),
+												 exportRef);
+				break;
+			case ObjectKind::exceptionType:
+				exportedObjectIndex = resolveRef(moduleState->parseState,
+												 moduleState->exceptionTypeNameToIndexMap,
+												 moduleState->module.exceptionTypes.size(),
 												 exportRef);
 				break;
 			default: Errors::unreachable();

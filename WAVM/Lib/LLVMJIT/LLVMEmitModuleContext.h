@@ -1,7 +1,7 @@
 #pragma once
 
-#include "IR/Module.h"
 #include "LLVMJITPrivate.h"
+#include "WAVM/IR/Module.h"
 
 #include "LLVMPreInclude.h"
 
@@ -9,8 +9,7 @@
 
 #include "LLVMPostInclude.h"
 
-namespace LLVMJIT
-{
+namespace WAVM { namespace LLVMJIT {
 	struct EmitModuleContext
 	{
 		const IR::Module& irModule;
@@ -56,4 +55,4 @@ namespace LLVMJIT
 			return llvm::Intrinsic::getDeclaration(llvmModule, id, typeArguments);
 		}
 	};
-}
+}}

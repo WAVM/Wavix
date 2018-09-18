@@ -3,18 +3,19 @@
 #include <utility>
 #include <vector>
 
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/Hash.h"
-#include "Inline/HashSet.h"
-#include "Inline/Lock.h"
-#include "Inline/Timing.h"
-#include "Logging/Logging.h"
-#include "Platform/Mutex.h"
-#include "Runtime/Runtime.h"
 #include "RuntimePrivate.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Hash.h"
+#include "WAVM/Inline/HashSet.h"
+#include "WAVM/Inline/Lock.h"
+#include "WAVM/Inline/Timing.h"
+#include "WAVM/Logging/Logging.h"
+#include "WAVM/Platform/Mutex.h"
+#include "WAVM/Runtime/Runtime.h"
 
-using namespace Runtime;
+using namespace WAVM;
+using namespace WAVM::Runtime;
 
 // Keep a global list of all objects.
 struct GCGlobals
@@ -57,6 +58,15 @@ static void visitReference(HashSet<ObjectImpl*>& unreferencedObjects,
 {
 	if(reference && unreferencedObjects.remove((ObjectImpl*)reference))
 	{ pendingScanObjects.push_back(reference); }
+}
+
+static void visitReference(HashSet<ObjectImpl*>& unreferencedObjects,
+						   std::vector<Object*>& pendingScanObjects,
+						   const AnyReferee* anyRef)
+{
+	wavmAssert(!(anyRef && !anyRef->object));
+	if(anyRef && unreferencedObjects.remove((ObjectImpl*)anyRef->object))
+	{ pendingScanObjects.push_back(anyRef->object); }
 }
 
 template<typename Array>
@@ -129,6 +139,11 @@ void Runtime::collectGarbage()
 		{
 			GlobalInstance* global = asGlobal(scanObject);
 			visitReference(unreferencedObjects, pendingScanObjects, global->compartment);
+			if(isReferenceType(global->type.valueType))
+			{
+				visitReference(
+					unreferencedObjects, pendingScanObjects, global->initialValue.anyRef);
+			}
 			break;
 		}
 		case ObjectKind::moduleInstance:

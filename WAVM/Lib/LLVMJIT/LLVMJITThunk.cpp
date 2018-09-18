@@ -4,17 +4,17 @@
 #include <utility>
 #include <vector>
 
-#include "IR/Types.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Hash.h"
-#include "Inline/HashMap.h"
-#include "Inline/Lock.h"
 #include "LLVMEmitContext.h"
-#include "LLVMJIT/LLVMJIT.h"
 #include "LLVMJITPrivate.h"
-#include "Platform/Mutex.h"
-#include "Runtime/RuntimeData.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Hash.h"
+#include "WAVM/Inline/HashMap.h"
+#include "WAVM/Inline/Lock.h"
+#include "WAVM/LLVMJIT/LLVMJIT.h"
+#include "WAVM/Platform/Mutex.h"
+#include "WAVM/Runtime/RuntimeData.h"
 
 #include "LLVMPreInclude.h"
 
@@ -35,47 +35,22 @@
 
 #include "LLVMPostInclude.h"
 
-namespace llvm
-{
+namespace llvm {
 	class Value;
 }
 
-using namespace IR;
-using namespace LLVMJIT;
-using namespace Runtime;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::LLVMJIT;
+using namespace WAVM::Runtime;
 
 // A map from function types to JIT symbols for cached invoke thunks (C++ -> WASM)
 static Platform::Mutex invokeThunkMutex;
 static HashMap<FunctionType, struct JITFunction*> invokeThunkTypeToFunctionMap;
 
-struct IntrinsicThunkKey
-{
-	void* intrinsicFunction;
-	Uptr defaultMemoryId;
-	Uptr defaultTableId;
-};
-
-template<> struct Hash<IntrinsicThunkKey>
-{
-	Uptr operator()(const IntrinsicThunkKey& key, Uptr seed = 0) const
-	{
-		Uptr result = seed;
-		result = XXH64_fixed(reinterpret_cast<Uptr>(key.intrinsicFunction), result);
-		result = XXH64_fixed(key.defaultMemoryId, result);
-		result = XXH64_fixed(key.defaultTableId, result);
-		return result;
-	}
-};
-
-inline bool operator==(const IntrinsicThunkKey& a, const IntrinsicThunkKey& b)
-{
-	return a.intrinsicFunction == b.intrinsicFunction && a.defaultMemoryId == b.defaultMemoryId
-		   && a.defaultTableId == b.defaultTableId;
-}
-
 // A map from function types to JIT symbols for cached native thunks (WASM -> C++)
 static Platform::Mutex intrinsicThunkMutex;
-static HashMap<IntrinsicThunkKey, struct JITFunction*> intrinsicFunctionToThunkFunctionMap;
+static HashMap<void*, struct JITFunction*> intrinsicFunctionToThunkFunctionMap;
 
 InvokeThunkPointer LLVMJIT::getInvokeThunk(FunctionType functionType,
 										   CallingConvention callingConvention)
@@ -101,7 +76,7 @@ InvokeThunkPointer LLVMJIT::getInvokeThunk(FunctionType functionType,
 	llvm::Value* functionPointer = &*(function->args().begin() + 0);
 	llvm::Value* contextPointer = &*(function->args().begin() + 1);
 
-	EmitContext emitContext(llvmContext, nullptr, nullptr);
+	EmitContext emitContext(llvmContext, nullptr);
 	emitContext.irBuilder.SetInsertPoint(llvm::BasicBlock::Create(llvmContext, "entry", function));
 
 	emitContext.initContextVariables(contextPointer);
@@ -174,29 +149,20 @@ InvokeThunkPointer LLVMJIT::getInvokeThunk(FunctionType functionType,
 }
 
 void* LLVMJIT::getIntrinsicThunk(void* nativeFunction,
-								 FunctionInstance* functionInstance,
+								 const FunctionInstance* functionInstance,
 								 FunctionType functionType,
-								 CallingConvention callingConvention,
-								 MemoryBinding defaultMemory,
-								 TableBinding defaultTable)
+								 CallingConvention callingConvention)
 {
 	Lock<Platform::Mutex> intrinsicThunkLock(intrinsicThunkMutex);
 
 	wavmAssert(callingConvention == CallingConvention::intrinsic
-			   || callingConvention == CallingConvention::intrinsicWithContextSwitch
-			   || callingConvention == CallingConvention::intrinsicWithMemAndTable);
+			   || callingConvention == CallingConvention::intrinsicWithContextSwitch);
 
 	LLVMContext llvmContext;
 
 	// Reuse cached intrinsic thunks for the same function type.
-	const IntrinsicThunkKey key{
-		nativeFunction,
-		callingConvention == CallingConvention::intrinsicWithMemAndTable ? defaultMemory.id
-																		 : UINTPTR_MAX,
-		callingConvention == CallingConvention::intrinsicWithMemAndTable ? defaultTable.id
-																		 : UINTPTR_MAX};
 	JITFunction*& intrinsicThunkFunction
-		= intrinsicFunctionToThunkFunctionMap.getOrAdd(key, nullptr);
+		= intrinsicFunctionToThunkFunctionMap.getOrAdd(nativeFunction, nullptr);
 	if(intrinsicThunkFunction)
 	{ return reinterpret_cast<void*>(intrinsicThunkFunction->baseAddress); }
 
@@ -212,23 +178,7 @@ void* LLVMJIT::getIntrinsicThunk(void* nativeFunction,
 		{emitLiteral(llvmContext, reinterpret_cast<Uptr>(functionInstance)),
 		 emitLiteral(llvmContext, functionType.getEncoding().impl)}));
 
-	llvm::Constant* defaultMemoryOffset = nullptr;
-	if(defaultMemory.id != UINTPTR_MAX)
-	{
-		defaultMemoryOffset = emitLiteral(
-			llvmContext,
-			offsetof(CompartmentRuntimeData, memoryBases) + sizeof(void*) * defaultMemory.id);
-	}
-
-	llvm::Constant* defaultTableOffset = nullptr;
-	if(defaultTable.id != UINTPTR_MAX)
-	{
-		defaultTableOffset = emitLiteral(
-			llvmContext,
-			offsetof(CompartmentRuntimeData, tableBases) + sizeof(void*) * defaultTable.id);
-	}
-
-	EmitContext emitContext(llvmContext, defaultMemoryOffset, defaultTableOffset);
+	EmitContext emitContext(llvmContext, nullptr);
 	emitContext.irBuilder.SetInsertPoint(llvm::BasicBlock::Create(llvmContext, "entry", function));
 
 	emitContext.initContextVariables(&*function->args().begin());

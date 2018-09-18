@@ -5,30 +5,30 @@
 #include <tuple>
 #include <utility>
 
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/CLI.h"
-#include "Inline/Errors.h"
-#include "Inline/Timing.h"
 #include "Lexer.h"
-#include "Logging/Logging.h"
-#include "NFA/NFA.h"
-#include "RegExp/RegExp.h"
-#include "WASTParse/WASTParse.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/CLI.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Timing.h"
+#include "WAVM/Logging/Logging.h"
+#include "WAVM/NFA/NFA.h"
+#include "WAVM/RegExp/RegExp.h"
+#include "WAVM/WASTParse/WASTParse.h"
 
 #define DUMP_NFA_GRAPH 0
 #define DUMP_DFA_GRAPH 0
 
-using namespace WAST;
+using namespace WAVM;
+using namespace WAVM::WAST;
 
-namespace WAST
-{
+namespace WAVM { namespace WAST {
 	struct LineInfo
 	{
 		U32* lineStarts;
 		U32 numLineStarts;
 	};
-}
+}}
 
 const char* WAST::describeToken(TokenType tokenType)
 {
@@ -36,7 +36,7 @@ const char* WAST::describeToken(TokenType tokenType)
 	static const char* tokenDescriptions[] = {
 // This ENUM_TOKENS must come before the literalTokenPairs definition that redefines
 // VISIT_OPERATOR_TOKEN.
-#define VISIT_TOKEN(name, description) description,
+#define VISIT_TOKEN(name, description, _) description,
 		ENUM_TOKENS()
 #undef VISIT_TOKEN
 	};
@@ -115,7 +115,7 @@ StaticData::StaticData()
 		   std::make_tuple(t_rightParenthesis, ")", true),
 		   std::make_tuple(t_equals, "=", true),
 
-#define VISIT_TOKEN(name, description) std::make_tuple(t_##name, #name, false),
+#define VISIT_TOKEN(name, _, literalString) std::make_tuple(t_##name, literalString, false),
 		   ENUM_LITERAL_TOKENS()
 #undef VISIT_TOKEN
 

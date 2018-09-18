@@ -4,21 +4,32 @@
 #include <utility>
 #include <vector>
 
-#include "IR/IR.h"
-#include "IR/Module.h"
-#include "IR/Types.h"
-#include "IR/Validate.h"
-#include "IR/Value.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Serialization.h"
 #include "Lexer.h"
 #include "Parse.h"
-#include "WASM/WASM.h"
-#include "WASTParse/TestScript.h"
-#include "WASTParse/WASTParse.h"
+#include "WAVM/IR/IR.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/IR/Validate.h"
+#include "WAVM/IR/Value.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Serialization.h"
+#include "WAVM/Runtime/RuntimeData.h"
+#include "WAVM/WASM/WASM.h"
+#include "WAVM/WASTParse/TestScript.h"
+#include "WAVM/WASTParse/WASTParse.h"
 
-using namespace IR;
-using namespace WAST;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::WAST;
+
+static const Runtime::AnyFunc* makeHostRef(Uptr index)
+{
+	static HashMap<Uptr, const Runtime::AnyFunc*> indexToHostRefMap;
+	const Runtime::AnyFunc*& anyFunc = indexToHostRefMap.getOrAdd(index, nullptr);
+	if(!anyFunc)
+	{ anyFunc = new Runtime::AnyFunc{{nullptr}, IR::FunctionType::Encoding{0}, {0xcc}}; }
+	return anyFunc;
+}
 
 static IR::Value parseConstExpression(CursorState* cursor)
 {
@@ -55,6 +66,20 @@ static IR::Value parseConstExpression(CursorState* cursor)
 			++cursor->nextToken;
 			result.type = ValueType::v128;
 			result.v128 = parseV128(cursor);
+			break;
+		}
+		case t_ref_host:
+		{
+			++cursor->nextToken;
+			result.type = ValueType::anyfunc;
+			result.anyFunc = makeHostRef(parseIptr(cursor));
+			break;
+		}
+		case t_ref_null:
+		{
+			++cursor->nextToken;
+			result.type = ValueType::nullref;
+			result.anyRef = nullptr;
 			break;
 		}
 		default:
@@ -254,8 +279,8 @@ static Command* parseCommand(CursorState* cursor, const IR::FeatureSpec& feature
 				result = new AssertReturnCommand(std::move(locus), action, expectedResults);
 				break;
 			}
-			case t_assert_return_canonical_nan:
 			case t_assert_return_arithmetic_nan:
+			case t_assert_return_canonical_nan:
 			{
 				const Command::Type commandType
 					= cursor->nextToken->type == t_assert_return_canonical_nan
@@ -265,6 +290,14 @@ static Command* parseCommand(CursorState* cursor, const IR::FeatureSpec& feature
 
 				Action* action = parseAction(cursor, featureSpec);
 				result = new AssertReturnNaNCommand(commandType, std::move(locus), action);
+				break;
+			}
+			case t_assert_return_func:
+			{
+				++cursor->nextToken;
+
+				Action* action = parseAction(cursor, featureSpec);
+				result = new AssertReturnFuncCommand(std::move(locus), action);
 				break;
 			}
 			case t_assert_exhaustion:
@@ -284,6 +317,10 @@ static Command* parseCommand(CursorState* cursor, const IR::FeatureSpec& feature
 				ExpectedTrapType expectedType;
 				if(!strcmp(expectedErrorMessage.c_str(), "out of bounds memory access"))
 				{ expectedType = ExpectedTrapType::memoryAddressOutOfBounds; }
+				else if(!strcmp(expectedErrorMessage.c_str(), "out of bounds"))
+				{
+					expectedType = ExpectedTrapType::tableIndexOutOfBounds;
+				}
 				else if(!strcmp(expectedErrorMessage.c_str(), "call stack exhausted"))
 				{
 					expectedType = ExpectedTrapType::stackOverflow;

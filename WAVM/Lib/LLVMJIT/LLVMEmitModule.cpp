@@ -1,13 +1,13 @@
 #include <stdint.h>
 #include <vector>
 
-#include "IR/Module.h"
-#include "IR/Types.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Timing.h"
 #include "LLVMEmitFunctionContext.h"
 #include "LLVMEmitModuleContext.h"
 #include "LLVMJITPrivate.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Timing.h"
 
 #include "LLVMPreInclude.h"
 
@@ -26,14 +26,14 @@
 
 #include "LLVMPostInclude.h"
 
-namespace llvm
-{
+namespace llvm {
 	class Constant;
 }
 
-using namespace IR;
-using namespace LLVMJIT;
-using namespace Runtime;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::LLVMJIT;
+using namespace WAVM::Runtime;
 
 EmitModuleContext::EmitModuleContext(const IR::Module& inIRModule,
 									 LLVMContext& inLLVMContext,
