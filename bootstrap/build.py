@@ -50,12 +50,13 @@ GCC_TEST_DIR = os.path.join(WAVIX_SRC_DIR,'gcc-test-suite')
 MUSL_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'musl')
 BASH_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'bash')
 COREUTILS_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'coreutils')
-WAVM_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'wavm')
+WAVM_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'WAVM')
+WAVIX_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'Wavix')
 
 HOST_LLVM_OUT_DIR = os.path.join(BUILD_DIR, 'host-llvm')
-LLVM_OUT_DIR = os.path.join(BUILD_DIR, 'llvm')
-HOST_WAVM_OUT_DIR = os.path.join(BUILD_DIR, 'host-wavm')
-WAVM_OUT_DIR = os.path.join(BUILD_DIR, 'wavm')
+HOST_WAVM_OUT_DIR = os.path.join(BUILD_DIR, 'host-WAVM')
+WAVIX_OUT_DIR = os.path.join(BUILD_DIR, 'wavix')
+WAVM_OUT_DIR = os.path.join(BUILD_DIR, 'WAVM')
 MUSL_OUT_DIR = os.path.join(BUILD_DIR, 'musl')
 BASH_OUT_DIR = os.path.join(BUILD_DIR, 'bash')
 COREUTILS_OUT_DIR = os.path.join(BUILD_DIR, 'coreutils')
@@ -81,7 +82,8 @@ def AllBuilds():
   return [
       # Host tools
       Build('host-llvm', HostLLVM),
-      Build('host-wavm', HostWAVM),
+      Build('host-WAVM', HostWAVM),
+      Build('wavix', Wavix),
       Build('Toolchain', Toolchain),
       # Target libs
       Build('musl', Musl),
@@ -199,6 +201,18 @@ def HostWAVM():
 
   proc.check_call(command, cwd=HOST_WAVM_OUT_DIR)
   proc.check_call([NINJA_BIN, 'install'], cwd=HOST_WAVM_OUT_DIR)
+
+def Wavix():
+  buildbot.Step('Wavix')
+  Mkdir(WAVIX_OUT_DIR)
+  command = [CMAKE_BIN, '-G', CMAKE_GENERATOR, WAVIX_SRC_DIR, 
+             '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
+             '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
+             '-DCMAKE_INSTALL_PREFIX=' + HOST_DIR,
+             '-DWAVM_DIR=' + os.path.join(HOST_DIR, 'lib/cmake/WAVM') ]
+
+  proc.check_call(command, cwd=WAVIX_OUT_DIR)
+  proc.check_call([NINJA_BIN, 'install'], cwd=WAVIX_OUT_DIR)
 
 def Toolchain():
   buildbot.Step('Toolchain')
