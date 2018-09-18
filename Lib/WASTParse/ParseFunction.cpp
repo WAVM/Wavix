@@ -5,24 +5,24 @@
 #include <utility>
 #include <vector>
 
-#include "IR/Module.h"
-#include "IR/Operators.h"
-#include "IR/Types.h"
-#include "IR/Validate.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/HashMap.h"
-#include "Inline/Serialization.h"
 #include "Lexer.h"
 #include "Parse.h"
-#include "Platform/Intrinsic.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/IR/Validate.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/HashMap.h"
+#include "WAVM/Inline/Serialization.h"
+#include "WAVM/Platform/Intrinsic.h"
 
-using namespace IR;
-using namespace WAST;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::WAST;
 
-namespace WAST
-{
+namespace WAVM { namespace WAST {
 	// State associated with parsing a function.
 	struct FunctionState
 	{
@@ -52,10 +52,9 @@ namespace WAST
 		{
 		}
 	};
-}
+}}
 
-namespace
-{
+namespace {
 	// While in scope, pushes a branch target onto the branch target stack.
 	// Also maintains the branchTargetNameToIndexMap
 	struct ScopedBranchTarget
@@ -223,7 +222,7 @@ static void parseImm(CursorState* cursor, GetOrSetVariableImm<isGlobal>& outImm)
 		isGlobal ? "global" : "local");
 }
 
-static void parseImm(CursorState* cursor, CallImm& outImm)
+static void parseImm(CursorState* cursor, FunctionImm& outImm)
 {
 	outImm.functionIndex
 		= parseAndResolveNameOrIndexRef(cursor,
@@ -237,32 +236,33 @@ static void parseImm(CursorState* cursor, CallIndirectImm& outImm)
 	if(cursor->nextToken->type == t_name || cursor->nextToken->type == t_decimalInt
 	   || cursor->nextToken->type == t_hexInt)
 	{
-		// Parse the callee type as a legacy naked name or index referring to a type declaration.
-		outImm.type.index = parseAndResolveNameOrIndexRef(cursor,
-														  cursor->moduleState->typeNameToIndexMap,
-														  cursor->moduleState->module.types.size(),
-														  "type");
+		// Parse a table name or index.
+		outImm.tableIndex = parseAndResolveNameOrIndexRef(cursor,
+														  cursor->moduleState->tableNameToIndexMap,
+														  cursor->moduleState->module.tables.size(),
+														  "table");
 	}
 	else
 	{
-		// Parse the callee type, as a reference or explicit declaration.
-		const Token* firstTypeToken = cursor->nextToken;
-		std::vector<std::string> paramDisassemblyNames;
-		NameToIndexMap paramNameToIndexMap;
-		const UnresolvedFunctionType unresolvedFunctionType
-			= parseFunctionTypeRefAndOrDecl(cursor, paramNameToIndexMap, paramDisassemblyNames);
-		outImm.type.index = resolveFunctionType(cursor->moduleState, unresolvedFunctionType).index;
+		outImm.tableIndex = 0;
+	}
 
-		// Disallow named parameters.
-		if(paramNameToIndexMap.size())
-		{
-			auto paramNameIt = paramNameToIndexMap.begin();
-			parseErrorf(
-				cursor->parseState,
-				firstTypeToken,
-				"call_indirect callee type declaration may not declare parameter names ($%s)",
-				paramNameIt->key.getString().c_str());
-		}
+	// Parse the callee type, as a reference or explicit declaration.
+	const Token* firstTypeToken = cursor->nextToken;
+	std::vector<std::string> paramDisassemblyNames;
+	NameToIndexMap paramNameToIndexMap;
+	const UnresolvedFunctionType unresolvedFunctionType
+		= parseFunctionTypeRefAndOrDecl(cursor, paramNameToIndexMap, paramDisassemblyNames);
+	outImm.type.index = resolveFunctionType(cursor->moduleState, unresolvedFunctionType).index;
+
+	// Disallow named parameters.
+	if(paramNameToIndexMap.size())
+	{
+		auto paramNameIt = paramNameToIndexMap.begin();
+		parseErrorf(cursor->parseState,
+					firstTypeToken,
+					"call_indirect callee type declaration may not declare parameter names ($%s)",
+					paramNameIt->key.getString().c_str());
 	}
 }
 

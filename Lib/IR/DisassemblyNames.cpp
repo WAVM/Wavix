@@ -5,15 +5,16 @@
 #include <utility>
 #include <vector>
 
-#include "IR/IR.h"
-#include "IR/Module.h"
-#include "IR/Types.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Serialization.h"
-#include "Logging/Logging.h"
+#include "WAVM/IR/IR.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Serialization.h"
+#include "WAVM/Logging/Logging.h"
 
-using namespace IR;
-using namespace Serialization;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::Serialization;
 
 enum class NameSubsectionType : U8
 {

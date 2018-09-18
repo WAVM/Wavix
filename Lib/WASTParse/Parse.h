@@ -5,16 +5,15 @@
 #include <string>
 #include <vector>
 
-#include "IR/Module.h"
-#include "IR/Types.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Hash.h"
-#include "Inline/HashMap.h"
 #include "Lexer.h"
-#include "WASTParse/WASTParse.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Hash.h"
+#include "WAVM/Inline/HashMap.h"
+#include "WAVM/WASTParse/WASTParse.h"
 
-namespace WAST
-{
+namespace WAVM { namespace WAST {
 	struct FatalParseException
 	{
 	};
@@ -293,4 +292,4 @@ namespace WAST
 
 	// Module parsing.
 	void parseModuleBody(CursorState* cursor, IR::Module& outModule);
-}
+}}

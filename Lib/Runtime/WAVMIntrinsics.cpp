@@ -3,23 +3,23 @@
 #include <string>
 #include <vector>
 
-#include "IR/IR.h"
-#include "IR/Types.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Floats.h"
-#include "Logging/Logging.h"
-#include "Runtime/Intrinsics.h"
-#include "Runtime/Runtime.h"
-#include "Runtime/RuntimeData.h"
 #include "RuntimePrivate.h"
+#include "WAVM/IR/IR.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Floats.h"
+#include "WAVM/Logging/Logging.h"
+#include "WAVM/Runtime/Intrinsics.h"
+#include "WAVM/Runtime/Runtime.h"
+#include "WAVM/Runtime/RuntimeData.h"
 
-using namespace Runtime;
+using namespace WAVM;
+using namespace WAVM::Runtime;
 
-namespace Runtime
-{
+namespace WAVM { namespace Runtime {
 	DEFINE_INTRINSIC_MODULE(wavmIntrinsics)
-}
+}}
 
 template<typename Float> Float quietNaN(Float value)
 {
@@ -206,7 +206,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 						  "debugEnterFunction",
 						  void,
 						  debugEnterFunction,
-						  AnyFunc* anyFunc)
+						  const AnyFunc* anyFunc)
 {
 	FunctionInstance* function = reinterpret_cast<FunctionInstance*>(anyFunc->anyRef.object);
 	Log::printf(Log::debug,
@@ -220,7 +220,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 						  "debugExitFunction",
 						  void,
 						  debugExitFunction,
-						  AnyFunc* anyFunc)
+						  const AnyFunc* anyFunc)
 {
 	FunctionInstance* function = reinterpret_cast<FunctionInstance*>(anyFunc->anyRef.object);
 	--indentLevel;

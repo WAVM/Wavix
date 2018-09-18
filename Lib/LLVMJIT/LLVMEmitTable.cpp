@@ -1,11 +1,12 @@
-#include "IR/Operators.h"
-#include "IR/Types.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
 #include "LLVMEmitContext.h"
 #include "LLVMEmitFunctionContext.h"
 #include "LLVMEmitModuleContext.h"
 #include "LLVMJITPrivate.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Runtime/RuntimeData.h"
 
 #include "LLVMPreInclude.h"
 
@@ -20,8 +21,8 @@
 
 #include "LLVMPostInclude.h"
 
-using namespace IR;
-using namespace LLVMJIT;
+using namespace WAVM::IR;
+using namespace WAVM::LLVMJIT;
 
 void EmitFunctionContext::ref_null(NoImm)
 {
@@ -34,6 +35,16 @@ void EmitFunctionContext::ref_isnull(NoImm)
 	llvm::Value* null = llvm::Constant::getNullValue(llvmContext.anyrefType);
 	llvm::Value* isNull = irBuilder.CreateICmpEQ(reference, null);
 	push(coerceBoolToI32(isNull));
+}
+
+void EmitFunctionContext::ref_func(FunctionImm imm)
+{
+	llvm::Value* referencedFunction = moduleContext.functions[imm.functionIndex];
+	llvm::Value* codeAddress = irBuilder.CreatePtrToInt(referencedFunction, llvmContext.iptrType);
+	llvm::Value* anyFuncAddress = irBuilder.CreateSub(
+		codeAddress, emitLiteral(llvmContext, Uptr(offsetof(Runtime::AnyFunc, code))));
+	llvm::Value* anyFunc = irBuilder.CreateIntToPtr(anyFuncAddress, llvmContext.anyrefType);
+	push(anyFunc);
 }
 
 void EmitFunctionContext::table_get(TableImm imm)
@@ -55,7 +66,7 @@ void EmitFunctionContext::table_set(TableImm imm)
 		FunctionType({}, TypeTuple({ValueType::i32, ValueType::anyref, inferValueType<Uptr>()})),
 		{index,
 		 value,
-		 getTableIdFromOffset(llvmContext, moduleContext.tableOffsets[imm.tableIndex])})[0];
+		 getTableIdFromOffset(llvmContext, moduleContext.tableOffsets[imm.tableIndex])});
 }
 
 void EmitFunctionContext::table_init(ElemSegmentAndTableImm imm)

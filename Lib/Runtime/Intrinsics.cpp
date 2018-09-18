@@ -2,17 +2,16 @@
 #include <utility>
 #include <vector>
 
-#include "Inline/Errors.h"
-#include "Inline/Hash.h"
-#include "Inline/HashMap.h"
-#include "Inline/Lock.h"
-#include "Platform/Mutex.h"
-#include "Runtime/Intrinsics.h"
-#include "Runtime/Runtime.h"
 #include "RuntimePrivate.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Hash.h"
+#include "WAVM/Inline/HashMap.h"
+#include "WAVM/Inline/Lock.h"
+#include "WAVM/Platform/Mutex.h"
+#include "WAVM/Runtime/Intrinsics.h"
+#include "WAVM/Runtime/Runtime.h"
 
-namespace Intrinsics
-{
+namespace WAVM { namespace Intrinsics {
 	struct ModuleImpl
 	{
 		HashMap<std::string, Intrinsics::Function*> functionMap;
@@ -20,7 +19,9 @@ namespace Intrinsics
 		HashMap<std::string, Intrinsics::Memory*> memoryMap;
 		HashMap<std::string, Intrinsics::Table*> tableMap;
 	};
-}
+}}
+
+using namespace WAVM;
 
 Intrinsics::Module::~Module()
 {

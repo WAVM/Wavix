@@ -1,13 +1,19 @@
-#include "Runtime/Runtime.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/Lock.h"
-#include "Runtime/RuntimeData.h"
+#include "WAVM/Runtime/Runtime.h"
 #include "RuntimePrivate.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Lock.h"
+#include "WAVM/Runtime/RuntimeData.h"
 
-using namespace IR;
-using namespace Runtime;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::Runtime;
+
+const AnyReferee* Runtime::asAnyRef(const Object* object)
+{
+	return ((ObjectImpl*)object)->getAnyRef();
+}
 
 bool Runtime::isA(Object* object, const ObjectType& type)
 {
@@ -16,9 +22,9 @@ bool Runtime::isA(Object* object, const ObjectType& type)
 	switch(type.kind)
 	{
 	case IR::ObjectKind::function: return asFunctionType(type) == asFunction(object)->type;
-	case IR::ObjectKind::global: return asGlobalType(type) == asGlobal(object)->type;
-	case IR::ObjectKind::table: return isSubset(asTableType(type), asTable(object)->type);
-	case IR::ObjectKind::memory: return isSubset(asMemoryType(type), asMemory(object)->type);
+	case IR::ObjectKind::global: return isSubtype(asGlobal(object)->type, asGlobalType(type));
+	case IR::ObjectKind::table: return isSubtype(asTable(object)->type, asTableType(type));
+	case IR::ObjectKind::memory: return isSubtype(asMemory(object)->type, asMemoryType(type));
 	case IR::ObjectKind::exceptionType:
 		return asExceptionType(type) == asExceptionTypeInstance(object)->type;
 	default: Errors::unreachable();

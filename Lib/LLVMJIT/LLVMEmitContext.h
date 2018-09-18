@@ -1,8 +1,8 @@
 #pragma once
 
-#include "IR/Module.h"
-#include "IR/Types.h"
 #include "LLVMJITPrivate.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Types.h"
 
 #include "LLVMPreInclude.h"
 
@@ -14,8 +14,7 @@
 
 #include "LLVMPostInclude.h"
 
-namespace LLVMJIT
-{
+namespace WAVM { namespace LLVMJIT {
 	// Code and state that is used for generating IR for both thunks and WASM functions.
 	struct EmitContext
 	{
@@ -24,18 +23,13 @@ namespace LLVMJIT
 
 		llvm::Value* contextPointerVariable;
 		llvm::Value* memoryBasePointerVariable;
-		llvm::Value* tableBasePointerVariable;
 
-		EmitContext(LLVMContext& inLLVMContext,
-					llvm::Constant* inDefaultMemoryOffset,
-					llvm::Constant* inDefaultTableOffset)
+		EmitContext(LLVMContext& inLLVMContext, llvm::Constant* inDefaultMemoryOffset)
 		: llvmContext(inLLVMContext)
 		, irBuilder(inLLVMContext)
 		, contextPointerVariable(nullptr)
 		, memoryBasePointerVariable(nullptr)
-		, tableBasePointerVariable(nullptr)
 		, defaultMemoryOffset(inDefaultMemoryOffset)
-		, defaultTableOffset(inDefaultTableOffset)
 		{
 		}
 
@@ -51,16 +45,21 @@ namespace LLVMJIT
 				value, irBuilder.CreatePointerCast(pointer, value->getType()->getPointerTo()));
 		}
 
-		void reloadMemoryAndTableBase()
+		llvm::Value* getCompartmentAddress()
 		{
 			// Derive the compartment runtime data from the context address by masking off the lower
 			// 32 bits.
-			llvm::Value* compartmentAddress = irBuilder.CreateIntToPtr(
+			return irBuilder.CreateIntToPtr(
 				irBuilder.CreateAnd(
 					irBuilder.CreatePtrToInt(irBuilder.CreateLoad(contextPointerVariable),
 											 llvmContext.i64Type),
 					emitLiteral(llvmContext, ~((U64(1) << 32) - 1))),
 				llvmContext.i8PtrType);
+		}
+
+		void reloadMemoryBase()
+		{
+			llvm::Value* compartmentAddress = getCompartmentAddress();
 
 			// Load the defaultMemoryBase and defaultTableBase values from the runtime data for this
 			// module instance.
@@ -73,27 +72,16 @@ namespace LLVMJIT
 						llvmContext.i8PtrType),
 					memoryBasePointerVariable);
 			}
-
-			if(defaultTableOffset)
-			{
-				irBuilder.CreateStore(
-					loadFromUntypedPointer(
-						irBuilder.CreateInBoundsGEP(compartmentAddress, {defaultTableOffset}),
-						llvmContext.i8PtrType),
-					tableBasePointerVariable);
-			}
 		}
 
 		void initContextVariables(llvm::Value* initialContextPointer)
 		{
 			memoryBasePointerVariable
 				= irBuilder.CreateAlloca(llvmContext.i8PtrType, nullptr, "memoryBase");
-			tableBasePointerVariable
-				= irBuilder.CreateAlloca(llvmContext.i8PtrType, nullptr, "tableBase");
 			contextPointerVariable
 				= irBuilder.CreateAlloca(llvmContext.i8PtrType, nullptr, "context");
 			irBuilder.CreateStore(initialContextPointer, contextPointerVariable);
-			reloadMemoryAndTableBase();
+			reloadMemoryBase();
 		}
 
 		// Creates either a call or an invoke if the call occurs inside a try.
@@ -105,24 +93,7 @@ namespace LLVMJIT
 		{
 			llvm::ArrayRef<llvm::Value*> augmentedArgs = args;
 
-			if(callingConvention == IR::CallingConvention::intrinsicWithMemAndTable)
-			{
-				// Augment the argument list with the context pointer, and the default memory and
-				// table IDs.
-				auto augmentedArgsAlloca
-					= (llvm::Value**)alloca(sizeof(llvm::Value*) * (args.size() + 3));
-				augmentedArgs = llvm::ArrayRef<llvm::Value*>(augmentedArgsAlloca, args.size() + 3);
-				augmentedArgsAlloca[0] = irBuilder.CreateLoad(contextPointerVariable);
-				augmentedArgsAlloca[1]
-					= defaultMemoryOffset ? getMemoryIdFromOffset(llvmContext, defaultMemoryOffset)
-										  : emitLiteral(llvmContext, I64(-1));
-				augmentedArgsAlloca[2] = defaultTableOffset
-											 ? getTableIdFromOffset(llvmContext, defaultTableOffset)
-											 : emitLiteral(llvmContext, I64(-1));
-				for(Uptr argIndex = 0; argIndex < args.size(); ++argIndex)
-				{ augmentedArgsAlloca[3 + argIndex] = args[argIndex]; }
-			}
-			else if(callingConvention != IR::CallingConvention::c)
+			if(callingConvention != IR::CallingConvention::c)
 			{
 				// Augment the argument list with the context pointer.
 				auto augmentedArgsAlloca
@@ -162,7 +133,7 @@ namespace LLVMJIT
 				irBuilder.CreateStore(newContextPointer, contextPointerVariable);
 
 				// Reload the memory/table base pointers.
-				reloadMemoryAndTableBase();
+				reloadMemoryBase();
 
 				if(areResultsReturnedDirectly(calleeType.results()))
 				{
@@ -204,7 +175,7 @@ namespace LLVMJIT
 				irBuilder.CreateStore(newContextPointer, contextPointerVariable);
 
 				// Reload the memory/table base pointers.
-				reloadMemoryAndTableBase();
+				reloadMemoryBase();
 
 				// Load the call result from the returned context.
 				wavmAssert(calleeType.results().size() <= 1);
@@ -216,7 +187,6 @@ namespace LLVMJIT
 
 				break;
 			}
-			case IR::CallingConvention::intrinsicWithMemAndTable:
 			case IR::CallingConvention::intrinsic:
 			case IR::CallingConvention::c:
 			{
@@ -275,6 +245,5 @@ namespace LLVMJIT
 
 	private:
 		llvm::Constant* defaultMemoryOffset;
-		llvm::Constant* defaultTableOffset;
 	};
-}
+}}

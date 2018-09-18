@@ -4,17 +4,17 @@
 #include <string>
 #include <vector>
 
-#include "IR/Module.h"
-#include "IR/OperatorPrinter.h"
-#include "IR/Operators.h"
-#include "IR/Types.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
 #include "LLVMEmitFunctionContext.h"
 #include "LLVMEmitModuleContext.h"
 #include "LLVMJITPrivate.h"
-#include "Logging/Logging.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/OperatorPrinter.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Logging/Logging.h"
 
 #include "LLVMPreInclude.h"
 
@@ -39,17 +39,17 @@
 
 #include "LLVMPostInclude.h"
 
-namespace llvm
-{
+namespace llvm {
 	class Metadata;
 }
 
 #define ENABLE_LOGGING 0
 #define EMIT_ENTER_EXIT_HOOKS 0
 
-using namespace IR;
-using namespace LLVMJIT;
-using namespace Runtime;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::LLVMJIT;
+using namespace WAVM::Runtime;
 
 // Creates a PHI node for the argument of branches to a basic block.
 PHIVector EmitFunctionContext::createPHIs(llvm::BasicBlock* basicBlock, IR::TypeTuple type)

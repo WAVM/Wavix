@@ -2,17 +2,35 @@
 #include <memory>
 #include <vector>
 
-#include "IR/Types.h"
-#include "IR/Value.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "LLVMJIT/LLVMJIT.h"
-#include "Runtime/Runtime.h"
-#include "Runtime/RuntimeData.h"
 #include "RuntimePrivate.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/IR/Value.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/LLVMJIT/LLVMJIT.h"
+#include "WAVM/Runtime/Runtime.h"
+#include "WAVM/Runtime/RuntimeData.h"
 
-using namespace IR;
-using namespace Runtime;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::Runtime;
+
+const AnyFunc* Runtime::asAnyFunc(const FunctionInstance* functionInstance)
+{
+	void* wasmFunction = functionInstance->nativeFunction;
+
+	// If the function isn't a WASM function, generate a thunk for it.
+	if(functionInstance->callingConvention != IR::CallingConvention::wasm)
+	{
+		wasmFunction = LLVMJIT::getIntrinsicThunk(wasmFunction,
+												  functionInstance,
+												  functionInstance->type,
+												  functionInstance->callingConvention);
+	}
+
+	// Get the pointer to the AnyFunc struct that is emitted as a prefix to the function's code.
+	return (AnyFunc*)((U8*)wasmFunction - offsetof(AnyFunc, code));
+}
 
 UntaggedValue* Runtime::invokeFunctionUnchecked(Context* context,
 												FunctionInstance* function,
@@ -71,7 +89,7 @@ ValueTuple Runtime::invokeFunctionChecked(Context* context,
 		= (UntaggedValue*)alloca(arguments.size() * sizeof(UntaggedValue));
 	for(Uptr argumentIndex = 0; argumentIndex < arguments.size(); ++argumentIndex)
 	{
-		if(functionType.params()[argumentIndex] != arguments[argumentIndex].type)
+		if(!isSubtype(arguments[argumentIndex].type, functionType.params()[argumentIndex]))
 		{ throwException(Exception::invokeSignatureMismatchType); }
 
 		untaggedArguments[argumentIndex] = arguments[argumentIndex];
@@ -98,10 +116,8 @@ ValueTuple Runtime::invokeFunctionChecked(Context* context,
 		case ValueType::f32: results.values.push_back(Value(*(F32*)result)); break;
 		case ValueType::f64: results.values.push_back(Value(*(F64*)result)); break;
 		case ValueType::v128: results.values.push_back(Value(*(V128*)result)); break;
-		case ValueType::anyref:
-		case ValueType::anyfunc:
-			results.values.push_back(Value((*(AnyReferee**)result)->object));
-			break;
+		case ValueType::anyref: results.values.push_back(Value(*(const AnyReferee**)result)); break;
+		case ValueType::anyfunc: results.values.push_back(Value(*(const AnyFunc**)result)); break;
 		default: Errors::unreachable();
 		};
 

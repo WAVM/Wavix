@@ -7,26 +7,28 @@
 #include <utility>
 #include <vector>
 
-#include "IR/Types.h"
-#include "IR/Value.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/CLI.h"
-#include "Inline/Errors.h"
-#include "Inline/Floats.h"
-#include "Inline/Hash.h"
-#include "Inline/HashMap.h"
-#include "Logging/Logging.h"
-#include "Runtime/Intrinsics.h"
-#include "Runtime/Linker.h"
-#include "Runtime/Runtime.h"
-#include "ThreadTest/ThreadTest.h"
-#include "WASTParse/TestScript.h"
-#include "WASTParse/WASTParse.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/IR/Value.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/CLI.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Floats.h"
+#include "WAVM/Inline/Hash.h"
+#include "WAVM/Inline/HashMap.h"
+#include "WAVM/Logging/Logging.h"
+#include "WAVM/Runtime/Intrinsics.h"
+#include "WAVM/Runtime/Linker.h"
+#include "WAVM/Runtime/Runtime.h"
+#include "WAVM/Runtime/RuntimeData.h"
+#include "WAVM/ThreadTest/ThreadTest.h"
+#include "WAVM/WASTParse/TestScript.h"
+#include "WAVM/WASTParse/WASTParse.h"
 
-using namespace IR;
-using namespace Runtime;
-using namespace WAST;
+using namespace WAVM;
+using namespace WAVM::IR;
+using namespace WAVM::Runtime;
+using namespace WAVM::WAST;
 
 DEFINE_INTRINSIC_MODULE(spectest);
 
@@ -362,6 +364,24 @@ static void processCommand(TestScriptState& state, const Command* command)
 		}
 		break;
 	}
+	case Command::assert_return_func:
+	{
+		auto assertCommand = (AssertReturnNaNCommand*)command;
+		// Execute the action and check that the result is a function.
+		IR::ValueTuple actionResults;
+		if(processAction(state, assertCommand->action.get(), actionResults))
+		{
+			if(actionResults.size() != 1 || !isReferenceType(actionResults[0].type)
+			   || !asFunctionNullable(actionResults[0].anyRef->object))
+			{
+				testErrorf(state,
+						   assertCommand->locus,
+						   "expected single reference result but got %s",
+						   asString(actionResults).c_str());
+			}
+		}
+		break;
+	}
 	case Command::assert_trap:
 	{
 		auto assertCommand = (AssertTrapCommand*)command;
@@ -555,8 +575,7 @@ static void showHelp()
 {
 	Log::printf(Log::error,
 				"Usage: RunTestScript [options] in.wast [options]\n"
-				"  -h|--help                 Display this message\n"
-				"  --enable-reference-types  Enable the reference-types extension\n");
+				"  -h|--help                 Display this message\n");
 }
 
 int main(int argc, char** argv)
@@ -568,12 +587,7 @@ int main(int argc, char** argv)
 	const char* filename = nullptr;
 	for(int argIndex = 1; argIndex < argc; ++argIndex)
 	{
-		if(!strcmp(argv[argIndex], "--enable-reference-types"))
-		{
-			errorUnless(!featureSpec.referenceTypes);
-			featureSpec.referenceTypes = true;
-		}
-		else if(!strcmp(argv[argIndex], "--help") || !strcmp(argv[argIndex], "-h"))
+		if(!strcmp(argv[argIndex], "--help") || !strcmp(argv[argIndex], "-h"))
 		{
 			showHelp();
 			return EXIT_SUCCESS;

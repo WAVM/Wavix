@@ -1,25 +1,26 @@
-#include "IR/Validate.h"
+#include "WAVM/IR/Validate.h"
 
 #include <stdint.h>
 #include <memory>
 #include <utility>
 #include <vector>
 
-#include "IR/IR.h"
-#include "IR/Module.h"
-#include "IR/OperatorPrinter.h"
-#include "IR/Operators.h"
-#include "IR/Types.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
-#include "Inline/Errors.h"
-#include "Inline/Hash.h"
-#include "Inline/HashSet.h"
-#include "Logging/Logging.h"
+#include "WAVM/IR/IR.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/OperatorPrinter.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/Hash.h"
+#include "WAVM/Inline/HashSet.h"
+#include "WAVM/Logging/Logging.h"
 
 #define ENABLE_LOGGING 0
 
-using namespace IR;
+using namespace WAVM;
+using namespace WAVM::IR;
 
 #define VALIDATE_UNLESS(reason, comparison)                                                        \
 	if(comparison) { throw ValidationException(reason #comparison); }
@@ -400,17 +401,49 @@ struct FunctionValidationContext
 	void br_table(BranchTableImm imm)
 	{
 		popAndValidateOperand("br_table index", ValueType::i32);
+
 		const TypeTuple defaultTargetParams = getBranchTargetByDepth(imm.defaultTargetDepth).params;
-		popAndValidateTypeTuple("br_table argument", defaultTargetParams);
+
+		// Meet (intersect) the parameters of all the branch targets to get the most general type
+		// that matches any of the targets.
+		const Uptr numTargetParams = defaultTargetParams.size();
+		ValueType* targetParamMeets = new(alloca(sizeof(ValueType) * defaultTargetParams.size()))
+			ValueType[numTargetParams];
+		for(Uptr elementIndex = 0; elementIndex < numTargetParams; ++elementIndex)
+		{ targetParamMeets[elementIndex] = defaultTargetParams[elementIndex]; }
 
 		wavmAssert(imm.branchTableIndex < functionDef.branchTables.size());
 		const std::vector<Uptr>& targetDepths = functionDef.branchTables[imm.branchTableIndex];
 		for(Uptr targetIndex = 0; targetIndex < targetDepths.size(); ++targetIndex)
 		{
 			const TypeTuple targetParams = getBranchTargetByDepth(targetDepths[targetIndex]).params;
-			VALIDATE_UNLESS("br_table target argument must match default target argument: ",
-							targetParams != defaultTargetParams);
+			if(targetParams.size() != numTargetParams)
+			{
+				throw ValidationException(
+					"br_table targets must all take the same number of parameters");
+			}
+			else
+			{
+				for(Uptr elementIndex = 0; elementIndex < numTargetParams; ++elementIndex)
+				{
+					targetParamMeets[elementIndex]
+						= meet(targetParamMeets[elementIndex], targetParams[elementIndex]);
+				}
+			}
 		}
+
+		// If any target's parameters are disjoint from any other target's parameters, the result of
+		// the meet will be empty; i.e. there are no possible arguments that will match any of the
+		// branch targets.
+		for(Uptr elementIndex = 0; elementIndex < numTargetParams; ++elementIndex)
+		{
+			if(targetParamMeets[elementIndex] == ValueType::none)
+			{ throw ValidationException("br_table targets have incompatible parameter types"); }
+		}
+
+		// Validate that the br_table's arguments match the meet of the target's parameters.
+		popAndValidateOperands(
+			"br_table argument", (const ValueType*)targetParamMeets, numTargetParams);
 
 		enterUnreachable();
 	}
@@ -429,8 +462,19 @@ struct FunctionValidationContext
 	{
 		popAndValidateOperand("select condition", ValueType::i32);
 		const ValueType falseType = popAndValidateOperand("select false value", ValueType::any);
-		popAndValidateOperand("select true value", falseType);
-		pushOperand(falseType);
+		const ValueType trueType = popAndValidateOperand("select true value", ValueType::any);
+		if(falseType == ValueType::any) { pushOperand(trueType); }
+		else if(trueType == ValueType::any)
+		{
+			pushOperand(falseType);
+		}
+		else
+		{
+			const ValueType resultType = join(falseType, trueType);
+			if(resultType == ValueType::any)
+			{ throw ValidationException("select operands must have a common supertype"); }
+			pushOperand(resultType);
+		}
 	}
 
 	void get_local(GetOrSetVariableImm<false> imm)
@@ -492,7 +536,7 @@ struct FunctionValidationContext
 		enterUnreachable();
 	}
 
-	void call(CallImm imm)
+	void call(FunctionImm imm)
 	{
 		FunctionType calleeType = validateFunctionIndex(module, imm.functionIndex);
 		popAndValidateTypeTuple("call arguments", calleeType.params());
@@ -500,10 +544,10 @@ struct FunctionValidationContext
 	}
 	void call_indirect(CallIndirectImm imm)
 	{
-		VALIDATE_UNLESS("call_indirect is only valid if there is a default function table: ",
-						module.tables.size() == 0);
-		VALIDATE_UNLESS("call_indirect requires a table element type of anyfunc: ",
-						module.tables.getType(0).elementType != ReferenceType::anyfunc);
+		VALIDATE_INDEX(imm.tableIndex, module.tables.size());
+		VALIDATE_UNLESS(
+			"call_indirect requires a table element type of anyfunc: ",
+			module.tables.getType(imm.tableIndex).elementType != ReferenceType::anyfunc);
 		FunctionType calleeType = validateFunctionType(module, imm.type);
 		popAndValidateOperand("call_indirect function index", ValueType::i32);
 		popAndValidateTypeTuple("call_indirect arguments", calleeType.params());
@@ -525,6 +569,8 @@ struct FunctionValidationContext
 	void validateImm(MemoryImm imm) { VALIDATE_INDEX(imm.memoryIndex, module.memories.size()); }
 
 	void validateImm(TableImm imm) { VALIDATE_INDEX(imm.tableIndex, module.tables.size()); }
+
+	void validateImm(FunctionImm imm) { validateFunctionIndex(module, imm.functionIndex); }
 
 	template<Uptr numLanes> void validateImm(LaneIndexImm<numLanes> imm)
 	{
@@ -933,8 +979,7 @@ void IR::validateDataSegments(const Module& module)
 	}
 }
 
-namespace IR
-{
+namespace WAVM { namespace IR {
 	struct CodeValidationStreamImpl
 	{
 		FunctionValidationContext functionContext;
@@ -945,7 +990,7 @@ namespace IR
 		{
 		}
 	};
-}
+}}
 
 IR::CodeValidationStream::CodeValidationStream(const Module& module, const FunctionDef& functionDef)
 {

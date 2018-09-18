@@ -1,11 +1,11 @@
-#include "IR/Operators.h"
-#include "IR/Types.h"
-#include "Inline/Assert.h"
-#include "Inline/BasicTypes.h"
 #include "LLVMEmitContext.h"
 #include "LLVMEmitFunctionContext.h"
 #include "LLVMEmitModuleContext.h"
 #include "LLVMJITPrivate.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/IR/Types.h"
+#include "WAVM/Inline/Assert.h"
+#include "WAVM/Inline/BasicTypes.h"
 
 #include "LLVMPreInclude.h"
 
@@ -21,8 +21,8 @@
 
 #include "LLVMPostInclude.h"
 
-using namespace IR;
-using namespace LLVMJIT;
+using namespace WAVM::IR;
+using namespace WAVM::LLVMJIT;
 
 // Bounds checks a sandboxed memory address + offset, and returns an offset relative to the memory
 // base address that is guaranteed to be within the virtual address space allocated for the linear

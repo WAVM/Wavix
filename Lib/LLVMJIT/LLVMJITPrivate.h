@@ -1,10 +1,10 @@
 #pragma once
 
-#include "IR/Module.h"
-#include "IR/Operators.h"
-#include "Inline/BasicTypes.h"
-#include "LLVMJIT/LLVMJIT.h"
-#include "Runtime/RuntimeData.h"
+#include "WAVM/IR/Module.h"
+#include "WAVM/IR/Operators.h"
+#include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/LLVMJIT/LLVMJIT.h"
+#include "WAVM/Runtime/RuntimeData.h"
 
 #include <cctype>
 #include <string>
@@ -31,18 +31,15 @@
 #define USE_WINDOWS_SEH 0
 #endif
 
-namespace llvm
-{
+namespace llvm {
 	class LoadedObjectInfo;
 
-	namespace object
-	{
+	namespace object {
 		class SectionRef;
 	}
 }
 
-namespace LLVMJIT
-{
+namespace WAVM { namespace LLVMJIT {
 	typedef llvm::SmallVector<llvm::Value*, 1> ValueVector;
 	typedef llvm::SmallVector<llvm::PHINode*, 1> PHIVector;
 
@@ -173,22 +170,11 @@ namespace LLVMJIT
 										  IR::FunctionType functionType,
 										  IR::CallingConvention callingConvention)
 	{
-		const Uptr numImplicitParameters
-			= callingConvention == IR::CallingConvention::intrinsicWithMemAndTable
-				  ? 3
-				  : callingConvention == IR::CallingConvention::c ? 0 : 1;
+		const Uptr numImplicitParameters = callingConvention == IR::CallingConvention::c ? 0 : 1;
 		const Uptr numParameters = numImplicitParameters + functionType.params().size();
 		auto llvmArgTypes = (llvm::Type**)alloca(sizeof(llvm::Type*) * numParameters);
-		if(callingConvention == IR::CallingConvention::intrinsicWithMemAndTable)
-		{
-			llvmArgTypes[0] = llvmContext.i8PtrType;
-			llvmArgTypes[1] = llvmContext.i64Type;
-			llvmArgTypes[2] = llvmContext.i64Type;
-		}
-		else if(callingConvention != IR::CallingConvention::c)
-		{
-			llvmArgTypes[0] = llvmContext.i8PtrType;
-		}
+		if(callingConvention != IR::CallingConvention::c)
+		{ llvmArgTypes[0] = llvmContext.i8PtrType; }
 		for(Uptr argIndex = 0; argIndex < functionType.params().size(); ++argIndex)
 		{
 			llvmArgTypes[argIndex + numImplicitParameters]
@@ -206,7 +192,6 @@ namespace LLVMJIT
 			llvmReturnType = llvmContext.i8PtrType;
 			break;
 
-		case IR::CallingConvention::intrinsicWithMemAndTable:
 		case IR::CallingConvention::intrinsic:
 		case IR::CallingConvention::c:
 			switch(functionType.results().size())
@@ -231,7 +216,6 @@ namespace LLVMJIT
 
 		case IR::CallingConvention::intrinsic:
 		case IR::CallingConvention::intrinsicWithContextSwitch:
-		case IR::CallingConvention::intrinsicWithMemAndTable:
 		case IR::CallingConvention::c: return llvm::CallingConv::C;
 
 		default: Errors::unreachable();
@@ -309,4 +293,4 @@ namespace LLVMJIT
 								 const llvm::object::SectionRef& xdataSection,
 								 const U8* xdataCopy,
 								 Uptr sehTrampolineAddress);
-}
+}}
