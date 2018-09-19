@@ -10,5 +10,7 @@ install(TARGETS wavix DESTINATION bin)
 # This adds the WAVM RPATH to the installed binary.
 set_target_properties(wavix PROPERTIES INSTALL_RPATH_USE_LINK_PATH true)
 
-# Disable zero-length printf format string warning.
-target_compile_options(wavix PRIVATE "-Wno-format-zero-length")
+if(NOT MSVC)
+	# Disable zero-length printf format string warning.
+	target_compile_options(wavix PRIVATE "-Wno-format-zero-length")
+endif()
