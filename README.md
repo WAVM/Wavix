@@ -56,4 +56,4 @@ This repository integrates many other repos as subdirectories using the [git sub
 * `git subtree pull --squash --prefix lld https://llvm.org/git/lld.git master`
 * `git subtree pull --squash --prefix llvm https://llvm.org/git/llvm.git master`
 * `git subtree pull --squash --prefix musl https://github.com/jfbastien/musl wasm-prototype-1`
-* `git subtree pull --squash --prefix wavm https://github.com/WAVM/WAVM master`
+* `git subtree pull --squash --prefix WAVM https://github.com/WAVM/WAVM master`
