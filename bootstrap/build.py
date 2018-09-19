@@ -232,8 +232,8 @@ def WAVM():
              '-DCMAKE_INSTALL_PREFIX=' + SYSROOT_DIR,
              '-DCMAKE_TOOLCHAIN_FILE=' +
              WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
-             '-DENABLE_RUNTIME=OFF',
-             '-DENABLE_STATIC_LINKING=ON',
+             '-DWAVM_ENABLE_RUNTIME=OFF',
+             '-DWAVM_ENABLE_STATIC_LINKING=ON',
              '-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON' ]
 
   proc.check_call(command, cwd=WAVM_OUT_DIR)
