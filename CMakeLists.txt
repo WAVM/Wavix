@@ -57,10 +57,17 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 # Put executables/DLLs in the <build>/bin directory.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 
-# Put libraries/SOs in the <build|install>/lib/WAVM directory.
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/WAVM)
-set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib/WAVM")
-
+# This is a hack around the fact that CMake doesn't allow generator expressions in INSTALL_RPATH.
+# This means that platforms that need an RPATH but have multi-configuration generators (i.e. Xcode)
+# can't install the shared libraries into a configuration-dependent directory, so only one
+# configuration may be installed at a time.
+if(CMAKE_BUILD_TYPE)
+	set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib/WAVM/${CMAKE_BUILD_TYPE}")
+	set(WAVM_DISABLE_PER_CONFIG_RPATH 0)
+else()
+	set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib/WAVM")
+	set(WAVM_DISABLE_PER_CONFIG_RPATH 1)
+endif()
 
 # Install Include/WAVM to <install root>/include/WAVM
 install(DIRECTORY ${WAVM_SOURCE_DIR}/Include/WAVM
@@ -80,9 +87,9 @@ function(WAVM_SET_TARGET_OPTIONS TARGET_NAME)
 	# Add the WAVM public include directory.
 	target_include_directories(
 		${TARGET_NAME}
-		INTERFACE $<INSTALL_INTERFACE:include>
-		PRIVATE $<BUILD_INTERFACE:${WAVM_SOURCE_DIR}/Include>
-				${PROJECT_BINARY_DIR}/Include
+		PUBLIC $<INSTALL_INTERFACE:include>
+			   $<BUILD_INTERFACE:${WAVM_SOURCE_DIR}/Include>
+			   $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/Include>
 	)
 
 	# Target C++11.
@@ -104,13 +111,10 @@ function(WAVM_SET_TARGET_OPTIONS TARGET_NAME)
 		target_compile_options(${TARGET_NAME} PRIVATE "/wd4310") # cast truncates constant value
 		target_compile_options(${TARGET_NAME} PRIVATE "/wd4324") # structure was padded due to alignment specifier
 		target_compile_options(${TARGET_NAME} PRIVATE "/wd4146") # unary minus operator applied to unsigned type, result still unsigned
-	elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+	elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 		# Compile with all warnings and fatal warnings
 		target_compile_options(${TARGET_NAME} PRIVATE "-Wall")
 		target_compile_options(${TARGET_NAME} PRIVATE "-Werror")
-
-		# Disable zero-length printf format string warning.
-		target_compile_options(${TARGET_NAME} PRIVATE "-Wno-format-zero-length")
 	
 		# Disable RTTI to allow linking against a build of LLVM that was compiled without it.
 		target_compile_options(${TARGET_NAME} PRIVATE "-fno-rtti")
@@ -120,8 +124,9 @@ function(WAVM_SET_TARGET_OPTIONS TARGET_NAME)
 
 		if(WAVM_ENABLE_ASAN)
 			target_compile_options(${TARGET_NAME} PRIVATE "-fsanitize=address")
+			target_link_libraries(${TARGET_NAME} INTERFACE "-fsanitize=address")
 			if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-				target_compile_options(${TARGET_NAME} PRIVATE "-mllvm -asan-stack=0")
+				target_compile_options(${TARGET_NAME} PRIVATE "-mllvm" "-asan-stack=0")
 				target_compile_options(${TARGET_NAME} PRIVATE "-Wno-unused-command-line-argument")
 			endif()
 		endif()
@@ -129,12 +134,14 @@ function(WAVM_SET_TARGET_OPTIONS TARGET_NAME)
 		# Optionally enable the undefined-behavior sanitizer.
 		if(WAVM_ENABLE_UBSAN)
 			target_compile_options(${TARGET_NAME} PRIVATE "-fsanitize=undefined")
+			target_link_libraries(${TARGET_NAME} INTERFACE -fsanitize=undefined)
 			target_compile_options(${TARGET_NAME} PRIVATE "-fno-sanitize-recover=undefined")
 		endif()
 
 		# Optionally enable the thread sanitizer.
 		if(WAVM_ENABLE_TSAN)
 			target_compile_options(${TARGET_NAME} PRIVATE "-fsanitize=thread")
+			target_link_libraries(${TARGET_NAME} INTERFACE -fsanitize=thread)
 		endif()
 
 		# Make sure to omit the frame pointer in order to allow stuff like thread forking to work.
@@ -142,19 +149,22 @@ function(WAVM_SET_TARGET_OPTIONS TARGET_NAME)
 	endif()
 endfunction()
 
+function(WAVM_INSTALL_TARGET TARGET_NAME)
+	install(TARGETS ${TARGET_NAME}
+			EXPORT WAVMInstallTargets
+			LIBRARY DESTINATION lib/WAVM/$<CONFIG>
+			ARCHIVE DESTINATION lib/WAVM/$<CONFIG>
+			# Install RelWithDebInfo binaries to bin, and all others to bin/WAVM/config
+			RUNTIME DESTINATION $<IF:$<OR:$<CONFIG:RelWithDebInfo>,$<BOOL:${WAVM_DISABLE_PER_CONFIG_RPATH}>>,bin,bin/WAVM/$<CONFIG>>)
+endfunction()
+
 function(WAVM_ADD_LIBRARY TARGET_NAME)
 	if(WAVM_ENABLE_STATIC_LINKING)
 		add_library(${TARGET_NAME} STATIC ${ARGN})
-		install(TARGETS ${TARGET_NAME} DESTINATION lib/WAVM EXPORT WAVMLibraries)
 	else()
 		add_library(${TARGET_NAME} SHARED ${ARGN})
-		if(WIN32)
-			install(TARGETS ${TARGET_NAME} DESTINATION bin EXPORT WAVMLibraries)
-		else()
-			install(TARGETS ${TARGET_NAME} DESTINATION lib/WAVM EXPORT WAVMLibraries)
-		endif()
 	endif()
-
+	WAVM_INSTALL_TARGET(${TARGET_NAME})
 	WAVM_SET_TARGET_OPTIONS(${TARGET_NAME})
 	
 	# Set up the library's API definitions.
@@ -185,7 +195,7 @@ endfunction()
 
 function(WAVM_ADD_INSTALLED_EXECUTABLE TARGET_NAME FOLDER_NAME)
 	WAVM_ADD_EXECUTABLE(${TARGET_NAME} ${FOLDER_NAME} ${ARGN})
-	install(TARGETS ${TARGET_NAME} DESTINATION bin)
+	WAVM_INSTALL_TARGET(${TARGET_NAME})
 endfunction()
 
 add_subdirectory(Examples)
@@ -213,9 +223,15 @@ if(WAVM_ENABLE_RUNTIME)
 	add_subdirectory(ThirdParty/libunwind)
 endif()
 
+# Create a CMake package in <build>/lib/cmake/WAVM containing the WAVM library targets.
+export(
+	EXPORT WAVMInstallTargets
+	FILE ${CMAKE_CURRENT_BINARY_DIR}/lib/cmake/WAVM/WAVMConfig.cmake
+	NAMESPACE WAVM::)
+
 # Create a CMake package in <install root>/lib/cmake/WAVM containing the WAVM library targets.
 install(
-	EXPORT WAVMLibraries
+	EXPORT WAVMInstallTargets
 	FILE WAVMConfig.cmake
 	DESTINATION lib/cmake/WAVM
 	NAMESPACE WAVM::)

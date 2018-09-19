@@ -9,8 +9,7 @@
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/Timing.h"
 
-#include "LLVMPreInclude.h"
-
+PUSH_DISABLE_WARNINGS_FOR_LLVM_HEADERS
 #include "llvm/ADT/Twine.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/Constants.h"
@@ -23,8 +22,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-
-#include "LLVMPostInclude.h"
+POP_DISABLE_WARNINGS_FOR_LLVM_HEADERS
 
 namespace llvm {
 	class Constant;
@@ -113,11 +111,7 @@ void LLVMJIT::emitModule(const IR::Module& irModule,
 	auto personalityFunction
 		= llvm::Function::Create(llvm::FunctionType::get(llvmContext.i32Type, {}, false),
 								 llvm::GlobalValue::LinkageTypes::ExternalLinkage,
-#ifdef _WIN32
-								 "__C_specific_handler",
-#else
-								 "__gxx_personality_v0",
-#endif
+								 USE_WINDOWS_SEH ? "__C_specific_handler" : "__gxx_personality_v0",
 								 &outLLVMModule);
 
 	// Create LLVM external globals corresponding to the encoded function types for the module's
