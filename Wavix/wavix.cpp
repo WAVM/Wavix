@@ -193,6 +193,15 @@ struct wavix_utsname
 	char domainName[65];
 };
 
+// Provide a macro to wrap calls to the C standard library functions that disables the MSVC error
+// that they should be replaced by the safer but unportable MSVC secure CRT functions.
+#ifdef _MSC_VER
+#define SCOPED_DISABLE_SECURE_CRT_WARNINGS(code)                                                   \
+	__pragma(warning(push)) __pragma(warning(disable : 4996)) code __pragma(warning(pop))
+#else
+#define SCOPED_DISABLE_SECURE_CRT_WARNINGS(code) code
+#endif
+
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_uname", I32, __syscall_uname, I32 resultAddress)
 {
 	MemoryInstance* memory = currentThread->process->memory;
