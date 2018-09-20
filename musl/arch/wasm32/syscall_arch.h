@@ -74,6 +74,7 @@ long __syscall_faccessat(long,long,long,long);
 long __syscall_membarrier(__WORKAROUND_NO_PARAMETERS);
 long __syscall_exit(long);
 long __syscall_read(long,long,long);
+long __syscall_write(long,long,long);
 long __syscall_open(long,long,long);
 long __syscall_openat(long,long,long,long);
 long __syscall_creat(long,long);
@@ -149,6 +150,7 @@ static __attribute__((always_inline)) long __syscall_dispatch(long n, long a, lo
 	case __NR_faccessat: return __syscall_faccessat(a, b, c, d);
 	case __NR_exit: return __syscall_exit(a);
 	case __NR_read: return __syscall_read(a, b, c);
+	case __NR_write: return __syscall_write(a, b, c);
 	case __NR_open: return __syscall_open(a, b, c);
 	case __NR_openat: return __syscall_openat(a, b, c, d);
 	case __NR_creat: return __syscall_creat(a, b);

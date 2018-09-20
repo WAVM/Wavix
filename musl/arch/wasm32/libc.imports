@@ -43,6 +43,7 @@ __syscall_faccessat
 __syscall_membarrier
 __syscall_exit
 __syscall_read
+__syscall_write
 __syscall_open
 __syscall_openat
 __syscall_creat

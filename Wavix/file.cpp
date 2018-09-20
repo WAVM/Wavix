@@ -297,10 +297,10 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	Lock<Platform::Mutex> fileLock(currentProcess->filesMutex);
 
-	if(!validateFD(fd)) { return -1; }
+	if(!validateFD(fd)) { return -ErrNo::ebadf; }
 
 	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { throwException(Exception::calledUnimplementedIntrinsicType); }
+	if(!platformFile) { return -ErrNo::ebadf; }
 
 	U8* buffer = memoryArrayPtr<U8>(memory, bufferAddress, numBytes);
 
@@ -309,6 +309,34 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	if(!result) { return -1; }
 
 	return coerce32bitAddress(numReadBytes);
+}
+
+DEFINE_INTRINSIC_FUNCTION(wavix,
+						  "__syscall_write",
+						  I32,
+						  __syscall_write,
+						  I32 fd,
+						  I32 bufferAddress,
+						  I32 numBytes)
+{
+	MemoryInstance* memory = currentThread->process->memory;
+
+	traceSyscallf("write", "(%i,0x%08x,%u)", fd, bufferAddress, numBytes);
+
+	Lock<Platform::Mutex> fileLock(currentProcess->filesMutex);
+
+	if(!validateFD(fd)) { return -ErrNo::ebadf; }
+
+	Platform::File* platformFile = currentProcess->files[fd];
+	if(!platformFile) { return -ErrNo::ebadf; }
+
+	U8* buffer = memoryArrayPtr<U8>(memory, bufferAddress, numBytes);
+
+	Uptr numWrittenBytes = 0;
+	const bool result = Platform::writeFile(platformFile, buffer, numBytes, &numWrittenBytes);
+	if(!result) { return -ErrNo::einval; }
+
+	return coerce32bitAddress(numWrittenBytes);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
