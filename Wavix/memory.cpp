@@ -88,6 +88,12 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	throwException(Exception::calledUnimplementedIntrinsicType);
 }
 
+#define WAVIX_MADV_NORMAL 0
+#define WAVIX_MADV_RANDOM 1
+#define WAVIX_MADV_SEQUENTIAL 2
+#define WAVIX_MADV_WILLNEED 3
+#define WAVIX_MADV_DONTNEED 4
+
 DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_madvise",
 						  I32,
@@ -96,7 +102,22 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32 numBytes,
 						  I32 advice)
 {
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	traceSyscallf("madvise", "(address=0x%08x, numBytes=%u, advise=%u)", address, numBytes, advice);
+
+	MemoryInstance* memory = currentThread->process->memory;
+
+	if((address & (IR::numBytesPerPage - 1)) || (numBytes & (IR::numBytesPerPage - 1)))
+	{ return -ErrNo::einval; }
+
+	if(advice == WAVIX_MADV_DONTNEED)
+	{
+		WAVM::Platform::bytewiseMemSet(memoryArrayPtr<U8>(memory, address, numBytes), 0, numBytes);
+		return 0;
+	}
+	else
+	{
+		throwException(Exception::calledUnimplementedIntrinsicType);
+	}
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_brk", I32, __syscall_brk, I32 address)
