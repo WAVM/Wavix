@@ -255,11 +255,7 @@ def CompilerRT():
   Mkdir(COMPILER_RT_OUT_DIR)
   command = [CMAKE_BIN, '-G', CMAKE_GENERATOR,
              WindowsFSEscape(os.path.join(COMPILER_RT_SRC_DIR, 'lib', 'builtins')),
-             # wasm-clang can't compile compiler-rt in release yet:
-             # Assertion failed: VT.isFloatingPoint(), file C:\Dropbox\Development\wavix\llvm\include\llvm/CodeGen/TargetLowering.h, line 2159
-             # looks like a problem with how WASM lowers long doubles?
-             #'-DCMAKE_BUILD_TYPE=RelWithDebInfo',
-             '-DCMAKE_BUILD_TYPE=Debug',
+             '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_TOOLCHAIN_FILE=' +
              WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
