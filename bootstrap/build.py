@@ -209,7 +209,8 @@ def Wavix():
              '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              '-DCMAKE_INSTALL_PREFIX=' + HOST_DIR,
-             '-DWAVM_DIR=' + os.path.join(HOST_DIR, 'lib/cmake/WAVM') ]
+             '-DWAVM_DIR=' + os.path.join(HOST_DIR, 'lib/cmake/WAVM')
+             '-DLLVM_DIR=' + os.path.join(HOST_DIR, 'lib/cmake/llvm') ]
 
   proc.check_call(command, cwd=WAVIX_OUT_DIR)
   proc.check_call([NINJA_BIN, 'install'], cwd=WAVIX_OUT_DIR)

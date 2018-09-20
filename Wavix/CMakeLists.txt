@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.8.0)
 project (Wavix C CXX ASM)
 
 find_package(WAVM REQUIRED CONFIG)
+find_package(LLVM REQUIRED CONFIG)
 
 add_executable(wavix file.cpp file.h memory.cpp process.cpp wavix.cpp errno.h process.h wavix.h)
 target_link_libraries(wavix WAVM::Logging WAVM::IR WAVM::WASM WAVM::Runtime)
