@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "WAVM/IR/IR.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Runtime/Intrinsics.h"
@@ -67,15 +69,18 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	return 0;
 }
 
+#define WAVIX_MREMAP_MAYMOVE 1
+#define WAVIX_MREMAP_FIXED 2
+
 DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_mremap",
-						  I32,
+						  U32,
 						  __syscall_mremap,
-						  I32 oldAddress,
-						  I32 oldNumBytes,
-						  I32 newNumBytes,
+						  U32 oldAddress,
+						  U32 oldNumBytes,
+						  U32 newNumBytes,
 						  I32 flags,
-						  I32 newAddress)
+						  U32 newAddress)
 {
 	traceSyscallf(
 		"mremap",
@@ -85,7 +90,32 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 		newNumBytes,
 		flags,
 		newAddress);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+
+	MemoryInstance* memory = currentThread->process->memory;
+
+	if(flags & WAVIX_MREMAP_FIXED) { return -ErrNo::enomem; }
+
+	if(oldAddress & (IR::numBytesPerPage - 1)) { return -ErrNo::einval; }
+
+	// Round newNumBytes up to the next multiple of the page size.
+	const Uptr newNumPages = (newNumBytes + IR::numBytesPerPage - 1) / IR::numBytesPerPage;
+
+	const Iptr newPageIndex = growMemory(memory, newNumPages);
+	if(newPageIndex < 0) { return -ErrNo::enomem; }
+
+	newAddress = coerce32bitAddress(Uptr(newPageIndex) * IR::numBytesPerPage);
+
+	const U32 numBytesToCopy = std::min(oldNumBytes, newNumBytes);
+
+	WAVM::Platform::bytewiseMemCopy(memoryArrayPtr<U8>(memory, newAddress, numBytesToCopy),
+									memoryArrayPtr<U8>(memory, oldAddress, numBytesToCopy),
+									numBytesToCopy);
+
+	unmapMemoryPages(memory,
+					 oldAddress / IR::numBytesPerPage,
+					 (oldNumBytes + IR::numBytesPerPage - 1) / IR::numBytesPerPage);
+
+	return newAddress;
 }
 
 #define WAVIX_MADV_NORMAL 0
@@ -106,8 +136,10 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	MemoryInstance* memory = currentThread->process->memory;
 
-	if((address & (IR::numBytesPerPage - 1)) || (numBytes & (IR::numBytesPerPage - 1)))
-	{ return -ErrNo::einval; }
+	if((address & (IR::numBytesPerPage - 1))) { return -ErrNo::einval; }
+
+	// Round numBytes up to the next multiple of the page size.
+	numBytes = (numBytes + IR::numBytesPerPage - 1) & -IR::numBytesPerPage;
 
 	if(advice == WAVIX_MADV_DONTNEED)
 	{
