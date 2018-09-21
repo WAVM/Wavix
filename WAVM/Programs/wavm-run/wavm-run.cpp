@@ -91,7 +91,9 @@ struct RootResolver : Resolver
 			stubModule.exports.push_back({"importStub", IR::ObjectKind::function, 0});
 			stubModuleNames.functions.push_back({"importStub: " + exportName, {}, {}});
 			IR::setDisassemblyNames(stubModule, stubModuleNames);
-			IR::validateDefinitions(stubModule);
+			IR::validatePreCodeSections(stubModule);
+			DeferredCodeValidationState deferredCodeValidationState;
+			IR::validatePostCodeSections(stubModule,deferredCodeValidationState);
 
 			// Instantiate the module and return the stub function instance.
 			auto stubModuleInstance
@@ -100,11 +102,13 @@ struct RootResolver : Resolver
 		}
 		case IR::ObjectKind::memory:
 		{
-			return asObject(Runtime::createMemory(compartment, asMemoryType(type)));
+			return asObject(
+				Runtime::createMemory(compartment, asMemoryType(type), std::string(exportName)));
 		}
 		case IR::ObjectKind::table:
 		{
-			return asObject(Runtime::createTable(compartment, asTableType(type)));
+			return asObject(
+				Runtime::createTable(compartment, asTableType(type), std::string(exportName)));
 		}
 		case IR::ObjectKind::global:
 		{
