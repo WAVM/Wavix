@@ -407,7 +407,7 @@ void LinkerDriver::link(ArrayRef<const char *> ArgsArr) {
   Config->GlobalBase = args::getInteger(Args, OPT_global_base, 1024);
   Config->MaxMemory = args::getInteger(Args, OPT_max_memory, 0);
   Config->ZStackSize =
-      args::getZOptionValue(Args, OPT_z, "stack-size", WasmPageSize);
+      args::getZOptionValue(Args, OPT_z, "stack-size", WasmPageSize*16);
 
   if (!Config->StripDebug && !Config->StripAll && Config->CompressRelocTargets)
     error("--compress-relocations is incompatible with output debug"
