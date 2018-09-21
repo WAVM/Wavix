@@ -11,7 +11,9 @@ install(TARGETS wavix DESTINATION bin)
 # This adds the WAVM RPATH to the installed binary.
 set_target_properties(wavix PROPERTIES INSTALL_RPATH_USE_LINK_PATH true)
 
-if(NOT MSVC)
+if(MSVC)
+	target_compile_options(wavix PRIVATE "/wd4146") # unary minus operator applied to unsigned type, result still unsigned
+else()
 	# Disable zero-length printf format string warning.
 	target_compile_options(wavix PRIVATE "-Wno-format-zero-length")
 endif()
