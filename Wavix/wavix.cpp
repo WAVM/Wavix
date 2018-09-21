@@ -53,13 +53,13 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_membarrier", I32, __syscall_membarri
 	return 0;
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "setjmp", I32, wavix_setjmp, I32 bufferAddress)
+DEFINE_INTRINSIC_FUNCTION(wavix, "setjmp", I32, wavix_setjmp, U32 bufferAddress)
 {
 	traceSyscallf("setjmp", "(0x%08x)", bufferAddress);
 	return 0;
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "longjmp", void, wavix_longjmp, I32 bufferAddress, I32 value)
+DEFINE_INTRINSIC_FUNCTION(wavix, "longjmp", void, wavix_longjmp, U32 bufferAddress, I32 value)
 {
 	traceSyscallf("longjmp", "(0x%08x, %i)", bufferAddress, value);
 	throwException(Exception::calledUnimplementedIntrinsicType);
@@ -82,18 +82,18 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 // Command-line arguments
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__wavix_get_num_args", I32, __wavix_get_num_args)
+DEFINE_INTRINSIC_FUNCTION(wavix, "__wavix_get_num_args", U32, __wavix_get_num_args)
 {
 	return coerce32bitAddress(currentProcess->args.size());
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__wavix_get_arg_length",
-						  I32,
+						  U32,
 						  __wavix_get_arg_length,
-						  I32 argIndex)
+						  U32 argIndex)
 {
-	if(U32(argIndex) < currentProcess->args.size())
+	if(argIndex < currentProcess->args.size())
 	{
 		const Uptr safeArgIndex
 			= Platform::saturateToBounds((Uptr)argIndex, currentProcess->args.size());
@@ -109,12 +109,12 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__wavix_get_arg",
 						  void,
 						  __wavix_get_arg,
-						  I32 argIndex,
-						  I32 bufferAddress,
-						  I32 numCharsInBuffer)
+						  U32 argIndex,
+						  U32 bufferAddress,
+						  U32 numCharsInBuffer)
 {
 	MemoryInstance* memory = currentThread->process->memory;
-	if(U32(argIndex) < currentProcess->args.size())
+	if(argIndex < currentProcess->args.size())
 	{
 		const Uptr safeArgIndex
 			= Platform::saturateToBounds((Uptr)argIndex, currentProcess->args.size());
@@ -202,7 +202,7 @@ struct wavix_utsname
 #define SCOPED_DISABLE_SECURE_CRT_WARNINGS(code) code
 #endif
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_uname", I32, __syscall_uname, I32 resultAddress)
+DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_uname", I32, __syscall_uname, U32 resultAddress)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 	traceSyscallf("uname", "(0x%08x)", resultAddress);
@@ -254,8 +254,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_clock_gettime",
 						  I32,
 						  __syscall_clock_gettime,
-						  I32 clockId,
-						  I32 resultAddress)
+						  U32 clockId,
+						  U32 resultAddress)
 {
 	traceSyscallf("clock_gettime", "(%u,0x%08x)", clockId, resultAddress);
 

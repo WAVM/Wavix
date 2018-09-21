@@ -352,7 +352,10 @@ DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 	{
 		Lock<Platform::Mutex> processesLock(processesMutex);
 		newProcess->id = processes.add(-1, newProcess);
-		if(newProcess->id == -1) { return nullptr; }
+		if(newProcess->id == -1)
+		{
+			return Intrinsics::resultInContextRuntimeData<I32>(contextRuntimeData, -ErrNo::eagain);
+		}
 	}
 
 	// Add the process to the PID->process hash table.
@@ -473,7 +476,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_kill", I32, __syscall_kill, I32 a, I
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_getpid", I32, __syscall_getpid, I32 dummy)
 {
 	traceSyscallf("getpid", "");
-	return coerce32bitAddress(currentProcess->id);
+	return currentProcess->id;
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_getppid", I32, __syscall_getppid, I32 dummy)
@@ -540,7 +543,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	if(options & WAVIX_WNOHANG)
 	{
-		memoryRef<I32>(memory, statusAddress) = 0;
+		memoryRef<U32>(memory, statusAddress) = 0;
 		return 0;
 	}
 	else
@@ -566,7 +569,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 			if(waiterIt != child->waiters.end()) { child->waiters.erase(waiterIt); }
 		}
 
-		memoryRef<I32>(memory, statusAddress) = WAVIX_WEXITED;
+		memoryRef<U32>(memory, statusAddress) = WAVIX_WEXITED;
 		return pid == -1 ? 1 : pid;
 	}
 }

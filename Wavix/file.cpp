@@ -135,9 +135,9 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_open",
 						  I32,
 						  __syscall_open,
-						  I32 pathAddress,
-						  I32 flags,
-						  I32 mode)
+						  U32 pathAddress,
+						  U32 flags,
+						  U32 mode)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 	std::string pathString = readUserString(memory, pathAddress);
@@ -160,7 +160,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	// Validate and interpret the access mode.
 	Platform::FileAccessMode platformAccessMode;
-	const I32 accessMode = flags & OpenFlags::accessModeMask;
+	const U32 accessMode = flags & OpenFlags::accessModeMask;
 	switch(accessMode)
 	{
 	case OpenFlags::readOnly: platformAccessMode = Platform::FileAccessMode::readOnly; break;
@@ -218,15 +218,15 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_openat,
 						  I32 dirfd,
-						  I32 pathName,
-						  I32 flags,
-						  I32 mode)
+						  U32 pathAddress,
+						  U32 flags,
+						  U32 mode)
 {
 	traceSyscallf("openat", "");
 	throwException(Exception::calledUnimplementedIntrinsicType);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_creat", I32, __syscall_creat, I32 pathName, I32 mode)
+DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_creat", I32, __syscall_creat, U32 pathAddress, U32 mode)
 {
 	traceSyscallf("creat", "");
 	throwException(Exception::calledUnimplementedIntrinsicType);
@@ -255,10 +255,10 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_llseek,
 						  I32 fd,
-						  I32 offsetHigh,
-						  I32 offsetLow,
-						  I32 resultAddress,
-						  I32 whence)
+						  U32 offsetHigh,
+						  U32 offsetLow,
+						  U32 resultAddress,
+						  U32 whence)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -288,8 +288,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_read,
 						  I32 fd,
-						  I32 bufferAddress,
-						  I32 numBytes)
+						  U32 bufferAddress,
+						  U32 numBytes)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -308,7 +308,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	const bool result = Platform::readFile(platformFile, buffer, numBytes, &numReadBytes);
 	if(!result) { return -1; }
 
-	return coerce32bitAddress(numReadBytes);
+	return coerce32bitAddressSigned(numReadBytes);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
@@ -316,8 +316,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_write,
 						  I32 fd,
-						  I32 bufferAddress,
-						  I32 numBytes)
+						  U32 bufferAddress,
+						  U32 numBytes)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -336,7 +336,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	const bool result = Platform::writeFile(platformFile, buffer, numBytes, &numWrittenBytes);
 	if(!result) { return -ErrNo::einval; }
 
-	return coerce32bitAddress(numWrittenBytes);
+	return coerce32bitAddressSigned(numWrittenBytes);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
@@ -344,8 +344,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_readv,
 						  I32 fd,
-						  I32 iosAddress,
-						  I32 numIos)
+						  U32 iosAddress,
+						  U32 numIos)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -386,7 +386,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 		}
 	}
 
-	return coerce32bitAddress(numReadBytes);
+	return coerce32bitAddressSigned(numReadBytes);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
@@ -394,8 +394,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_writev,
 						  I32 fd,
-						  I32 iosAddress,
-						  I32 numIOs)
+						  U32 iosAddress,
+						  U32 numIOs)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -436,7 +436,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 		}
 	}
 
-	return coerce32bitAddress(numWrittenBytes);
+	return coerce32bitAddressSigned(numWrittenBytes);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_fsync", I32, __syscall_fsync, I32 fd)
@@ -507,8 +507,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_fcntl64,
 						  I32 fd,
-						  I32 cmd,
-						  I32 arg)
+						  U32 cmd,
+						  U32 arg)
 {
 	traceSyscallf("fnctl64", "(%i,%i,%i)", fd, cmd, arg);
 	switch(cmd)
@@ -557,8 +557,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_stat64",
 						  I32,
 						  __syscall_stat64,
-						  I32 pathAddress,
-						  I32 resultAddress)
+						  U32 pathAddress,
+						  U32 resultAddress)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -579,8 +579,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_lstat64",
 						  I32,
 						  __syscall_lstat64,
-						  I32 pathAddress,
-						  I32 resultAddress)
+						  U32 pathAddress,
+						  U32 resultAddress)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -602,7 +602,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_fstat64,
 						  I32 fd,
-						  I32 resultAddress)
+						  U32 resultAddress)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -619,9 +619,9 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_faccessat,
 						  I32 dirfd,
-						  I32 pathAddress,
-						  I32 mode,
-						  I32 flags)
+						  U32 pathAddress,
+						  U32 mode,
+						  U32 flags)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -641,7 +641,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_unlink", I32, __syscall_unlink, I32 
 	throwException(Exception::calledUnimplementedIntrinsicType);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_chdir", I32, __syscall_chdir, I32 pathAddress)
+DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_chdir", I32, __syscall_chdir, U32 pathAddress)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
@@ -680,8 +680,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_readlink",
 						  I32,
 						  __syscall_readlink,
-						  I32 pathAddress,
-						  I32 bufferAddress,
+						  U32 pathAddress,
+						  U32 bufferAddress,
 						  U32 numBufferBytes)
 {
 	MemoryInstance* memory = currentThread->process->memory;
@@ -777,11 +777,11 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32,
 						  __syscall_ioctl,
 						  I32 fd,
-						  I32 request,
-						  I32 arg0,
-						  I32 arg1,
-						  I32 arg2,
-						  I32 arg3)
+						  U32 request,
+						  U32 arg0,
+						  U32 arg1,
+						  U32 arg2,
+						  U32 arg3)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 

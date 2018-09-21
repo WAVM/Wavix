@@ -96,8 +96,15 @@ namespace Wavix {
 		{ Runtime::throwException(Runtime::Exception::integerDivideByZeroOrOverflowType); }
 		return (U32)address;
 	}
+	
+	inline I32 coerce32bitAddressSigned(Uptr address)
+	{
+		if(address >= INT32_MAX)
+		{ Runtime::throwException(Runtime::Exception::integerDivideByZeroOrOverflowType); }
+		return (I32)address;
+	}
 
-	inline std::string readUserString(Runtime::MemoryInstance* memory, I32 stringAddress)
+	inline std::string readUserString(Runtime::MemoryInstance* memory, U32 stringAddress)
 	{
 		// Validate the path name and make a local copy of it.
 		std::string pathString;

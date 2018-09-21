@@ -19,12 +19,12 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_mmap",
 						  I32,
 						  __syscall_mmap,
-						  I32 address,
-						  I32 numBytes,
-						  I32 prot,
-						  I32 flags,
+						  U32 address,
+						  U32 numBytes,
+						  U32 prot,
+						  U32 flags,
 						  I32 fd,
-						  I32 offset)
+						  U32 offset)
 {
 	traceSyscallf("mmap",
 				  "(address=0x%08x, numBytes=%u, prot=0x%x, flags=0x%x, fd=%i, offset=%u)",
@@ -43,15 +43,15 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	Iptr basePageIndex = growMemory(memory, numPages);
 	if(basePageIndex == -1) { return -ErrNo::enomem; }
 
-	return coerce32bitAddress(Uptr(basePageIndex) * IR::numBytesPerPage);
+	return coerce32bitAddressSigned(Uptr(basePageIndex) * IR::numBytesPerPage);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_munmap",
 						  I32,
 						  __syscall_munmap,
-						  I32 address,
-						  I32 numBytes)
+						  U32 address,
+						  U32 numBytes)
 {
 	traceSyscallf("munmap", "(address=0x%08x, numBytes=%u)", address, numBytes);
 
@@ -74,12 +74,12 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_mremap",
-						  U32,
+						  I32,
 						  __syscall_mremap,
 						  U32 oldAddress,
 						  U32 oldNumBytes,
 						  U32 newNumBytes,
-						  I32 flags,
+						  U32 flags,
 						  U32 newAddress)
 {
 	traceSyscallf(
@@ -115,7 +115,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 					 oldAddress / IR::numBytesPerPage,
 					 (oldNumBytes + IR::numBytesPerPage - 1) / IR::numBytesPerPage);
 
-	return newAddress;
+	return coerce32bitAddressSigned(newAddress);
 }
 
 #define WAVIX_MADV_NORMAL 0
@@ -128,9 +128,9 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  "__syscall_madvise",
 						  I32,
 						  __syscall_madvise,
-						  I32 address,
-						  I32 numBytes,
-						  I32 advice)
+						  U32 address,
+						  U32 numBytes,
+						  U32 advice)
 {
 	traceSyscallf("madvise", "(address=0x%08x, numBytes=%u, advise=%u)", address, numBytes, advice);
 
@@ -152,7 +152,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_brk", I32, __syscall_brk, I32 address)
+DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_brk", I32, __syscall_brk, U32 address)
 {
 	MemoryInstance* memory = currentThread->process->memory;
 
