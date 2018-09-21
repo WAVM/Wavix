@@ -395,8 +395,12 @@ void EmitFunctionContext::call_indirect(CallIndirectImm imm)
 		irBuilder.CreateICmpNE(calleeTypeId, elementTypeId),
 		"callIndirectFail",
 		FunctionType(TypeTuple(),
-					 TypeTuple({ValueType::i32, inferValueType<Iptr>(), inferValueType<Iptr>()})),
+					 TypeTuple({ValueType::i32,
+								inferValueType<Uptr>(),
+								inferValueType<Uptr>(),
+								inferValueType<Uptr>()})),
 		{tableElementIndex,
+		 getTableIdFromOffset(llvmContext, moduleContext.tableOffsets[imm.tableIndex]),
 		 irBuilder.CreatePtrToInt(anyfuncPointer, llvmContext.iptrType),
 		 calleeTypeId});
 
