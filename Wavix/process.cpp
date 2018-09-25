@@ -50,7 +50,7 @@ struct RootResolver : Resolver
 
 	bool resolve(const std::string& moduleName,
 				 const std::string& exportName,
-				 ObjectType type,
+				 ExternType type,
 				 Object*& outObject) override
 	{
 		auto namedInstance = moduleNameToInstanceMap.get(moduleName);
