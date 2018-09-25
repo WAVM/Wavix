@@ -39,7 +39,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	if(address != 0 || fd != -1) { throwException(Exception::calledUnimplementedIntrinsicType); }
 
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 	Iptr basePageIndex = growMemory(memory, numPages);
 	if(basePageIndex == -1) { return -ErrNo::enomem; }
 
@@ -55,7 +55,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 {
 	traceSyscallf("munmap", "(address=0x%08x, numBytes=%u)", address, numBytes);
 
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	if(address & (IR::numBytesPerPage - 1) || numBytes == 0) { return -ErrNo::einval; }
 
@@ -91,7 +91,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 		flags,
 		newAddress);
 
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	if(flags & WAVIX_MREMAP_FIXED) { return -ErrNo::enomem; }
 
@@ -134,7 +134,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 {
 	traceSyscallf("madvise", "(address=0x%08x, numBytes=%u, advise=%u)", address, numBytes, advice);
 
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	if((address & (IR::numBytesPerPage - 1))) { return -ErrNo::einval; }
 
@@ -154,7 +154,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_brk", I32, __syscall_brk, U32 address)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("brk", "(address=0x%08x)", address);
 	// throwException(Exception::calledUnimplementedIntrinsicType);

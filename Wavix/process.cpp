@@ -66,8 +66,8 @@ struct RootResolver : Resolver
 struct MainThreadArgs
 {
 	Thread* thread;
-	GCPointer<FunctionInstance> startFunction;
-	GCPointer<FunctionInstance> mainFunction;
+	GCPointer<Function> startFunction;
+	GCPointer<Function> mainFunction;
 };
 
 FORCENOINLINE static void signalProcessWaiters(Process* process)
@@ -396,7 +396,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 argsAddress,
 						  U32 envsAddress)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	std::string pathString = readUserString(memory, pathAddress);
 	std::vector<std::string> args;
@@ -518,7 +518,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 options,
 						  U32 rusageAddress)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("wait4", "(%i,0x%08x,%i,0x%08x)", pid, statusAddress, options, rusageAddress);
 

@@ -113,7 +113,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 bufferAddress,
 						  U32 numCharsInBuffer)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 	if(argIndex < currentProcess->args.size())
 	{
 		const Uptr safeArgIndex
@@ -204,7 +204,7 @@ struct wavix_utsname
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_uname", I32, __syscall_uname, U32 resultAddress)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 	traceSyscallf("uname", "(0x%08x)", resultAddress);
 	wavix_utsname& result = memoryRef<wavix_utsname>(memory, resultAddress);
 	SCOPED_DISABLE_SECURE_CRT_WARNINGS(strcpy(result.sysName, "Wavix"));
@@ -259,7 +259,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 {
 	traceSyscallf("clock_gettime", "(%u,0x%08x)", clockId, resultAddress);
 
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 	wavix_timespec& result = memoryRef<wavix_timespec>(memory, resultAddress);
 
 	static std::atomic<U64> hackedClock;

@@ -104,7 +104,7 @@ namespace Wavix {
 		return (I32)address;
 	}
 
-	inline std::string readUserString(Runtime::MemoryInstance* memory, U32 stringAddress)
+	inline std::string readUserString(Runtime::Memory* memory, U32 stringAddress)
 	{
 		// Validate the path name and make a local copy of it.
 		std::string pathString;

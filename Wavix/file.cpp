@@ -139,7 +139,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 flags,
 						  U32 mode)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 	std::string pathString = readUserString(memory, pathAddress);
 
 	traceSyscallf("open", "(%08x=>\"%s\", 0x%x, %u)", pathAddress, pathString.c_str(), flags, mode);
@@ -260,7 +260,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 resultAddress,
 						  U32 whence)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("llseek", "");
 
@@ -291,7 +291,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 bufferAddress,
 						  U32 numBytes)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("read", "(%i,0x%08x,%u)", fd, bufferAddress, numBytes);
 
@@ -319,7 +319,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 bufferAddress,
 						  U32 numBytes)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("write", "(%i,0x%08x,%u)", fd, bufferAddress, numBytes);
 
@@ -347,7 +347,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 iosAddress,
 						  U32 numIos)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("readv", "");
 
@@ -397,7 +397,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 iosAddress,
 						  U32 numIOs)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("writev", "(%i, 0x%x, %u)", fd, iosAddress, numIOs);
 
@@ -560,7 +560,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 pathAddress,
 						  U32 resultAddress)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	std::string pathString = readUserString(memory, pathAddress);
 
@@ -582,7 +582,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 pathAddress,
 						  U32 resultAddress)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	std::string pathString = readUserString(memory, pathAddress);
 	Path path;
@@ -604,7 +604,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32 fd,
 						  U32 resultAddress)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("fstat64", "(%i,0x%08x)", fd, resultAddress);
 
@@ -623,7 +623,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 mode,
 						  U32 flags)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	std::string pathString = readUserString(memory, pathAddress);
 	Path path;
@@ -643,7 +643,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_unlink", I32, __syscall_unlink, I32 
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_chdir", I32, __syscall_chdir, U32 pathAddress)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	std::string pathString = readUserString(memory, pathAddress);
 
@@ -684,7 +684,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 bufferAddress,
 						  U32 numBufferBytes)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	std::string pathString = readUserString(memory, pathAddress);
 
@@ -783,7 +783,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 arg2,
 						  U32 arg3)
 {
-	MemoryInstance* memory = currentThread->process->memory;
+	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("ioctl", "(%i,%i)", fd, request);
 	switch(request)
