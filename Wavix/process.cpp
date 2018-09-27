@@ -325,10 +325,8 @@ DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 	// as the original process's memory and table objects in the cloned compartment.
 	wavmAssert(originalProcess->memory);
 	wavmAssert(originalProcess->table);
-	newProcess->memory = getCompartmentMemoryById(newProcess->compartment,
-												  getCompartmentMemoryId(originalProcess->memory));
-	newProcess->table = getCompartmentTableById(newProcess->compartment,
-												getCompartmentTableId(originalProcess->table));
+	newProcess->memory = remapToClonedCompartment(originalProcess->memory, newProcess->compartment);
+	newProcess->table = remapToClonedCompartment(originalProcess->table, newProcess->compartment);
 	wavmAssert(newProcess->memory);
 	wavmAssert(newProcess->table);
 
