@@ -16,119 +16,138 @@
 #include "sanitizer_common/sanitizer_common.h"
 #include "sanitizer_common/sanitizer_libc.h"
 #include "sanitizer_common/sanitizer_posix.h"
+#include "xray_allocator.h"
+#include "xray_defs.h"
 #include <memory>
 #include <sys/mman.h>
 
 using namespace __xray;
 using namespace __sanitizer;
 
-template <class T> static T *allocRaw(size_t N) {
-  // TODO: Report errors?
-  void *A = reinterpret_cast<void *>(
-      internal_mmap(NULL, N * sizeof(T), PROT_WRITE | PROT_READ,
-                    MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
-  return (A == MAP_FAILED) ? nullptr : reinterpret_cast<T *>(A);
-}
+BufferQueue::ErrorCode BufferQueue::init(size_t BS, size_t BC) {
+  SpinMutexLock Guard(&Mutex);
 
-template <class T> static void deallocRaw(T *ptr, size_t N) {
-  // TODO: Report errors?
-  if (ptr != nullptr)
-    internal_munmap(ptr, N);
-}
+  if (!finalizing())
+    return BufferQueue::ErrorCode::AlreadyInitialized;
 
-template <class T> static T *initArray(size_t N) {
-  auto A = allocRaw<T>(N);
-  if (A != nullptr)
-    while (N > 0)
-      new (A + (--N)) T();
-  return A;
-}
+  bool Success = false;
+  BufferSize = BS;
+  BufferCount = BC;
+  BackingStore = allocateBuffer(BufferSize * BufferCount);
+  if (BackingStore == nullptr)
+    return BufferQueue::ErrorCode::NotEnoughMemory;
 
-BufferQueue::BufferQueue(size_t B, size_t N, bool &Success)
-    : BufferSize(B), Buffers(initArray<BufferQueue::BufferRep>(N)),
-      BufferCount(N), Finalizing{0}, OwnedBuffers(initArray<void *>(N)),
-      Next(Buffers), First(Buffers), LiveBuffers(0) {
-  if (Buffers == nullptr) {
-    Success = false;
-    return;
-  }
-  if (OwnedBuffers == nullptr) {
-    // Clean up the buffers we've already allocated.
-    for (auto B = Buffers, E = Buffers + BufferCount; B != E; ++B)
-      B->~BufferRep();
-    deallocRaw(Buffers, N);
-    Success = false;
-    return;
-  };
-
-  for (size_t i = 0; i < N; ++i) {
-    auto &T = Buffers[i];
-    void *Tmp = allocRaw<char>(BufferSize);
-    if (Tmp == nullptr) {
-      Success = false;
+  auto CleanupBackingStore = __sanitizer::at_scope_exit([&, this] {
+    if (Success)
       return;
-    }
-    auto *Extents = allocRaw<BufferExtents>(1);
-    if (Extents == nullptr) {
-      Success = false;
-      return;
-    }
-    auto &Buf = T.Buff;
-    Buf.Data = Tmp;
-    Buf.Size = B;
-    Buf.Extents = Extents;
-    OwnedBuffers[i] = Tmp;
-  }
+    deallocateBuffer(BackingStore, BufferSize * BufferCount);
+  });
+
+  Buffers = initArray<BufferRep>(BufferCount);
+  if (Buffers == nullptr)
+    return BufferQueue::ErrorCode::NotEnoughMemory;
+
+  // At this point we increment the generation number to associate the buffers
+  // to the new generation.
+  atomic_fetch_add(&Generation, 1, memory_order_acq_rel);
+
   Success = true;
+  for (size_t i = 0; i < BufferCount; ++i) {
+    auto &T = Buffers[i];
+    auto &Buf = T.Buff;
+    atomic_store(&Buf.Extents, 0, memory_order_release);
+    Buf.Generation = generation();
+    Buf.Data = reinterpret_cast<char *>(BackingStore) + (BufferSize * i);
+    Buf.Size = BufferSize;
+    T.Used = false;
+  }
+
+  Next = Buffers;
+  First = Buffers;
+  LiveBuffers = 0;
+  atomic_store(&Finalizing, 0, memory_order_release);
+  return BufferQueue::ErrorCode::Ok;
+}
+
+BufferQueue::BufferQueue(size_t B, size_t N,
+                         bool &Success) XRAY_NEVER_INSTRUMENT
+    : BufferSize(B),
+      BufferCount(N),
+      Mutex(),
+      Finalizing{1},
+      BackingStore(nullptr),
+      Buffers(nullptr),
+      Next(Buffers),
+      First(Buffers),
+      LiveBuffers(0),
+      Generation{0} {
+  Success = init(B, N) == BufferQueue::ErrorCode::Ok;
 }
 
 BufferQueue::ErrorCode BufferQueue::getBuffer(Buffer &Buf) {
   if (atomic_load(&Finalizing, memory_order_acquire))
     return ErrorCode::QueueFinalizing;
-  SpinMutexLock Guard(&Mutex);
-  if (LiveBuffers == BufferCount)
-    return ErrorCode::NotEnoughMemory;
 
-  auto &T = *Next;
-  auto &B = T.Buff;
-  Buf = B;
-  T.Used = true;
-  ++LiveBuffers;
+  BufferRep *B = nullptr;
+  {
+    SpinMutexLock Guard(&Mutex);
+    if (LiveBuffers == BufferCount)
+      return ErrorCode::NotEnoughMemory;
+    B = Next++;
+    if (Next == (Buffers + BufferCount))
+      Next = Buffers;
+    ++LiveBuffers;
+  }
 
-  if (++Next == (Buffers + BufferCount))
-    Next = Buffers;
-
+  Buf.Data = B->Buff.Data;
+  Buf.Generation = generation();
+  Buf.Size = B->Buff.Size;
+  B->Used = true;
   return ErrorCode::Ok;
 }
 
 BufferQueue::ErrorCode BufferQueue::releaseBuffer(Buffer &Buf) {
-  // Blitz through the buffers array to find the buffer.
-  bool Found = false;
-  for (auto I = OwnedBuffers, E = OwnedBuffers + BufferCount; I != E; ++I) {
-    if (*I == Buf.Data) {
-      Found = true;
-      break;
+  // Check whether the buffer being referred to is within the bounds of the
+  // backing store's range.
+  BufferRep *B = nullptr;
+  {
+    SpinMutexLock Guard(&Mutex);
+    if (Buf.Data < BackingStore ||
+        Buf.Data > reinterpret_cast<char *>(BackingStore) +
+                       (BufferCount * BufferSize)) {
+      if (Buf.Generation != generation()) {
+        Buf.Data = nullptr;
+        Buf.Size = 0;
+        Buf.Generation = 0;
+        return BufferQueue::ErrorCode::Ok;
+      }
+      return BufferQueue::ErrorCode::UnrecognizedBuffer;
     }
+
+    if (LiveBuffers == 0) {
+      Buf.Data = nullptr;
+      Buf.Size = Buf.Size;
+      Buf.Generation = 0;
+      return ErrorCode::Ok;
+    }
+
+    --LiveBuffers;
+    B = First++;
+    if (First == (Buffers + BufferCount))
+      First = Buffers;
   }
-  if (!Found)
-    return ErrorCode::UnrecognizedBuffer;
-
-  SpinMutexLock Guard(&Mutex);
-
-  // This points to a semantic bug, we really ought to not be releasing more
-  // buffers than we actually get.
-  if (LiveBuffers == 0)
-    return ErrorCode::NotEnoughMemory;
 
   // Now that the buffer has been released, we mark it as "used".
-  First->Buff = Buf;
-  First->Used = true;
+  B->Buff.Data = Buf.Data;
+  B->Buff.Size = Buf.Size;
+  B->Buff.Generation = Buf.Generation;
+  B->Used = true;
+  atomic_store(&B->Buff.Extents,
+               atomic_load(&Buf.Extents, memory_order_acquire),
+               memory_order_release);
   Buf.Data = nullptr;
   Buf.Size = 0;
-  --LiveBuffers;
-  if (++First == (Buffers + BufferCount))
-    First = Buffers;
-
+  Buf.Generation = 0;
   return ErrorCode::Ok;
 }
 
@@ -139,14 +158,8 @@ BufferQueue::ErrorCode BufferQueue::finalize() {
 }
 
 BufferQueue::~BufferQueue() {
-  for (auto I = Buffers, E = Buffers + BufferCount; I != E; ++I) {
-    auto &T = *I;
-    auto &Buf = T.Buff;
-    deallocRaw(Buf.Data, Buf.Size);
-    deallocRaw(Buf.Extents, 1);
-  }
   for (auto B = Buffers, E = Buffers + BufferCount; B != E; ++B)
     B->~BufferRep();
-  deallocRaw(Buffers, BufferCount);
-  deallocRaw(OwnedBuffers, BufferCount);
+  deallocateBuffer(Buffers, BufferCount);
+  deallocateBuffer(BackingStore, BufferSize * BufferCount);
 }

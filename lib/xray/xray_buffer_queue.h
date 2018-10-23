@@ -18,7 +18,9 @@
 #include "sanitizer_common/sanitizer_atomic.h"
 #include "sanitizer_common/sanitizer_common.h"
 #include "sanitizer_common/sanitizer_mutex.h"
+#include "xray_defs.h"
 #include <cstddef>
+#include <cstdint>
 
 namespace __xray {
 
@@ -29,14 +31,11 @@ namespace __xray {
 /// trace collection.
 class BufferQueue {
 public:
-  struct alignas(64) BufferExtents {
-    atomic_uint64_t Size;
-  };
-
   struct Buffer {
+    atomic_uint64_t Extents{0};
+    uint64_t Generation{0};
     void *Data = nullptr;
     size_t Size = 0;
-    BufferExtents *Extents;
   };
 
   struct BufferRep {
@@ -76,8 +75,10 @@ private:
 
     T *operator->() const { return &(Buffers[Offset].Buff); }
 
-    Iterator(BufferRep *Root, size_t O, size_t M)
-        : Buffers(Root), Offset(O), Max(M) {
+    Iterator(BufferRep *Root, size_t O, size_t M) XRAY_NEVER_INSTRUMENT
+        : Buffers(Root),
+          Offset(O),
+          Max(M) {
       // We want to advance to the first Offset where the 'Used' property is
       // true, or to the end of the list/queue.
       while (!Buffers[Offset].Used && Offset != Max) {
@@ -107,16 +108,18 @@ private:
   // Size of each individual Buffer.
   size_t BufferSize;
 
-  BufferRep *Buffers;
-
   // Amount of pre-allocated buffers.
   size_t BufferCount;
 
   SpinMutex Mutex;
   atomic_uint8_t Finalizing;
 
-  // Pointers to buffers managed/owned by the BufferQueue.
-  void **OwnedBuffers;
+  // A pointer to a contiguous block of memory to serve as the backing store for
+  // all the individual buffers handed out.
+  uint8_t *BackingStore;
+
+  // A dynamically allocated array of BufferRep instances.
+  BufferRep *Buffers;
 
   // Pointer to the next buffer to be handed out.
   BufferRep *Next;
@@ -128,6 +131,10 @@ private:
   // Count of buffers that have been handed out through 'getBuffer'.
   size_t LiveBuffers;
 
+  // We use a generation number to identify buffers and which generation they're
+  // associated with.
+  atomic_uint64_t Generation;
+
 public:
   enum class ErrorCode : unsigned {
     Ok,
@@ -135,6 +142,7 @@ public:
     QueueFinalizing,
     UnrecognizedBuffer,
     AlreadyFinalized,
+    AlreadyInitialized,
   };
 
   static const char *getErrorString(ErrorCode E) {
@@ -149,6 +157,8 @@ public:
       return "buffer being returned not owned by buffer queue";
     case ErrorCode::AlreadyFinalized:
       return "queue already finalized";
+    case ErrorCode::AlreadyInitialized:
+      return "queue already initialized";
     }
     return "unknown error";
   }
@@ -179,8 +189,21 @@ public:
   ///     the buffer being released.
   ErrorCode releaseBuffer(Buffer &Buf);
 
+  /// Initializes the buffer queue, starting a new generation. We can re-set the
+  /// size of buffers with |BS| along with the buffer count with |BC|.
+  ///
+  /// Returns:
+  ///   - ErrorCode::Ok when we successfully initialize the buffer. This
+  ///   requires that the buffer queue is previously finalized.
+  ///   - ErrorCode::AlreadyInitialized when the buffer queue is not finalized.
+  ErrorCode init(size_t BS, size_t BC);
+
   bool finalizing() const {
     return atomic_load(&Finalizing, memory_order_acquire);
+  }
+
+  uint64_t generation() const {
+    return atomic_load(&Generation, memory_order_acquire);
   }
 
   /// Returns the configured size of the buffers in the buffer queue.
@@ -198,7 +221,7 @@ public:
   /// Applies the provided function F to each Buffer in the queue, only if the
   /// Buffer is marked 'used' (i.e. has been the result of getBuffer(...) and a
   /// releaseBuffer(...) operation).
-  template <class F> void apply(F Fn) {
+  template <class F> void apply(F Fn) XRAY_NEVER_INSTRUMENT {
     SpinMutexLock G(&Mutex);
     for (auto I = begin(), E = end(); I != E; ++I)
       Fn(*I);

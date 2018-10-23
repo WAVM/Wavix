@@ -133,21 +133,20 @@ XRayLogFlushStatus profilingFlush() XRAY_NEVER_INSTRUMENT {
       if (Verbosity())
         Report("profiling: No data to flush.\n");
     } else {
-      int Fd = getLogFD();
-      if (Fd == -1) {
+      LogWriter* LW = LogWriter::Open();
+      if (LW == nullptr) {
         if (Verbosity())
           Report("profiling: Failed to flush to file, dropping data.\n");
       } else {
         // Now for each of the buffers, write out the profile data as we would
         // see it in memory, verbatim.
         while (B.Data != nullptr && B.Size != 0) {
-          retryingWriteAll(Fd, reinterpret_cast<const char *>(B.Data),
-                           reinterpret_cast<const char *>(B.Data) + B.Size);
+          LW->WriteAll(reinterpret_cast<const char *>(B.Data),
+                       reinterpret_cast<const char *>(B.Data) + B.Size);
           B = profileCollectorService::nextBuffer(B);
         }
-        // Then we close out the file.
-        internal_close(Fd);
       }
+      LogWriter::Close(LW);
     }
   }
 
@@ -242,15 +241,8 @@ XRayLogInitStatus profilingFinalize() XRAY_NEVER_INSTRUMENT {
 }
 
 XRayLogInitStatus
-profilingLoggingInit(size_t BufferSize, size_t BufferMax, void *Options,
-                     size_t OptionsSize) XRAY_NEVER_INSTRUMENT {
-  if (BufferSize != 0 || BufferMax != 0) {
-    if (Verbosity())
-      Report("__xray_log_init() being used, and is unsupported. Use "
-             "__xray_log_init_mode(...) instead. Bailing out.");
-    return XRayLogInitStatus::XRAY_LOG_UNINITIALIZED;
-  }
-
+profilingLoggingInit(UNUSED size_t BufferSize, UNUSED size_t BufferMax,
+                     void *Options, size_t OptionsSize) XRAY_NEVER_INSTRUMENT {
   s32 CurrentStatus = XRayLogInitStatus::XRAY_LOG_UNINITIALIZED;
   if (!atomic_compare_exchange_strong(&ProfilerLogStatus, &CurrentStatus,
                                       XRayLogInitStatus::XRAY_LOG_INITIALIZING,

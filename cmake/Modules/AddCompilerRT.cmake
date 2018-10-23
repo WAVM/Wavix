@@ -77,7 +77,7 @@ function(add_compiler_rt_object_libraries name)
     endif()
 
     set_target_compile_flags(${libname}
-      ${CMAKE_CXX_FLAGS} ${extra_cflags_${libname}} ${target_flags})
+      ${extra_cflags_${libname}} ${target_flags})
     set_property(TARGET ${libname} APPEND PROPERTY
       COMPILE_DEFINITIONS ${LIB_DEFS})
     set_target_properties(${libname} PROPERTIES FOLDER "Compiler-RT Libraries")
@@ -355,6 +355,16 @@ set(COMPILER_RT_GTEST_CFLAGS
   -DGTEST_HAS_RTTI=0
   -I${COMPILER_RT_GTEST_PATH}/include
   -I${COMPILER_RT_GTEST_PATH}
+)
+
+# Mocking support.
+set(COMPILER_RT_GMOCK_PATH ${LLVM_MAIN_SRC_DIR}/utils/unittest/googlemock)
+set(COMPILER_RT_GMOCK_SOURCE ${COMPILER_RT_GMOCK_PATH}/src/gmock-all.cc)
+set(COMPILER_RT_GMOCK_CFLAGS
+  -DGTEST_NO_LLVM_RAW_OSTREAM=1
+  -DGTEST_HAS_RTTI=0
+  -I${COMPILER_RT_GMOCK_PATH}/include
+  -I${COMPILER_RT_GMOCK_PATH}
 )
 
 append_list_if(COMPILER_RT_DEBUG -DSANITIZER_DEBUG=1 COMPILER_RT_UNITTEST_CFLAGS)
