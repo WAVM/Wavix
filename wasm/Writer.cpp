@@ -979,7 +979,7 @@ void Writer::createCtorFunction() {
     OS << BodyContent;
   }
 
-  ArrayRef<uint8_t> Body = toArrayRef(Saver.save(FunctionBody));
+  ArrayRef<uint8_t> Body = arrayRefFromStringRef(Saver.save(FunctionBody));
   cast<SyntheticFunction>(WasmSym::CallCtors->Function)->setBody(Body);
 }
 
@@ -991,7 +991,7 @@ void Writer::calculateInitFunctions() {
     const WasmLinkingData &L = File->getWasmObj()->linkingData();
     for (const WasmInitFunc &F : L.InitFunctions) {
       FunctionSymbol *Sym = File->getFunctionSymbol(F.Symbol);
-      if (*Sym->FunctionType != WasmSignature{{}, WASM_TYPE_NORESULT})
+      if (*Sym->FunctionType != WasmSignature{{}, {}})
         error("invalid signature for init func: " + toString(*Sym));
       InitFunctions.emplace_back(WasmInitEntry{Sym, F.Priority});
     }

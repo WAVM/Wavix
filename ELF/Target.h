@@ -69,8 +69,10 @@ public:
   // The function with a prologue starting at Loc was compiled with
   // -fsplit-stack and it calls a function compiled without. Adjust the prologue
   // to do the right thing. See https://gcc.gnu.org/wiki/SplitStacks.
-  virtual bool adjustPrologueForCrossSplitStack(uint8_t *Loc,
-                                                uint8_t *End) const;
+  // The symbols st_other flags are needed on PowerPC64 for determining the
+  // offset to the split-stack prologue.
+  virtual bool adjustPrologueForCrossSplitStack(uint8_t *Loc, uint8_t *End,
+                                                uint8_t StOther) const;
 
   // Return true if we can reach Dst from Src with Relocation RelocType
   virtual bool inBranchRange(RelType Type, uint64_t Src,
@@ -95,6 +97,7 @@ public:
 
   RelType CopyRel;
   RelType GotRel;
+  RelType NoneRel;
   RelType PltRel;
   RelType RelativeRel;
   RelType IRelativeRel;
@@ -128,6 +131,11 @@ public:
   // A 4-byte field corresponding to one or more trap instructions, used to pad
   // executable OutputSections.
   uint32_t TrapInstr = 0;
+
+  // If a target needs to rewrite calls to __morestack to instead call
+  // __morestack_non_split when a split-stack enabled caller calls a
+  // non-split-stack callee this will return true. Otherwise returns false.
+  bool NeedsMoreStackNonSplit = true;
 
   virtual RelExpr adjustRelaxExpr(RelType Type, const uint8_t *Data,
                                   RelExpr Expr) const;
@@ -170,6 +178,15 @@ ErrorPlace getErrorPlace(const uint8_t *Loc);
 static inline std::string getErrorLocation(const uint8_t *Loc) {
   return getErrorPlace(Loc).Loc;
 }
+
+// In the PowerPC64 Elf V2 abi a function can have 2 entry points.  The first is
+// a global entry point (GEP) which typically is used to intiailzie the TOC
+// pointer in general purpose register 2.  The second is a local entry
+// point (LEP) which bypasses the TOC pointer initialization code. The
+// offset between GEP and LEP is encoded in a function's st_other flags.
+// This function will return the offset (in bytes) from the global entry-point
+// to the local entry-point.
+unsigned getPPC64GlobalEntryToLocalEntryOffset(uint8_t StOther);
 
 uint64_t getPPC64TocBase();
 uint64_t getAArch64Page(uint64_t Expr);

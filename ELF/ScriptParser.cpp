@@ -94,6 +94,7 @@ private:
   SortSectionPolicy readSortKind();
   SymbolAssignment *readProvideHidden(bool Provide, bool Hidden);
   SymbolAssignment *readAssignment(StringRef Tok);
+  std::pair<ELFKind, uint16_t> readBfdName();
   void readSort();
   Expr readAssert();
   Expr readConstant();
@@ -382,10 +383,36 @@ void ScriptParser::readOutputArch() {
     skip();
 }
 
+std::pair<ELFKind, uint16_t> ScriptParser::readBfdName() {
+  StringRef S = next();
+  if (S == "elf32-i386")
+    return {ELF32LEKind, EM_386};
+  if (S == "elf32-iamcu")
+    return {ELF32LEKind, EM_IAMCU};
+  if (S == "elf32-littlearm")
+    return {ELF32LEKind, EM_ARM};
+  if (S == "elf32-x86-64")
+    return {ELF32LEKind, EM_X86_64};
+  if (S == "elf64-littleaarch64")
+    return {ELF64LEKind, EM_AARCH64};
+  if (S == "elf64-x86-64")
+    return {ELF64LEKind, EM_X86_64};
+
+  setError("unknown output format name: " + S);
+  return {ELFNoneKind, EM_NONE};
+}
+
+// Parse OUTPUT_FORMAT(bfdname) or OUTPUT_FORMAT(bfdname, big, little).
+// Currently we ignore big and little parameters.
 void ScriptParser::readOutputFormat() {
-  // Error checking only for now.
   expect("(");
-  skip();
+
+  std::pair<ELFKind, uint16_t> P = readBfdName();
+  if (Config->EKind == ELFNoneKind) {
+    Config->EKind = P.first;
+    Config->EMachine = P.second;
+  }
+
   if (consume(")"))
     return;
   expect(",");
@@ -500,6 +527,9 @@ void ScriptParser::readSections() {
     if (Tok == "OVERLAY") {
       for (BaseCommand *Cmd : readOverlay())
         V.push_back(Cmd);
+      continue;
+    } else if (Tok == "INCLUDE") {
+      readInclude();
       continue;
     }
 
@@ -803,6 +833,8 @@ OutputSection *ScriptParser::readOutputSectionDescription(StringRef OutSec) {
       Cmd->Filler = readFill();
     } else if (Tok == "SORT") {
       readSort();
+    } else if (Tok == "INCLUDE") {
+      readInclude();
     } else if (peek() == "(") {
       Cmd->SectionCommands.push_back(readInputSectionDescription(Tok));
     } else {
@@ -1429,7 +1461,11 @@ uint64_t ScriptParser::readMemoryAssignment(StringRef S1, StringRef S2,
 void ScriptParser::readMemory() {
   expect("{");
   while (!errorCount() && !consume("}")) {
-    StringRef Name = next();
+    StringRef Tok = next();
+    if (Tok == "INCLUDE") {
+      readInclude();
+      continue;
+    }
 
     uint32_t Flags = 0;
     uint32_t NegFlags = 0;
@@ -1444,10 +1480,9 @@ void ScriptParser::readMemory() {
     uint64_t Length = readMemoryAssignment("LENGTH", "len", "l");
 
     // Add the memory region to the region map.
-    MemoryRegion *MR =
-        make<MemoryRegion>(Name, Origin, Length, Flags, NegFlags);
-    if (!Script->MemoryRegions.insert({Name, MR}).second)
-      setError("region '" + Name + "' already defined");
+    MemoryRegion *MR = make<MemoryRegion>(Tok, Origin, Length, Flags, NegFlags);
+    if (!Script->MemoryRegions.insert({Tok, MR}).second)
+      setError("region '" + Tok + "' already defined");
   }
 }
 

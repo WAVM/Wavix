@@ -98,7 +98,7 @@ public:
   }
 
   /// Emit the basic PDB structure: initial streams, headers, etc.
-  void initialize(const llvm::codeview::DebugInfo &BuildId);
+  void initialize(llvm::codeview::DebugInfo *BuildId);
 
   /// Add natvis files specified on the command line.
   void addNatvisFiles();
@@ -130,8 +130,8 @@ public:
   void addSections(ArrayRef<OutputSection *> OutputSections,
                    ArrayRef<uint8_t> SectionTable);
 
-  /// Write the PDB to disk.
-  void commit();
+  /// Write the PDB to disk and store the Guid generated for it in *Guid.
+  void commit(codeview::GUID *Guid);
 
 private:
   BumpPtrAllocator Alloc;
@@ -216,6 +216,39 @@ public:
   void handleDebugS(lld::coff::SectionChunk &DebugS);
   void finish();
 };
+}
+
+// Visual Studio's debugger requires absolute paths in various places in the
+// PDB to work without additional configuration:
+// https://docs.microsoft.com/en-us/visualstudio/debugger/debug-source-files-common-properties-solution-property-pages-dialog-box
+static void pdbMakeAbsolute(SmallVectorImpl<char> &FileName) {
+  // The default behavior is to produce paths that are valid within the context
+  // of the machine that you perform the link on.  If the linker is running on
+  // a POSIX system, we will output absolute POSIX paths.  If the linker is
+  // running on a Windows system, we will output absolute Windows paths.  If the
+  // user desires any other kind of behavior, they should explicitly pass
+  // /pdbsourcepath, in which case we will treat the exact string the user
+  // passed in as the gospel and not normalize, canonicalize it.
+  if (sys::path::is_absolute(FileName, sys::path::Style::windows) ||
+      sys::path::is_absolute(FileName, sys::path::Style::posix))
+    return;
+
+  // It's not absolute in any path syntax.  Relative paths necessarily refer to
+  // the local file system, so we can make it native without ending up with a
+  // nonsensical path.
+  sys::path::native(FileName);
+  if (Config->PDBSourcePath.empty()) {
+    sys::fs::make_absolute(FileName);
+    return;
+  }
+  // Only apply native and dot removal to the relative file path.  We want to
+  // leave the path the user specified untouched since we assume they specified
+  // it for a reason.
+  sys::path::remove_dots(FileName, /*remove_dot_dots=*/true);
+
+  SmallString<128> AbsoluteFileName = Config->PDBSourcePath;
+  sys::path::append(AbsoluteFileName, FileName);
+  FileName = std::move(AbsoluteFileName);
 }
 
 static SectionChunk *findByName(ArrayRef<SectionChunk *> Sections,
@@ -351,6 +384,12 @@ Expected<const CVIndexMap&> PDBLinker::mergeDebugT(ObjFile *File,
 
 static Expected<std::unique_ptr<pdb::NativeSession>>
 tryToLoadPDB(const GUID &GuidFromObj, StringRef TSPath) {
+  // Ensure the file exists before anything else. We want to return ENOENT,
+  // "file not found", even if the path points to a removable device (in which
+  // case the return message would be EAGAIN, "resource unavailable try again")
+  if (!llvm::sys::fs::exists(TSPath))
+    return errorCodeToError(std::error_code(ENOENT, std::generic_category()));
+
   ErrorOr<std::unique_ptr<MemoryBuffer>> MBOrErr = MemoryBuffer::getFile(
       TSPath, /*FileSize=*/-1, /*RequiresNullTerminator=*/false);
   if (!MBOrErr)
@@ -380,8 +419,8 @@ tryToLoadPDB(const GUID &GuidFromObj, StringRef TSPath) {
   return std::move(NS);
 }
 
-Expected<const CVIndexMap&> PDBLinker::maybeMergeTypeServerPDB(ObjFile *File,
-                                                               TypeServer2Record &TS) {
+Expected<const CVIndexMap &>
+PDBLinker::maybeMergeTypeServerPDB(ObjFile *File, TypeServer2Record &TS) {
   const GUID &TSId = TS.getGuid();
   StringRef TSPath = TS.getName();
 
@@ -411,6 +450,8 @@ Expected<const CVIndexMap&> PDBLinker::maybeMergeTypeServerPDB(ObjFile *File,
         StringRef LocalPath =
             !File->ParentName.empty() ? File->ParentName : File->getName();
         SmallString<128> Path = sys::path::parent_path(LocalPath);
+        // Currently, type server PDBs are only created by cl, which only runs
+        // on Windows, so we can assume type server paths are Windows style.
         sys::path::append(
             Path, sys::path::filename(TSPath, sys::path::Style::windows));
         return tryToLoadPDB(TSId, Path);
@@ -839,6 +880,7 @@ static ArrayRef<uint8_t> relocateDebugChunk(BumpPtrAllocator &Alloc,
   uint8_t *Buffer = Alloc.Allocate<uint8_t>(DebugChunk.getSize());
   assert(DebugChunk.OutputSectionOff == 0 &&
          "debug sections should not be in output sections");
+  DebugChunk.readRelocTargets();
   DebugChunk.writeTo(Buffer);
   return makeArrayRef(Buffer, DebugChunk.getSize());
 }
@@ -977,13 +1019,7 @@ void DebugSHandler::finish() {
   for (FileChecksumEntry &FC : Checksums) {
     SmallString<128> FileName =
         ExitOnErr(CVStrTab.getString(FC.FileNameOffset));
-    if (!sys::path::is_absolute(FileName) && !Config->PDBSourcePath.empty()) {
-      SmallString<128> AbsoluteFileName = Config->PDBSourcePath;
-      sys::path::append(AbsoluteFileName, FileName);
-      sys::path::native(AbsoluteFileName);
-      sys::path::remove_dots(AbsoluteFileName, /*remove_dot_dots=*/true);
-      FileName = std::move(AbsoluteFileName);
-    }
+    pdbMakeAbsolute(FileName);
     ExitOnErr(Linker.Builder.getDbiBuilder().addModuleSourceFile(
         *File.ModuleDBI, FileName));
     NewChecksums->addChecksum(FileName, FC.Kind, FC.Checksum);
@@ -998,8 +1034,7 @@ void PDBLinker::addObjFile(ObjFile *File) {
   // absolute.
   bool InArchive = !File->ParentName.empty();
   SmallString<128> Path = InArchive ? File->ParentName : File->getName();
-  sys::fs::make_absolute(Path);
-  sys::path::native(Path, sys::path::Style::windows);
+  pdbMakeAbsolute(Path);
   StringRef Name = InArchive ? File->getName() : StringRef(Path);
 
   pdb::DbiStreamBuilder &DbiBuilder = Builder.getDbiBuilder();
@@ -1194,11 +1229,14 @@ static void addCommonLinkerModuleSymbols(StringRef Path,
   std::string ArgStr = llvm::join(Args, " ");
   EBS.Fields.push_back("cwd");
   SmallString<64> cwd;
-  sys::fs::current_path(cwd);
+  if (Config->PDBSourcePath.empty()) 
+    sys::fs::current_path(cwd);
+  else
+    cwd = Config->PDBSourcePath;
   EBS.Fields.push_back(cwd);
   EBS.Fields.push_back("exe");
   SmallString<64> exe = Config->Argv[0];
-  llvm::sys::fs::make_absolute(exe);
+  pdbMakeAbsolute(exe);
   EBS.Fields.push_back(exe);
   EBS.Fields.push_back("pdb");
   EBS.Fields.push_back(Path);
@@ -1230,7 +1268,7 @@ static void addLinkerModuleSectionSymbol(pdb::DbiModuleDescriptorBuilder &Mod,
 void coff::createPDB(SymbolTable *Symtab,
                      ArrayRef<OutputSection *> OutputSections,
                      ArrayRef<uint8_t> SectionTable,
-                     const llvm::codeview::DebugInfo &BuildId) {
+                     llvm::codeview::DebugInfo *BuildId) {
   ScopedTimer T1(TotalPdbLinkTimer);
   PDBLinker PDB(Symtab);
 
@@ -1240,11 +1278,18 @@ void coff::createPDB(SymbolTable *Symtab,
   PDB.addNatvisFiles();
 
   ScopedTimer T2(DiskCommitTimer);
-  PDB.commit();
+  codeview::GUID Guid;
+  PDB.commit(&Guid);
+  memcpy(&BuildId->PDB70.Signature, &Guid, 16);
 }
 
-void PDBLinker::initialize(const llvm::codeview::DebugInfo &BuildId) {
+void PDBLinker::initialize(llvm::codeview::DebugInfo *BuildId) {
   ExitOnErr(Builder.initialize(4096)); // 4096 is blocksize
+
+  BuildId->Signature.CVSignature = OMF::Signature::PDB70;
+  // Signature is set to a hash of the PDB contents when the PDB is done.
+  memset(BuildId->PDB70.Signature, 0, 16);
+  BuildId->PDB70.Age = 1;
 
   // Create streams in MSF for predefined streams, namely
   // PDB, TPI, DBI and IPI.
@@ -1253,15 +1298,12 @@ void PDBLinker::initialize(const llvm::codeview::DebugInfo &BuildId) {
 
   // Add an Info stream.
   auto &InfoBuilder = Builder.getInfoBuilder();
-  GUID uuid;
-  memcpy(&uuid, &BuildId.PDB70.Signature, sizeof(uuid));
-  InfoBuilder.setAge(BuildId.PDB70.Age);
-  InfoBuilder.setGuid(uuid);
   InfoBuilder.setVersion(pdb::PdbRaw_ImplVer::PdbImplVC70);
+  InfoBuilder.setHashPDBContentsToGUID(true);
 
   // Add an empty DBI stream.
   pdb::DbiStreamBuilder &DbiBuilder = Builder.getDbiBuilder();
-  DbiBuilder.setAge(BuildId.PDB70.Age);
+  DbiBuilder.setAge(BuildId->PDB70.Age);
   DbiBuilder.setVersionHeader(pdb::PdbDbiV70);
   DbiBuilder.setMachineType(Config->Machine);
   // Technically we are not link.exe 14.11, but there are known cases where
@@ -1276,8 +1318,7 @@ void PDBLinker::addSections(ArrayRef<OutputSection *> OutputSections,
   // It's not entirely clear what this is, but the * Linker * module uses it.
   pdb::DbiStreamBuilder &DbiBuilder = Builder.getDbiBuilder();
   NativePath = Config->PDBPath;
-  sys::fs::make_absolute(NativePath);
-  sys::path::native(NativePath, sys::path::Style::windows);
+  pdbMakeAbsolute(NativePath);
   uint32_t PdbFilePathNI = DbiBuilder.addECName(NativePath);
   auto &LinkerModule = ExitOnErr(DbiBuilder.addModuleInfo("* Linker *"));
   LinkerModule.setPdbFilePathNI(PdbFilePathNI);
@@ -1286,7 +1327,7 @@ void PDBLinker::addSections(ArrayRef<OutputSection *> OutputSections,
   // Add section contributions. They must be ordered by ascending RVA.
   for (OutputSection *OS : OutputSections) {
     addLinkerModuleSectionSymbol(LinkerModule, *OS, Alloc);
-    for (Chunk *C : OS->getChunks()) {
+    for (Chunk *C : OS->Chunks) {
       pdb::SectionContrib SC =
           createSectionContrib(C, LinkerModule.getModuleIndex());
       Builder.getDbiBuilder().addSectionContrib(SC);
@@ -1305,9 +1346,9 @@ void PDBLinker::addSections(ArrayRef<OutputSection *> OutputSections,
       DbiBuilder.addDbgStream(pdb::DbgHeaderType::SectionHdr, SectionTable));
 }
 
-void PDBLinker::commit() {
+void PDBLinker::commit(codeview::GUID *Guid) {
   // Write to a file.
-  ExitOnErr(Builder.commit(Config->PDBPath));
+  ExitOnErr(Builder.commit(Config->PDBPath, Guid));
 }
 
 static Expected<StringRef>

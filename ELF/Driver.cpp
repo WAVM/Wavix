@@ -63,6 +63,7 @@ using namespace llvm;
 using namespace llvm::ELF;
 using namespace llvm::object;
 using namespace llvm::sys;
+using namespace llvm::support;
 
 using namespace lld;
 using namespace lld::elf;
@@ -84,7 +85,6 @@ bool elf::link(ArrayRef<const char *> Args, bool CanExitEarly,
 
   InputSections.clear();
   OutputSections.clear();
-  Tar = nullptr;
   BinaryFiles.clear();
   BitcodeFiles.clear();
   ObjectFiles.clear();
@@ -94,6 +94,10 @@ bool elf::link(ArrayRef<const char *> Args, bool CanExitEarly,
   Driver = make<LinkerDriver>();
   Script = make<LinkerScript>();
   Symtab = make<SymbolTable>();
+
+  Tar = nullptr;
+  memset(&In, 0, sizeof(In));
+
   Config->ProgName = Args[0];
 
   Driver->main(Args);
@@ -280,6 +284,9 @@ static void checkOptions(opt::InputArgList &Args) {
   if (Config->FixCortexA53Errata843419 && Config->EMachine != EM_AARCH64)
     error("--fix-cortex-a53-843419 is only supported on AArch64 targets.");
 
+  if (Config->TocOptimize && Config->EMachine != EM_PPC64)
+      error("--toc-optimize is only supported on the PowerPC64 target.");
+
   if (Config->Pie && Config->Shared)
     error("-shared and -pie may not be used together");
 
@@ -338,12 +345,13 @@ static bool getZFlag(opt::InputArgList &Args, StringRef K1, StringRef K2,
   return Default;
 }
 
-static bool isKnown(StringRef S) {
+static bool isKnownZFlag(StringRef S) {
   return S == "combreloc" || S == "copyreloc" || S == "defs" ||
          S == "execstack" || S == "global" || S == "hazardplt" ||
-         S == "initfirst" || S == "keep-text-section-prefix" || S == "lazy" ||
-         S == "muldefs" || S == "nocombreloc" || S == "nocopyreloc" ||
-         S == "nodelete" || S == "nodlopen" || S == "noexecstack" ||
+         S == "initfirst" || S == "interpose" ||
+         S == "keep-text-section-prefix" || S == "lazy" || S == "muldefs" ||
+         S == "nocombreloc" || S == "nocopyreloc" || S == "nodelete" ||
+         S == "nodlopen" || S == "noexecstack" ||
          S == "nokeep-text-section-prefix" || S == "norelro" || S == "notext" ||
          S == "now" || S == "origin" || S == "relro" || S == "retpolineplt" ||
          S == "rodynamic" || S == "text" || S == "wxneeded" ||
@@ -353,7 +361,7 @@ static bool isKnown(StringRef S) {
 // Report an error for an unknown -z option.
 static void checkZOptions(opt::InputArgList &Args) {
   for (auto *Arg : Args.filtered(OPT_z))
-    if (!isKnown(Arg->getValue()))
+    if (!isKnownZFlag(Arg->getValue()))
       error("unknown -z value: " + StringRef(Arg->getValue()));
 }
 
@@ -388,13 +396,6 @@ void LinkerDriver::main(ArrayRef<const char *> ArgsArr) {
   if (Args.hasArg(OPT_v) || Args.hasArg(OPT_version))
     message(getLLDVersion() + " (compatible with GNU linkers)");
 
-  // The behavior of -v or --version is a bit strange, but this is
-  // needed for compatibility with GNU linkers.
-  if (Args.hasArg(OPT_v) && !Args.hasArg(OPT_INPUT))
-    return;
-  if (Args.hasArg(OPT_version))
-    return;
-
   if (const char *Path = getReproduceOption(Args)) {
     // Note that --reproduce is a debug option so you can ignore it
     // if you are trying to understand the whole picture of the code.
@@ -413,6 +414,14 @@ void LinkerDriver::main(ArrayRef<const char *> ArgsArr) {
 
   readConfigs(Args);
   checkZOptions(Args);
+
+  // The behavior of -v or --version is a bit strange, but this is
+  // needed for compatibility with GNU linkers.
+  if (Args.hasArg(OPT_v) && !Args.hasArg(OPT_INPUT))
+    return;
+  if (Args.hasArg(OPT_version))
+    return;
+
   initLLVM();
   createFiles(Args);
   if (errorCount())
@@ -671,6 +680,38 @@ static void readCallGraph(MemoryBufferRef MB) {
   }
 }
 
+template <class ELFT> static void readCallGraphsFromObjectFiles() {
+  for (auto File : ObjectFiles) {
+    auto *Obj = cast<ObjFile<ELFT>>(File);
+    for (const Elf_CGProfile_Impl<ELFT> &CGPE : Obj->CGProfile) {
+      auto *FromSym = dyn_cast<Defined>(&Obj->getSymbol(CGPE.cgp_from));
+      auto *ToSym = dyn_cast<Defined>(&Obj->getSymbol(CGPE.cgp_to));
+      if (!FromSym || !ToSym)
+        continue;
+      auto *FromSec = dyn_cast_or_null<InputSectionBase>(FromSym->Section);
+      auto *ToSec = dyn_cast_or_null<InputSectionBase>(ToSym->Section);
+
+      // The profile from .llvm.call-graph-profile is conceptually affiliated to
+      // FromSec. Don't warn unorderable symbol if FromSym is not absolute
+      // (FromSec isn't null) and the section is discarded
+      // (!FromSec->Repl->Live).
+      //
+      // We also don't want to warn when ToSym is undefined or is in a shared
+      // object (as symbols in shared objects are fixed and unorderable).
+      //
+      // The check used here is more relaxed (no warning if either FromSym or
+      // ToSym is not Defined) for simplicity and there is no compelling reason
+      // to warn on more cases.
+      if (!FromSec || FromSec->Repl->Live) {
+        warnUnorderableSymbol(FromSym);
+        warnUnorderableSymbol(ToSym);
+      }
+      if (FromSec && ToSec)
+        Config->CallGraphProfile[{FromSec, ToSec}] += CGPE.cgp_weight;
+    }
+  }
+}
+
 static bool getCompressDebugSections(opt::InputArgList &Args) {
   StringRef S = Args.getLastArgValue(OPT_compress_debug_sections, "none");
   if (S == "none")
@@ -799,6 +840,7 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->SingleRoRx = Args.hasArg(OPT_no_rosegment);
   Config->SoName = Args.getLastArgValue(OPT_soname);
   Config->SortSection = getSortSection(Args);
+  Config->SplitStackAdjustSize = args::getInteger(Args, OPT_split_stack_adjust_size, 16384);
   Config->Strip = getStrip(Args);
   Config->Sysroot = Args.getLastArgValue(OPT_sysroot);
   Config->Target1Rel = Args.hasFlag(OPT_target1_rel, OPT_target1_abs, false);
@@ -828,6 +870,8 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->WarnBackrefs =
       Args.hasFlag(OPT_warn_backrefs, OPT_no_warn_backrefs, false);
   Config->WarnCommon = Args.hasFlag(OPT_warn_common, OPT_no_warn_common, false);
+  Config->WarnIfuncTextrel =
+      Args.hasFlag(OPT_warn_ifunc_textrel, OPT_no_warn_ifunc_textrel, false);
   Config->WarnSymbolOrdering =
       Args.hasFlag(OPT_warn_symbol_ordering, OPT_no_warn_symbol_ordering, true);
   Config->ZCombreloc = getZFlag(Args, "combreloc", "nocombreloc", true);
@@ -836,6 +880,7 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->ZGlobal = hasZOption(Args, "global");
   Config->ZHazardplt = hasZOption(Args, "hazardplt");
   Config->ZInitfirst = hasZOption(Args, "initfirst");
+  Config->ZInterpose = hasZOption(Args, "interpose");
   Config->ZKeepTextSectionPrefix = getZFlag(
       Args, "keep-text-section-prefix", "nokeep-text-section-prefix", false);
   Config->ZNodelete = hasZOption(Args, "nodelete");
@@ -867,6 +912,9 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
     error("--lto-partitions: number of threads must be > 0");
   if (Config->ThinLTOJobs == 0)
     error("--thinlto-jobs: number of threads must be > 0");
+
+  if (Config->SplitStackAdjustSize < 0)
+    error("--split-stack-adjust-size: size must be >= 0");
 
   // Parse ELF{32,64}{LE,BE} and CPU type.
   if (auto *Arg = Args.getLastArg(OPT_m)) {
@@ -956,21 +1004,16 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
 // This function initialize such members. See Config.h for the details
 // of these values.
 static void setConfigs(opt::InputArgList &Args) {
-  ELFKind Kind = Config->EKind;
-  uint16_t Machine = Config->EMachine;
+  ELFKind K = Config->EKind;
+  uint16_t M = Config->EMachine;
 
   Config->CopyRelocs = (Config->Relocatable || Config->EmitRelocs);
-  Config->Is64 = (Kind == ELF64LEKind || Kind == ELF64BEKind);
-  Config->IsLE = (Kind == ELF32LEKind || Kind == ELF64LEKind);
-  Config->Endianness =
-      Config->IsLE ? support::endianness::little : support::endianness::big;
-  Config->IsMips64EL = (Kind == ELF64LEKind && Machine == EM_MIPS);
+  Config->Is64 = (K == ELF64LEKind || K == ELF64BEKind);
+  Config->IsLE = (K == ELF32LEKind || K == ELF64LEKind);
+  Config->Endianness = Config->IsLE ? endianness::little : endianness::big;
+  Config->IsMips64EL = (K == ELF64LEKind && M == EM_MIPS);
   Config->Pic = Config->Pie || Config->Shared;
   Config->Wordsize = Config->Is64 ? 8 : 4;
-
-  // There is an ILP32 ABI for x86-64, although it's not very popular.
-  // It is called the x32 ABI.
-  bool IsX32 = (Kind == ELF32LEKind && Machine == EM_X86_64);
 
   // ELF defines two different ways to store relocation addends as shown below:
   //
@@ -985,9 +1028,9 @@ static void setConfigs(opt::InputArgList &Args) {
   // You cannot choose which one, Rel or Rela, you want to use. Instead each
   // ABI defines which one you need to use. The following expression expresses
   // that.
-  Config->IsRela =
-      (Config->Is64 || IsX32 || Machine == EM_PPC || Machine == EM_RISCV) &&
-      Machine != EM_MIPS;
+  Config->IsRela = M == EM_AARCH64 || M == EM_AMDGPU || M == EM_HEXAGON ||
+                   M == EM_PPC || M == EM_PPC64 || M == EM_RISCV ||
+                   M == EM_X86_64;
 
   // If the output uses REL relocations we must store the dynamic relocation
   // addends to the output sections. We also store addends for RELA relocations
@@ -997,6 +1040,9 @@ static void setConfigs(opt::InputArgList &Args) {
   Config->WriteAddends = Args.hasFlag(OPT_apply_dynamic_relocs,
                                       OPT_no_apply_dynamic_relocs, false) ||
                          !Config->IsRela;
+
+  Config->TocOptimize =
+      Args.hasFlag(OPT_toc_optimize, OPT_no_toc_optimize, M == EM_PPC64);
 }
 
 // Returns a value of "-format" option.
@@ -1312,6 +1358,11 @@ static void findKeepUniqueSections(opt::InputArgList &Args) {
   }
 }
 
+template <class ELFT> static Symbol *addUndefined(StringRef Name) {
+  return Symtab->addUndefined<ELFT>(Name, STB_GLOBAL, STV_DEFAULT, 0, false,
+                                    nullptr);
+}
+
 // The --wrap option is a feature to rename symbols so that you can write
 // wrappers for existing functions. If you pass `-wrap=foo`, all
 // occurrences of symbol `foo` are resolved to `wrap_foo` (so, you are
@@ -1345,8 +1396,8 @@ static std::vector<WrappedSymbol> addWrappedSymbols(opt::InputArgList &Args) {
     if (!Sym)
       continue;
 
-    Symbol *Real = Symtab->addUndefined<ELFT>(Saver.save("__real_" + Name));
-    Symbol *Wrap = Symtab->addUndefined<ELFT>(Saver.save("__wrap_" + Name));
+    Symbol *Real = addUndefined<ELFT>(Saver.save("__real_" + Name));
+    Symbol *Wrap = addUndefined<ELFT>(Saver.save("__wrap_" + Name));
     V.push_back({Sym, Real, Wrap});
 
     // We want to tell LTO not to inline symbols to be overwritten
@@ -1396,6 +1447,8 @@ static const char *LibcallRoutineNames[] = {
 // all linker scripts have already been parsed.
 template <class ELFT> void LinkerDriver::link(opt::InputArgList &Args) {
   Target = getTarget();
+  InX<ELFT>::VerSym = nullptr;
+  InX<ELFT>::VerNeed = nullptr;
 
   Config->MaxPageSize = getMaxPageSize(Args);
   Config->ImageBase = getImageBase(Args);
@@ -1451,8 +1504,8 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &Args) {
 
   // Some symbols (such as __ehdr_start) are defined lazily only when there
   // are undefined symbols for them, so we add these to trigger that logic.
-  for (StringRef Sym : Script->ReferencedSymbols)
-    Symtab->addUndefined<ELFT>(Sym);
+  for (StringRef Name : Script->ReferencedSymbols)
+    addUndefined<ELFT>(Name);
 
   // Handle the `--undefined <sym>` options.
   for (StringRef S : Config->Undefined)
@@ -1568,14 +1621,12 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &Args) {
   }
 
   // This adds a .comment section containing a version string. We have to add it
-  // before decompressAndMergeSections because the .comment section is a
-  // mergeable section.
+  // before mergeSections because the .comment section is a mergeable section.
   if (!Config->Relocatable)
     InputSections.push_back(createCommentSection());
 
   // Do size optimizations: garbage collection, merging of SHF_MERGE sections
   // and identical code folding.
-  decompressSections();
   splitSections<ELFT>();
   markLive<ELFT>();
   demoteSharedSymbols<ELFT>();
@@ -1589,6 +1640,7 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &Args) {
   if (auto *Arg = Args.getLastArg(OPT_call_graph_ordering_file))
     if (Optional<MemoryBufferRef> Buffer = readFile(Arg->getValue()))
       readCallGraph(*Buffer);
+  readCallGraphsFromObjectFiles<ELFT>();
 
   // Write the result to the file.
   writeResult<ELFT>();
