@@ -2640,6 +2640,11 @@ bool X86InstrInfo::AnalyzeBranchImpl(
     if (BranchCode == X86::COND_INVALID)
       return true;  // Can't handle indirect branch.
 
+    // In practice we should never have an undef eflags operand, if we do
+    // abort here as we are not prepared to preserve the flag.
+    if (I->getOperand(1).isUndef())
+      return true;
+
     // Working from the bottom, handle the first conditional branch.
     if (Cond.empty()) {
       MachineBasicBlock *TargetBB = I->getOperand(0).getMBB();
@@ -3119,7 +3124,7 @@ void X86InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   LLVM_DEBUG(dbgs() << "Cannot copy " << RI.getName(SrcReg) << " to "
                     << RI.getName(DestReg) << '\n');
-  llvm_unreachable("Cannot emit physreg copy instruction");
+  report_fatal_error("Cannot emit physreg copy instruction");
 }
 
 bool X86InstrInfo::isCopyInstrImpl(const MachineInstr &MI,
@@ -3313,8 +3318,7 @@ void X86InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
       (Subtarget.getFrameLowering()->getStackAlignment() >= Alignment) ||
       RI.canRealignStack(MF);
   unsigned Opc = getStoreRegOpcode(SrcReg, RC, isAligned, Subtarget);
-  DebugLoc DL = MBB.findDebugLoc(MI);
-  addFrameReference(BuildMI(MBB, MI, DL, get(Opc)), FrameIdx)
+  addFrameReference(BuildMI(MBB, MI, DebugLoc(), get(Opc)), FrameIdx)
     .addReg(SrcReg, getKillRegState(isKill));
 }
 
@@ -3348,8 +3352,7 @@ void X86InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
       (Subtarget.getFrameLowering()->getStackAlignment() >= Alignment) ||
       RI.canRealignStack(MF);
   unsigned Opc = getLoadRegOpcode(DestReg, RC, isAligned, Subtarget);
-  DebugLoc DL = MBB.findDebugLoc(MI);
-  addFrameReference(BuildMI(MBB, MI, DL, get(Opc), DestReg), FrameIdx);
+  addFrameReference(BuildMI(MBB, MI, DebugLoc(), get(Opc), DestReg), FrameIdx);
 }
 
 void X86InstrInfo::loadRegFromAddr(

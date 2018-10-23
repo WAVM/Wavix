@@ -41,10 +41,24 @@ NativeExeSymbol::findChildren(PDB_SymType Type) const {
     return std::unique_ptr<IPDBEnumSymbols>(new NativeEnumModules(Session));
     break;
   }
+  case PDB_SymType::ArrayType:
+    return Session.getSymbolCache().createTypeEnumerator(codeview::LF_ARRAY);
   case PDB_SymType::Enum:
     return Session.getSymbolCache().createTypeEnumerator(codeview::LF_ENUM);
   case PDB_SymType::PointerType:
     return Session.getSymbolCache().createTypeEnumerator(codeview::LF_POINTER);
+  case PDB_SymType::UDT:
+    return Session.getSymbolCache().createTypeEnumerator(
+        {codeview::LF_STRUCTURE, codeview::LF_CLASS, codeview::LF_UNION,
+         codeview::LF_INTERFACE});
+  case PDB_SymType::VTableShape:
+    return Session.getSymbolCache().createTypeEnumerator(codeview::LF_VTSHAPE);
+  case PDB_SymType::FunctionSig:
+    return Session.getSymbolCache().createTypeEnumerator(
+        {codeview::LF_PROCEDURE, codeview::LF_MFUNCTION});
+  case PDB_SymType::Typedef:
+    return Session.getSymbolCache().createGlobalsEnumerator(codeview::S_UDT);
+
   default:
     break;
   }

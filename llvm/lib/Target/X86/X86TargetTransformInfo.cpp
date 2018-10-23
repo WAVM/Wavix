@@ -810,6 +810,10 @@ int X86TTIImpl::getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
   // 64-bit packed integer vectors (v2i32) are promoted to type v2i64.
   std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, Tp);
 
+  // Treat Transpose as 2-op shuffles - there's no difference in lowering.
+  if (Kind == TTI::SK_Transpose)
+    Kind = TTI::SK_PermuteTwoSrc;
+
   // For Broadcasts we are splatting the first element from the first input
   // register, so only need to reference that input and all the output
   // registers are the same.
@@ -2342,11 +2346,15 @@ int X86TTIImpl::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
       return TTI::TCC_Free;
     ImmIdx = 1;
     break;
-  case Instruction::Mul:
   case Instruction::UDiv:
   case Instruction::SDiv:
   case Instruction::URem:
   case Instruction::SRem:
+    // Division by constant is typically expanded later into a different
+    // instruction sequence. This completely changes the constants.
+    // Report them as "free" to stop ConstantHoist from marking them as opaque.
+    return TTI::TCC_Free;
+  case Instruction::Mul:
   case Instruction::Or:
   case Instruction::Xor:
     ImmIdx = 1;
@@ -2719,7 +2727,12 @@ int X86TTIImpl::getInterleavedMemoryOpCostAVX2(unsigned Opcode, Type *VecTy,
                                                unsigned Factor,
                                                ArrayRef<unsigned> Indices,
                                                unsigned Alignment,
-                                               unsigned AddressSpace) {
+                                               unsigned AddressSpace,
+                                               bool IsMasked) {
+
+  if (IsMasked)
+    return BaseT::getInterleavedMemoryOpCost(Opcode, VecTy, Factor, Indices,
+                                             Alignment, AddressSpace, IsMasked);
 
   // We currently Support only fully-interleaved groups, with no gaps.
   // TODO: Support also strided loads (interleaved-groups with gaps).
@@ -2828,7 +2841,12 @@ int X86TTIImpl::getInterleavedMemoryOpCostAVX512(unsigned Opcode, Type *VecTy,
                                                  unsigned Factor,
                                                  ArrayRef<unsigned> Indices,
                                                  unsigned Alignment,
-                                                 unsigned AddressSpace) {
+                                                 unsigned AddressSpace,
+                                                 bool IsMasked) {
+
+  if (IsMasked)
+    return BaseT::getInterleavedMemoryOpCost(Opcode, VecTy, Factor, Indices,
+                                             Alignment, AddressSpace, IsMasked);
 
   // VecTy for interleave memop is <VF*Factor x Elt>.
   // So, for VF=4, Interleave Factor = 3, Element type = i32 we have
@@ -2946,7 +2964,8 @@ int X86TTIImpl::getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
                                            unsigned Factor,
                                            ArrayRef<unsigned> Indices,
                                            unsigned Alignment,
-                                           unsigned AddressSpace) {
+                                           unsigned AddressSpace,
+                                           bool IsMasked) {
   auto isSupportedOnAVX512 = [](Type *VecTy, bool HasBW) {
     Type *EltTy = VecTy->getVectorElementType();
     if (EltTy->isFloatTy() || EltTy->isDoubleTy() || EltTy->isIntegerTy(64) ||
@@ -2958,11 +2977,11 @@ int X86TTIImpl::getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
   };
   if (ST->hasAVX512() && isSupportedOnAVX512(VecTy, ST->hasBWI()))
     return getInterleavedMemoryOpCostAVX512(Opcode, VecTy, Factor, Indices,
-                                            Alignment, AddressSpace);
+                                            Alignment, AddressSpace, IsMasked);
   if (ST->hasAVX2())
     return getInterleavedMemoryOpCostAVX2(Opcode, VecTy, Factor, Indices,
-                                          Alignment, AddressSpace);
+                                          Alignment, AddressSpace, IsMasked);
 
   return BaseT::getInterleavedMemoryOpCost(Opcode, VecTy, Factor, Indices,
-                                           Alignment, AddressSpace);
+                                           Alignment, AddressSpace, IsMasked);
 }

@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_set>
 
+namespace llvm {
 namespace exegesis {
 
 // The clustering problem has the following characteristics:
@@ -53,7 +54,7 @@ bool InstructionBenchmarkClustering::isNeighbour(
     const std::vector<BenchmarkMeasure> &Q) const {
   double DistanceSquared = 0.0;
   for (size_t I = 0, E = P.size(); I < E; ++I) {
-    const auto Diff = P[I].Value - Q[I].Value;
+    const auto Diff = P[I].PerInstructionValue - Q[I].PerInstructionValue;
     DistanceSquared += Diff * Diff;
   }
   return DistanceSquared <= EpsilonSquared_;
@@ -170,3 +171,4 @@ InstructionBenchmarkClustering::create(
 }
 
 } // namespace exegesis
+} // namespace llvm

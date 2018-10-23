@@ -141,6 +141,9 @@ void DAGTypeLegalizer::PromoteIntegerResult(SDNode *N, unsigned ResNo) {
   case ISD::ADDCARRY:
   case ISD::SUBCARRY:    Res = PromoteIntRes_ADDSUBCARRY(N, ResNo); break;
 
+  case ISD::SADDSAT:
+  case ISD::UADDSAT:     Res = PromoteIntRes_ADDSAT(N); break;
+
   case ISD::ATOMIC_LOAD:
     Res = PromoteIntRes_Atomic0(cast<AtomicSDNode>(N)); break;
 
@@ -311,6 +314,19 @@ SDValue DAGTypeLegalizer::PromoteIntRes_BITCAST(SDNode *N) {
                      CreateStackStoreLoad(InOp, OutVT));
 }
 
+// Helper for BSWAP/BITREVERSE promotion to ensure we can fit the shift amount
+// in the VT returned by getShiftAmountTy and to return a safe VT if we can't.
+static EVT getShiftAmountTyForConstant(unsigned Val, EVT VT,
+                                       const TargetLowering &TLI,
+                                       SelectionDAG &DAG) {
+  EVT ShiftVT = TLI.getShiftAmountTy(VT, DAG.getDataLayout());
+  // If the value won't fit in the prefered type, just use something safe. It
+  // will be legalized when the shift is expanded.
+  if ((Log2_32(Val) + 1) > ShiftVT.getScalarSizeInBits())
+    ShiftVT = MVT::i32;
+  return ShiftVT;
+}
+
 SDValue DAGTypeLegalizer::PromoteIntRes_BSWAP(SDNode *N) {
   SDValue Op = GetPromotedInteger(N->getOperand(0));
   EVT OVT = N->getValueType(0);
@@ -318,10 +334,9 @@ SDValue DAGTypeLegalizer::PromoteIntRes_BSWAP(SDNode *N) {
   SDLoc dl(N);
 
   unsigned DiffBits = NVT.getScalarSizeInBits() - OVT.getScalarSizeInBits();
-  return DAG.getNode(
-      ISD::SRL, dl, NVT, DAG.getNode(ISD::BSWAP, dl, NVT, Op),
-      DAG.getConstant(DiffBits, dl,
-                      TLI.getShiftAmountTy(NVT, DAG.getDataLayout())));
+  EVT ShiftVT = getShiftAmountTyForConstant(DiffBits, NVT, TLI, DAG);
+  return DAG.getNode(ISD::SRL, dl, NVT, DAG.getNode(ISD::BSWAP, dl, NVT, Op),
+                     DAG.getConstant(DiffBits, dl, ShiftVT));
 }
 
 SDValue DAGTypeLegalizer::PromoteIntRes_BITREVERSE(SDNode *N) {
@@ -331,10 +346,10 @@ SDValue DAGTypeLegalizer::PromoteIntRes_BITREVERSE(SDNode *N) {
   SDLoc dl(N);
 
   unsigned DiffBits = NVT.getScalarSizeInBits() - OVT.getScalarSizeInBits();
-  return DAG.getNode(
-      ISD::SRL, dl, NVT, DAG.getNode(ISD::BITREVERSE, dl, NVT, Op),
-      DAG.getConstant(DiffBits, dl,
-                      TLI.getShiftAmountTy(NVT, DAG.getDataLayout())));
+  EVT ShiftVT = getShiftAmountTyForConstant(DiffBits, NVT, TLI, DAG);
+  return DAG.getNode(ISD::SRL, dl, NVT,
+                     DAG.getNode(ISD::BITREVERSE, dl, NVT, Op),
+                     DAG.getConstant(DiffBits, dl, ShiftVT));
 }
 
 SDValue DAGTypeLegalizer::PromoteIntRes_BUILD_PAIR(SDNode *N) {
@@ -532,6 +547,40 @@ SDValue DAGTypeLegalizer::PromoteIntRes_Overflow(SDNode *N) {
   ReplaceValueWith(SDValue(N, 0), Res);
 
   return SDValue(Res.getNode(), 1);
+}
+
+SDValue DAGTypeLegalizer::PromoteIntRes_ADDSAT(SDNode *N) {
+  // For promoting iN -> iM, this can be expanded by
+  // 1. ANY_EXTEND iN to iM
+  // 2. SHL by M-N
+  // 3. U/SADDSAT
+  // 4. L/ASHR by M-N
+  SDLoc dl(N);
+  SDValue Op1 = N->getOperand(0);
+  SDValue Op2 = N->getOperand(1);
+  unsigned OldBits = Op1.getValueSizeInBits();
+
+  unsigned Opcode = N->getOpcode();
+  assert((Opcode == ISD::SADDSAT || Opcode == ISD::UADDSAT) &&
+         "Expected opcode to be SADDSAT or UADDSAT");
+  unsigned ShiftOp = Opcode == ISD::SADDSAT ? ISD::SRA : ISD::SRL;
+
+  SDValue Op1Promoted = GetPromotedInteger(Op1);
+  SDValue Op2Promoted = GetPromotedInteger(Op2);
+
+  EVT PromotedType = Op1Promoted.getValueType();
+  unsigned NewBits = Op1Promoted.getValueSizeInBits();
+  unsigned SHLAmount = NewBits - OldBits;
+  EVT SHVT = TLI.getShiftAmountTy(PromotedType, DAG.getDataLayout());
+  SDValue ShiftAmount = DAG.getConstant(SHLAmount, dl, SHVT);
+  Op1Promoted =
+      DAG.getNode(ISD::SHL, dl, PromotedType, Op1Promoted, ShiftAmount);
+  Op2Promoted =
+      DAG.getNode(ISD::SHL, dl, PromotedType, Op2Promoted, ShiftAmount);
+
+  SDValue Result =
+      DAG.getNode(Opcode, dl, PromotedType, Op1Promoted, Op2Promoted);
+  return DAG.getNode(ShiftOp, dl, PromotedType, Result, ShiftAmount);
 }
 
 SDValue DAGTypeLegalizer::PromoteIntRes_SADDSUBO(SDNode *N, unsigned ResNo) {
@@ -994,7 +1043,7 @@ void DAGTypeLegalizer::PromoteSetCCOperands(SDValue &NewLHS,SDValue &NewRHS,
     // We would prefer to promote the comparison operand with sign extension.
     // If the width of OpL/OpR excluding the duplicated sign bits is no greater
     // than the width of NewLHS/NewRH, we can avoid inserting real truncate
-    // instruction, which is redudant eventually.
+    // instruction, which is redundant eventually.
     unsigned OpLEffectiveBits =
         OpL.getScalarValueSizeInBits() - DAG.ComputeNumSignBits(OpL) + 1;
     unsigned OpREffectiveBits =
@@ -1454,6 +1503,9 @@ void DAGTypeLegalizer::ExpandIntegerResult(SDNode *N, unsigned ResNo) {
   case ISD::USUBO: ExpandIntRes_UADDSUBO(N, Lo, Hi); break;
   case ISD::UMULO:
   case ISD::SMULO: ExpandIntRes_XMULO(N, Lo, Hi); break;
+
+  case ISD::SADDSAT:
+  case ISD::UADDSAT: ExpandIntRes_ADDSAT(N, Lo, Hi); break;
   }
 
   // If Lo/Hi is null, the sub-method took care of registering results etc.
@@ -2414,6 +2466,12 @@ void DAGTypeLegalizer::ExpandIntRes_READCYCLECOUNTER(SDNode *N, SDValue &Lo,
   Lo = R.getValue(0);
   Hi = R.getValue(1);
   ReplaceValueWith(SDValue(N, 1), R.getValue(2));
+}
+
+void DAGTypeLegalizer::ExpandIntRes_ADDSAT(SDNode *N, SDValue &Lo,
+                                           SDValue &Hi) {
+  SDValue Result = TLI.getExpandedSaturationAddition(N, DAG);
+  SplitInteger(Result, Lo, Hi);
 }
 
 void DAGTypeLegalizer::ExpandIntRes_SADDSUBO(SDNode *Node,

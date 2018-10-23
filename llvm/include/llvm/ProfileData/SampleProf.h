@@ -49,7 +49,8 @@ enum class sampleprof_error {
   unsupported_writing_format,
   truncated_name_table,
   not_implemented,
-  counter_overflow
+  counter_overflow,
+  ostream_seek_unsupported
 };
 
 inline std::error_code make_error_code(sampleprof_error E) {
@@ -487,8 +488,6 @@ public:
   // If the format is SPF_Compact_Binary, the name is already a GUID and we
   // don't want to return the GUID of GUID.
   static uint64_t getGUID(StringRef Name) {
-    if (Format == SPF_Compact_Binary)
-      errs() << Name << '\n';
     return (Format == SPF_Compact_Binary) ? std::stoull(Name.data())
                                           : Function::getGUID(Name);
   }

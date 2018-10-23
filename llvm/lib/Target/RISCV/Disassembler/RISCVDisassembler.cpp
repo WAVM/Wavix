@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/RISCVBaseInfo.h"
 #include "MCTargetDesc/RISCVMCTargetDesc.h"
+#include "Utils/RISCVBaseInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCFixedLenDisassembler.h"
@@ -212,6 +212,15 @@ static DecodeStatus decodeUImmOperand(MCInst &Inst, uint64_t Imm,
 }
 
 template <unsigned N>
+static DecodeStatus decodeUImmNonZeroOperand(MCInst &Inst, uint64_t Imm,
+                                             int64_t Address,
+                                             const void *Decoder) {
+  if (Imm == 0)
+    return MCDisassembler::Fail;
+  return decodeUImmOperand<N>(Inst, Imm, Address, Decoder);
+}
+
+template <unsigned N>
 static DecodeStatus decodeSImmOperand(MCInst &Inst, uint64_t Imm,
                                       int64_t Address, const void *Decoder) {
   assert(isUInt<N>(Imm) && "Invalid immediate");
@@ -219,6 +228,15 @@ static DecodeStatus decodeSImmOperand(MCInst &Inst, uint64_t Imm,
   // Sign-extend the number in the bottom N bits of Imm
   Inst.addOperand(MCOperand::createImm(SignExtend64<N>(Imm)));
   return MCDisassembler::Success;
+}
+
+template <unsigned N>
+static DecodeStatus decodeSImmNonZeroOperand(MCInst &Inst, uint64_t Imm,
+                                             int64_t Address,
+                                             const void *Decoder) {
+  if (Imm == 0)
+    return MCDisassembler::Fail;
+  return decodeSImmOperand<N>(Inst, Imm, Address, Decoder);
 }
 
 template <unsigned N>

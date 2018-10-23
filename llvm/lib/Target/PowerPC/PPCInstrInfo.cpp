@@ -1822,7 +1822,8 @@ bool PPCInstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, unsigned SrcReg,
 
   int NewOpC = -1;
   int MIOpC = MI->getOpcode();
-  if (MIOpC == PPC::ANDIo || MIOpC == PPC::ANDIo8)
+  if (MIOpC == PPC::ANDIo || MIOpC == PPC::ANDIo8 ||
+      MIOpC == PPC::ANDISo || MIOpC == PPC::ANDISo8)
     NewOpC = MIOpC;
   else {
     NewOpC = PPC::getRecordFormOpcode(MIOpC);
@@ -1912,14 +1913,36 @@ bool PPCInstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, unsigned SrcReg,
     // compare).
 
     // Rotates are expensive instructions. If we're emitting a record-form
-    // rotate that can just be an andi, we should just emit the andi.
-    if ((MIOpC == PPC::RLWINM || MIOpC == PPC::RLWINM8) &&
-        MI->getOperand(2).getImm() == 0) {
+    // rotate that can just be an andi/andis, we should just emit that.
+    if (MIOpC == PPC::RLWINM || MIOpC == PPC::RLWINM8) {
+      unsigned GPRRes = MI->getOperand(0).getReg();
+      int64_t SH = MI->getOperand(2).getImm();
       int64_t MB = MI->getOperand(3).getImm();
       int64_t ME = MI->getOperand(4).getImm();
-      if (MB < ME && MB >= 16) {
-        uint64_t Mask = ((1LLU << (32 - MB)) - 1) & ~((1LLU << (31 - ME)) - 1);
-        NewOpC = MIOpC == PPC::RLWINM ? PPC::ANDIo : PPC::ANDIo8;
+      // We can only do this if both the start and end of the mask are in the
+      // same halfword.
+      bool MBInLoHWord = MB >= 16;
+      bool MEInLoHWord = ME >= 16;
+      uint64_t Mask = ~0LLU;
+
+      if (MB <= ME && MBInLoHWord == MEInLoHWord && SH == 0) {
+        Mask = ((1LLU << (32 - MB)) - 1) & ~((1LLU << (31 - ME)) - 1);
+        // The mask value needs to shift right 16 if we're emitting andis.
+        Mask >>= MBInLoHWord ? 0 : 16;
+        NewOpC = MIOpC == PPC::RLWINM ?
+          (MBInLoHWord ? PPC::ANDIo : PPC::ANDISo) :
+          (MBInLoHWord ? PPC::ANDIo8 :PPC::ANDISo8);
+      } else if (MRI->use_empty(GPRRes) && (ME == 31) &&
+                 (ME - MB + 1 == SH) && (MB >= 16)) {
+        // If we are rotating by the exact number of bits as are in the mask
+        // and the mask is in the least significant bits of the register,
+        // that's just an andis. (as long as the GPR result has no uses).
+        Mask = ((1LLU << 32) - 1) & ~((1LLU << (32 - SH)) - 1);
+        Mask >>= 16;
+        NewOpC = MIOpC == PPC::RLWINM ? PPC::ANDISo :PPC::ANDISo8;
+      }
+      // If we've set the mask, we can transform.
+      if (Mask != ~0LLU) {
         MI->RemoveOperand(4);
         MI->RemoveOperand(3);
         MI->getOperand(2).setImm(Mask);
@@ -2296,7 +2319,7 @@ MachineInstr *PPCInstrInfo::getForwardingDefMI(
       Opc == PPC::RLDICL_32 || Opc == PPC::RLDICL_32_64 ||
       Opc == PPC::RLWINM || Opc == PPC::RLWINMo ||
       Opc == PPC::RLWINM8 || Opc == PPC::RLWINM8o;
-    if (!instrHasImmForm(MI, III) && !ConvertibleImmForm)
+    if (!instrHasImmForm(MI, III, true) && !ConvertibleImmForm)
       return nullptr;
 
     // Don't convert or %X, %Y, %Y since that's just a register move.
@@ -2398,7 +2421,7 @@ bool PPCInstrInfo::convertToImmediateForm(MachineInstr &MI,
     *KilledDef = DefMI;
 
   ImmInstrInfo III;
-  bool HasImmForm = instrHasImmForm(MI, III);
+  bool HasImmForm = instrHasImmForm(MI, III, PostRA);
   // If this is a reg+reg instruction that has a reg+imm form,
   // and one of the operands is produced by an add-immediate,
   // try to convert it.
@@ -2621,8 +2644,12 @@ bool PPCInstrInfo::convertToImmediateForm(MachineInstr &MI,
   return false;
 }
 
+static bool isVFReg(unsigned Reg) {
+  return PPC::VFRCRegClass.contains(Reg);
+}
+
 bool PPCInstrInfo::instrHasImmForm(const MachineInstr &MI,
-                                   ImmInstrInfo &III) const {
+                                   ImmInstrInfo &III, bool PostRA) const {
   unsigned Opc = MI.getOpcode();
   // The vast majority of the instructions would need their operand 2 replaced
   // with an immediate when switching to the reg+imm form. A marked exception
@@ -2923,13 +2950,20 @@ bool PPCInstrInfo::instrHasImmForm(const MachineInstr &MI,
     case PPC::STFDUX: III.ImmOpcode = PPC::STFDU; break;
     }
     break;
-  // Power9 only.
+  // Power9 and up only. For some of these, the X-Form version has access to all
+  // 64 VSR's whereas the D-Form only has access to the VR's. We replace those
+  // with pseudo-ops pre-ra and for post-ra, we check that the register loaded
+  // into or stored from is one of the VR registers.
   case PPC::LXVX:
   case PPC::LXSSPX:
   case PPC::LXSDX:
   case PPC::STXVX:
   case PPC::STXSSPX:
   case PPC::STXSDX:
+  case PPC::XFLOADf32:
+  case PPC::XFLOADf64:
+  case PPC::XFSTOREf32:
+  case PPC::XFSTOREf64:
     if (!Subtarget.hasP9Vector())
       return false;
     III.SignedImm = true;
@@ -2939,6 +2973,7 @@ bool PPCInstrInfo::instrHasImmForm(const MachineInstr &MI,
     III.IsSummingOperands = true;
     III.ImmOpNo = 1;
     III.OpNoForForwarding = 2;
+    III.ImmMustBeMultipleOf = 4;
     switch(Opc) {
     default: llvm_unreachable("Unknown opcode");
     case PPC::LXVX:
@@ -2946,24 +2981,56 @@ bool PPCInstrInfo::instrHasImmForm(const MachineInstr &MI,
       III.ImmMustBeMultipleOf = 16;
       break;
     case PPC::LXSSPX:
-      III.ImmOpcode = PPC::LXSSP;
-      III.ImmMustBeMultipleOf = 4;
+      if (PostRA) {
+        if (isVFReg(MI.getOperand(0).getReg()))
+          III.ImmOpcode = PPC::LXSSP;
+        else
+          III.ImmOpcode = PPC::LFS;
+        break;
+      }
+      LLVM_FALLTHROUGH;
+    case PPC::XFLOADf32:
+      III.ImmOpcode = PPC::DFLOADf32;
       break;
     case PPC::LXSDX:
-      III.ImmOpcode = PPC::LXSD;
-      III.ImmMustBeMultipleOf = 4;
+      if (PostRA) {
+        if (isVFReg(MI.getOperand(0).getReg()))
+          III.ImmOpcode = PPC::LXSD;
+        else
+          III.ImmOpcode = PPC::LFD;
+        break;
+      }
+      LLVM_FALLTHROUGH;
+    case PPC::XFLOADf64:
+      III.ImmOpcode = PPC::DFLOADf64;
       break;
     case PPC::STXVX:
       III.ImmOpcode = PPC::STXV;
       III.ImmMustBeMultipleOf = 16;
       break;
     case PPC::STXSSPX:
-      III.ImmOpcode = PPC::STXSSP;
-      III.ImmMustBeMultipleOf = 4;
+      if (PostRA) {
+        if (isVFReg(MI.getOperand(0).getReg()))
+          III.ImmOpcode = PPC::STXSSP;
+        else
+          III.ImmOpcode = PPC::STFS;
+        break;
+      }
+      LLVM_FALLTHROUGH;
+    case PPC::XFSTOREf32:
+      III.ImmOpcode = PPC::DFSTOREf32;
       break;
     case PPC::STXSDX:
-      III.ImmOpcode = PPC::STXSD;
-      III.ImmMustBeMultipleOf = 4;
+      if (PostRA) {
+        if (isVFReg(MI.getOperand(0).getReg()))
+          III.ImmOpcode = PPC::STXSD;
+        else
+          III.ImmOpcode = PPC::STFD;
+        break;
+      }
+      LLVM_FALLTHROUGH;
+    case PPC::XFSTOREf64:
+      III.ImmOpcode = PPC::DFSTOREf64;
       break;
     }
     break;
@@ -3125,6 +3192,14 @@ bool PPCInstrInfo::isImmElgibleForForwarding(const MachineOperand &ImmMO,
     // Check if the instruction met the requirement.
     if (III.ImmMustBeMultipleOf > 4 ||
        III.TruncateImmTo || III.ImmWidth != 16)
+      return false;
+
+    // Going from XForm to DForm loads means that the displacement needs to be
+    // not just an immediate but also a multiple of 4, or 16 depending on the
+    // load. A DForm load cannot be represented if it is a multiple of say 2.
+    // XForm loads do not have this restriction.
+    if (ImmMO.isGlobal() &&
+        ImmMO.getGlobal()->getAlignment() < III.ImmMustBeMultipleOf)
       return false;
 
     return true;

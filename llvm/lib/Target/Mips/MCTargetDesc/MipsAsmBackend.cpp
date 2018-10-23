@@ -13,6 +13,7 @@
 //
 
 #include "MCTargetDesc/MipsAsmBackend.h"
+#include "MCTargetDesc/MipsABIInfo.h"
 #include "MCTargetDesc/MipsFixupKinds.h"
 #include "MCTargetDesc/MipsMCExpr.h"
 #include "MCTargetDesc/MipsMCTargetDesc.h"
@@ -568,10 +569,18 @@ bool MipsAsmBackend::shouldForceRelocation(const MCAssembler &Asm,
   }
 }
 
+bool MipsAsmBackend::isMicroMips(const MCSymbol *Sym) const {
+  if (const auto *ElfSym = dyn_cast<const MCSymbolELF>(Sym)) {
+    if (ElfSym->getOther() & ELF::STO_MIPS_MICROMIPS)
+      return true;
+  }
+  return false;
+}
+
 MCAsmBackend *llvm::createMipsAsmBackend(const Target &T,
                                          const MCSubtargetInfo &STI,
                                          const MCRegisterInfo &MRI,
                                          const MCTargetOptions &Options) {
-  return new MipsAsmBackend(T, MRI, STI.getTargetTriple(), STI.getCPU(),
-                            Options.ABIName == "n32");
+  MipsABIInfo ABI = MipsABIInfo::computeTargetABI(STI.getTargetTriple(), STI.getCPU(), Options);
+  return new MipsAsmBackend(T, MRI, STI.getTargetTriple(), STI.getCPU(), ABI.IsN32());
 }

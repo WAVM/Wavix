@@ -930,6 +930,44 @@ void LLVMAddNamedMetadataOperand(LLVMModuleRef M, const char *Name,
                                  LLVMValueRef Val);
 
 /**
+ * Return the directory of the debug location for this value, which must be
+ * an llvm::Instruction, llvm::GlobalVariable, or llvm::Function.
+ *
+ * @see llvm::Instruction::getDebugLoc()
+ * @see llvm::GlobalVariable::getDebugInfo()
+ * @see llvm::Function::getSubprogram()
+ */
+const char *LLVMGetDebugLocDirectory(LLVMValueRef Val, unsigned *Length);
+
+/**
+ * Return the filename of the debug location for this value, which must be
+ * an llvm::Instruction, llvm::GlobalVariable, or llvm::Function.
+ *
+ * @see llvm::Instruction::getDebugLoc()
+ * @see llvm::GlobalVariable::getDebugInfo()
+ * @see llvm::Function::getSubprogram()
+ */
+const char *LLVMGetDebugLocFilename(LLVMValueRef Val, unsigned *Length);
+
+/**
+ * Return the line number of the debug location for this value, which must be
+ * an llvm::Instruction, llvm::GlobalVariable, or llvm::Function.
+ *
+ * @see llvm::Instruction::getDebugLoc()
+ * @see llvm::GlobalVariable::getDebugInfo()
+ * @see llvm::Function::getSubprogram()
+ */
+unsigned LLVMGetDebugLocLine(LLVMValueRef Val);
+
+/**
+ * Return the column number of the debug location for this value, which must be
+ * an llvm::Instruction.
+ *
+ * @see llvm::Instruction::getDebugLoc()
+ */
+unsigned LLVMGetDebugLocColumn(LLVMValueRef Val);
+
+/**
  * Add a function to a module under a specified name.
  *
  * @see llvm::Function::Create()
@@ -1279,6 +1317,13 @@ LLVMBool LLVMIsPackedStruct(LLVMTypeRef StructTy);
 LLVMBool LLVMIsOpaqueStruct(LLVMTypeRef StructTy);
 
 /**
+ * Determine whether a structure is literal.
+ *
+ * @see llvm::StructType::isLiteral()
+ */
+LLVMBool LLVMIsLiteralStruct(LLVMTypeRef StructTy);
+
+/**
  * @}
  */
 
@@ -1465,6 +1510,7 @@ LLVMTypeRef LLVMX86MMXType(void);
       macro(ConstantVector)                 \
       macro(GlobalValue)                    \
         macro(GlobalAlias)                  \
+        macro(GlobalIFunc)                  \
         macro(GlobalObject)                 \
           macro(Function)                   \
           macro(GlobalVariable)             \
@@ -1493,16 +1539,15 @@ LLVMTypeRef LLVMX86MMXType(void);
       macro(SelectInst)                     \
       macro(ShuffleVectorInst)              \
       macro(StoreInst)                      \
-      macro(TerminatorInst)                 \
-        macro(BranchInst)                   \
-        macro(IndirectBrInst)               \
-        macro(InvokeInst)                   \
-        macro(ReturnInst)                   \
-        macro(SwitchInst)                   \
-        macro(UnreachableInst)              \
-        macro(ResumeInst)                   \
-        macro(CleanupReturnInst)            \
-        macro(CatchReturnInst)              \
+      macro(BranchInst)                     \
+      macro(IndirectBrInst)                 \
+      macro(InvokeInst)                     \
+      macro(ReturnInst)                     \
+      macro(SwitchInst)                     \
+      macro(UnreachableInst)                \
+      macro(ResumeInst)                     \
+      macro(CleanupReturnInst)              \
+      macro(CatchReturnInst)                \
       macro(FuncletPadInst)                 \
         macro(CatchPadInst)                 \
         macro(CleanupPadInst)               \
@@ -2096,6 +2141,14 @@ void LLVMSetDLLStorageClass(LLVMValueRef Global, LLVMDLLStorageClass Class);
 LLVMUnnamedAddr LLVMGetUnnamedAddress(LLVMValueRef Global);
 void LLVMSetUnnamedAddress(LLVMValueRef Global, LLVMUnnamedAddr UnnamedAddr);
 
+/**
+ * Returns the "value type" of a global value.  This differs from the formal
+ * type of a global value which is always a pointer type.
+ *
+ * @see llvm::GlobalValue::getValueType()
+ */
+LLVMTypeRef LLVMGlobalGetValueType(LLVMValueRef Global);
+
 /** Deprecated: Use LLVMGetUnnamedAddress instead. */
 LLVMBool LLVMHasUnnamedAddr(LLVMValueRef Global);
 /** Deprecated: Use LLVMSetUnnamedAddress instead. */
@@ -2125,6 +2178,58 @@ unsigned LLVMGetAlignment(LLVMValueRef V);
  * @see llvm::GlobalValue::setAlignment()
  */
 void LLVMSetAlignment(LLVMValueRef V, unsigned Bytes);
+
+/**
+ * Sets a metadata attachment, erasing the existing metadata attachment if
+ * it already exists for the given kind.
+ *
+ * @see llvm::GlobalObject::setMetadata()
+ */
+void LLVMGlobalSetMetadata(LLVMValueRef Global, unsigned Kind,
+                           LLVMMetadataRef MD);
+
+/**
+ * Erases a metadata attachment of the given kind if it exists.
+ *
+ * @see llvm::GlobalObject::eraseMetadata()
+ */
+void LLVMGlobalEraseMetadata(LLVMValueRef Global, unsigned Kind);
+
+/**
+ * Removes all metadata attachments from this value.
+ *
+ * @see llvm::GlobalObject::clearMetadata()
+ */
+void LLVMGlobalClearMetadata(LLVMValueRef Global);
+
+/**
+ * Retrieves an array of metadata entries representing the metadata attached to
+ * this value. The caller is responsible for freeing this array by calling
+ * \c LLVMDisposeValueMetadataEntries.
+ *
+ * @see llvm::GlobalObject::getAllMetadata()
+ */
+LLVMValueMetadataEntry *LLVMGlobalCopyAllMetadata(LLVMValueRef Value,
+                                                  size_t *NumEntries);
+
+/**
+ * Destroys value metadata entries.
+ */
+void LLVMDisposeValueMetadataEntries(LLVMValueMetadataEntry *Entries);
+
+/**
+ * Returns the kind of a value metadata entry at a specific index.
+ */
+unsigned LLVMValueMetadataEntriesGetKind(LLVMValueMetadataEntry *Entries,
+                                         unsigned Index);
+
+/**
+ * Returns the underlying metadata node of a value metadata entry at a
+ * specific index.
+ */
+LLVMMetadataRef
+LLVMValueMetadataEntriesGetMetadata(LLVMValueMetadataEntry *Entries,
+                                    unsigned Index);
 
 /**
  * @}
@@ -2573,7 +2678,7 @@ LLVMValueRef LLVMGetBasicBlockParent(LLVMBasicBlockRef BB);
  * If the basic block does not have a terminator (it is not well-formed
  * if it doesn't), then NULL is returned.
  *
- * The returned LLVMValueRef corresponds to a llvm::TerminatorInst.
+ * The returned LLVMValueRef corresponds to an llvm::Instruction.
  *
  * @see llvm::BasicBlock::getTerminator()
  */
@@ -2754,6 +2859,16 @@ LLVMValueRef LLVMGetMetadata(LLVMValueRef Val, unsigned KindID);
 void LLVMSetMetadata(LLVMValueRef Val, unsigned KindID, LLVMValueRef Node);
 
 /**
+ * Returns the metadata associated with an instruction value, but filters out
+ * all the debug locations.
+ *
+ * @see llvm::Instruction::getAllMetadataOtherThanDebugLoc()
+ */
+LLVMValueMetadataEntry *
+LLVMInstructionGetAllMetadataOtherThanDebugLoc(LLVMValueRef Instr,
+                                               size_t *NumEntries);
+
+/**
  * Obtain the basic block to which an instruction belongs.
  *
  * @see llvm::Instruction::getParent()
@@ -2834,6 +2949,15 @@ LLVMRealPredicate LLVMGetFCmpPredicate(LLVMValueRef Inst);
  * @see llvm::Instruction::clone()
  */
 LLVMValueRef LLVMInstructionClone(LLVMValueRef Inst);
+
+/**
+ * Determine whether an instruction is a terminator. This routine is named to
+ * be compatible with historical functions that did this by querying the
+ * underlying C++ type.
+ *
+ * @see llvm::Instruction::isTerminator()
+ */
+LLVMValueRef LLVMIsATerminatorInst(LLVMValueRef Inst);
 
 /**
  * @defgroup LLVMCCoreValueInstructionCall Call Sites and Invocations
@@ -2975,8 +3099,8 @@ void LLVMSetUnwindDest(LLVMValueRef InvokeInst, LLVMBasicBlockRef B);
 /**
  * @defgroup LLVMCCoreValueInstructionTerminator Terminators
  *
- * Functions in this group only apply to instructions that map to
- * llvm::TerminatorInst instances.
+ * Functions in this group only apply to instructions for which
+ * LLVMIsATerminatorInst returns true.
  *
  * @{
  */
@@ -2984,21 +3108,21 @@ void LLVMSetUnwindDest(LLVMValueRef InvokeInst, LLVMBasicBlockRef B);
 /**
  * Return the number of successors that this terminator has.
  *
- * @see llvm::TerminatorInst::getNumSuccessors
+ * @see llvm::Instruction::getNumSuccessors
  */
 unsigned LLVMGetNumSuccessors(LLVMValueRef Term);
 
 /**
  * Return the specified successor.
  *
- * @see llvm::TerminatorInst::getSuccessor
+ * @see llvm::Instruction::getSuccessor
  */
 LLVMBasicBlockRef LLVMGetSuccessor(LLVMValueRef Term, unsigned i);
 
 /**
  * Update the specified successor to point at the provided block.
  *
- * @see llvm::TerminatorInst::setSuccessor
+ * @see llvm::Instruction::setSuccessor
  */
 void LLVMSetSuccessor(LLVMValueRef Term, unsigned i, LLVMBasicBlockRef block);
 

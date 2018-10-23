@@ -279,7 +279,12 @@ bool IRTranslator::translateBinaryOp(unsigned Opcode, const User &U,
   unsigned Op0 = getOrCreateVReg(*U.getOperand(0));
   unsigned Op1 = getOrCreateVReg(*U.getOperand(1));
   unsigned Res = getOrCreateVReg(U);
-  MIRBuilder.buildInstr(Opcode).addDef(Res).addUse(Op0).addUse(Op1);
+  auto FBinOp = MIRBuilder.buildInstr(Opcode).addDef(Res).addUse(Op0).addUse(Op1);
+  if (isa<Instruction>(U)) {
+    MachineInstr *FBinOpMI = FBinOp.getInstr();
+    const Instruction &I = cast<Instruction>(U);
+    FBinOpMI->copyIRFlags(I);
+  }
   return true;
 }
 
@@ -950,6 +955,14 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
         .addUse(getOrCreateVReg(*CI.getArgOperand(0)));
     return true;
   }
+  case Intrinsic::invariant_start: {
+    LLT PtrTy = getLLTForType(*CI.getArgOperand(0)->getType(), *DL);
+    unsigned Undef = MRI->createGenericVirtualRegister(PtrTy);
+    MIRBuilder.buildUndef(Undef);
+    return true;
+  }
+  case Intrinsic::invariant_end:
+    return true;
   }
   return false;
 }
@@ -1140,7 +1153,6 @@ bool IRTranslator::translateLandingPad(const User &U,
   const LandingPadInst &LP = cast<LandingPadInst>(U);
 
   MachineBasicBlock &MBB = MIRBuilder.getMBB();
-  addLandingPadInfo(LP, MBB);
 
   MBB.setIsEHPad();
 

@@ -1118,7 +1118,7 @@ Error DumpOutputStyle::dumpStringTableFromPdb() {
 
       std::vector<uint32_t> SortedIDs(IS->name_ids().begin(),
                                       IS->name_ids().end());
-      llvm::sort(SortedIDs.begin(), SortedIDs.end());
+      llvm::sort(SortedIDs);
       for (uint32_t I : SortedIDs) {
         auto ES = IS->getStringForID(I);
         llvm::SmallString<32> Str;
@@ -1241,13 +1241,13 @@ static void
 dumpFullTypeStream(LinePrinter &Printer, LazyRandomTypeCollection &Types,
                    uint32_t NumTypeRecords, uint32_t NumHashBuckets,
                    FixedStreamArray<support::ulittle32_t> HashValues,
-                   bool Bytes, bool Extras) {
+                   TpiStream *Stream, bool Bytes, bool Extras) {
 
   Printer.formatLine("Showing {0:N} records", NumTypeRecords);
   uint32_t Width = NumDigits(TypeIndex::FirstNonSimpleIndex + NumTypeRecords);
 
   MinimalTypeDumpVisitor V(Printer, Width + 2, Bytes, Extras, Types,
-                           NumHashBuckets, HashValues);
+                           NumHashBuckets, HashValues, Stream);
 
   if (auto EC = codeview::visitTypeStream(Types, V)) {
     Printer.formatLine("An error occurred dumping type records: {0}",
@@ -1263,7 +1263,8 @@ static void dumpPartialTypeStream(LinePrinter &Printer,
       NumDigits(TypeIndex::FirstNonSimpleIndex + Stream.getNumTypeRecords());
 
   MinimalTypeDumpVisitor V(Printer, Width + 2, Bytes, Extras, Types,
-                           Stream.getNumHashBuckets(), Stream.getHashValues());
+                           Stream.getNumHashBuckets(), Stream.getHashValues(),
+                           &Stream);
 
   if (opts::dump::DumpTypeDependents) {
     // If we need to dump all dependents, then iterate each index and find
@@ -1325,7 +1326,8 @@ Error DumpOutputStyle::dumpTypesFromObjectFile() {
     Types.reset(Reader, 100);
 
     if (opts::dump::DumpTypes) {
-      dumpFullTypeStream(P, Types, 0, 0, {}, opts::dump::DumpTypeData, false);
+      dumpFullTypeStream(P, Types, 0, 0, {}, nullptr, opts::dump::DumpTypeData,
+                         false);
     } else if (opts::dump::DumpTypeExtras) {
       auto LocalHashes = LocallyHashedType::hashTypeCollection(Types);
       auto GlobalHashes = GloballyHashedType::hashTypeCollection(Types);
@@ -1394,11 +1396,14 @@ Error DumpOutputStyle::dumpTpiStream(uint32_t StreamIdx) {
 
   auto &Types = (StreamIdx == StreamTPI) ? File.types() : File.ids();
 
+  // Enable resolving forward decls.
+  Stream.buildHashMap();
+
   if (DumpTypes || !Indices.empty()) {
     if (Indices.empty())
       dumpFullTypeStream(P, Types, Stream.getNumTypeRecords(),
                          Stream.getNumHashBuckets(), Stream.getHashValues(),
-                         DumpBytes, DumpExtras);
+                         &Stream, DumpBytes, DumpExtras);
     else {
       std::vector<TypeIndex> TiList(Indices.begin(), Indices.end());
       dumpPartialTypeStream(P, Types, Stream, TiList, DumpBytes, DumpExtras,
@@ -1567,8 +1572,40 @@ Error DumpOutputStyle::dumpGlobals() {
   ExitOnError Err("Error dumping globals stream: ");
   auto &Globals = Err(getPdb().getPDBGlobalsStream());
 
-  const GSIHashTable &Table = Globals.getGlobalsTable();
-  Err(dumpSymbolsFromGSI(Table, opts::dump::DumpGlobalExtras));
+  if (opts::dump::DumpGlobalNames.empty()) {
+    const GSIHashTable &Table = Globals.getGlobalsTable();
+    Err(dumpSymbolsFromGSI(Table, opts::dump::DumpGlobalExtras));
+  } else {
+    SymbolStream &SymRecords = cantFail(getPdb().getPDBSymbolStream());
+    auto &Types = File.types();
+    auto &Ids = File.ids();
+
+    SymbolVisitorCallbackPipeline Pipeline;
+    SymbolDeserializer Deserializer(nullptr, CodeViewContainer::Pdb);
+    MinimalSymbolDumper Dumper(P, opts::dump::DumpSymRecordBytes, Ids, Types);
+
+    Pipeline.addCallbackToPipeline(Deserializer);
+    Pipeline.addCallbackToPipeline(Dumper);
+    CVSymbolVisitor Visitor(Pipeline);
+
+    using ResultEntryType = std::pair<uint32_t, CVSymbol>;
+    for (StringRef Name : opts::dump::DumpGlobalNames) {
+      AutoIndent Indent(P);
+      P.formatLine("Global Name `{0}`", Name);
+      std::vector<ResultEntryType> Results =
+          Globals.findRecordsByName(Name, SymRecords);
+      if (Results.empty()) {
+        AutoIndent Indent(P);
+        P.printLine("(no matching records found)");
+        continue;
+      }
+
+      for (ResultEntryType Result : Results) {
+        if (auto E = Visitor.visitSymbolRecord(Result.second, Result.first))
+          return E;
+      }
+    }
+  }
   return Error::success();
 }
 
@@ -1671,8 +1708,6 @@ Error DumpOutputStyle::dumpSymbolsFromGSI(const GSIHashTable &Table,
 
   // Return early if we aren't dumping public hash table and address map info.
   if (HashExtras) {
-    P.formatBinary("Hash Bitmap", Table.HashBitmap, 0);
-
     P.formatLine("Hash Entries");
     {
       AutoIndent Indent2(P);

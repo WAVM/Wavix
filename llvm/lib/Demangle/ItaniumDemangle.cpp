@@ -112,14 +112,20 @@ struct DumpVisitor {
     printStr("}");
     --Depth;
   }
+
   // Overload used when T is exactly 'bool', not merely convertible to 'bool'.
-  template<typename T, T * = (bool*)nullptr>
-  void print(T B) {
-    printStr(B ? "true" : "false");
+  void print(bool B) { printStr(B ? "true" : "false"); }
+
+  template <class T>
+  typename std::enable_if<std::is_unsigned<T>::value>::type print(T N) {
+    fprintf(stderr, "%llu", (unsigned long long)N);
   }
-  void print(size_t N) {
-    fprintf(stderr, "%zu", N);
+
+  template <class T>
+  typename std::enable_if<std::is_signed<T>::value>::type print(T N) {
+    fprintf(stderr, "%lld", (long long)N);
   }
+
   void print(ReferenceKind RK) {
     switch (RK) {
     case ReferenceKind::LValue:
@@ -310,28 +316,13 @@ public:
     return Alloc.allocate(sizeof(Node *) * sz);
   }
 };
-
-bool initializeOutputStream(char *Buf, size_t *N, OutputStream &S,
-                            size_t InitSize) {
-  size_t BufferSize;
-  if (Buf == nullptr) {
-    Buf = static_cast<char *>(std::malloc(InitSize));
-    if (Buf == nullptr)
-      return true;
-    BufferSize = InitSize;
-  } else
-    BufferSize = *N;
-
-  S.reset(Buf, BufferSize);
-  return false;
-}
 }  // unnamed namespace
 
 //===----------------------------------------------------------------------===//
 // Code beyond this point should not be synchronized with libc++abi.
 //===----------------------------------------------------------------------===//
 
-using Demangler = itanium_demangle::Db<DefaultAllocator>;
+using Demangler = itanium_demangle::ManglingParser<DefaultAllocator>;
 
 char *llvm::itaniumDemangle(const char *MangledName, char *Buf,
                             size_t *N, int *Status) {

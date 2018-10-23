@@ -1040,17 +1040,14 @@ def : Pat<(v2f64 (bitconvert v1i128:$A)),
 def : Pat<(v1i128 (bitconvert v2f64:$A)),
           (COPY_TO_REGCLASS $A, VRRC)>;
 
-// sign extension patterns
-// To extend "in place" from v2i32 to v2i64, we have input data like:
-// | undef | i32 | undef | i32 |
-// but xvcvsxwdp expects the input in big-Endian format:
-// | i32 | undef | i32 | undef |
-// so we need to shift everything to the left by one i32 (word) before
-// the conversion.
-def : Pat<(sext_inreg v2i64:$C, v2i32),
-          (XVCVDPSXDS (XVCVSXWDP (XXSLDWI $C, $C, 1)))>;
-def : Pat<(v2f64 (sint_to_fp (sext_inreg v2i64:$C, v2i32))),
-          (XVCVSXWDP (XXSLDWI $C, $C, 1))>;
+def : Pat<(v2i64 (bitconvert f128:$A)),
+          (COPY_TO_REGCLASS $A, VRRC)>;
+def : Pat<(v4i32 (bitconvert f128:$A)),
+          (COPY_TO_REGCLASS $A, VRRC)>;
+def : Pat<(v8i16 (bitconvert f128:$A)),
+          (COPY_TO_REGCLASS $A, VRRC)>;
+def : Pat<(v16i8 (bitconvert f128:$A)),
+          (COPY_TO_REGCLASS $A, VRRC)>;
 
 def : Pat<(v2f64 (PPCsvec2fp v4i32:$C, 0)),
           (v2f64 (XVCVSXWDP (v2i64 (XXMRGHW $C, $C))))>;
@@ -2671,12 +2668,19 @@ let AddedComplexity = 400, Predicates = [HasP9Vector] in {
   def XSIEXPQP : XForm_18<63, 868, (outs vrrc:$vT), (ins vrrc:$vA, vsfrc:$vB),
                           "xsiexpqp $vT, $vA, $vB", IIC_VecFP, []>;
 
+  def : Pat<(f128 (int_ppc_scalar_insert_exp_qp f128:$vA, i64:$vB)),
+            (f128 (XSIEXPQP $vA, (MTVSRD $vB)))>;
+
   // Extract Exponent/Significand DP/QP
   def XSXEXPDP : XX2_RT5_XO5_XB6<60,  0, 347, "xsxexpdp", []>;
   def XSXSIGDP : XX2_RT5_XO5_XB6<60,  1, 347, "xsxsigdp", []>;
 
   def XSXEXPQP : X_VT5_XO5_VB5  <63,  2, 804, "xsxexpqp", []>;
   def XSXSIGQP : X_VT5_XO5_VB5  <63, 18, 804, "xsxsigqp", []>;
+
+  def : Pat<(i64 (int_ppc_scalar_extract_expq  f128:$vA)),
+            (i64 (MFVSRD (EXTRACT_SUBREG
+                           (v2i64 (XSXEXPQP $vA)), sub_64)))>;
 
   // Vector Insert Word
   let UseVSXReg = 1 in {

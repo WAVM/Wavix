@@ -46,34 +46,6 @@
 namespace llvm {
 
 //===----------------------------------------------------------------------===//
-//                            TerminatorInst Class
-//===----------------------------------------------------------------------===//
-
-/// Subclasses of this class are all able to terminate a basic
-/// block. Thus, these are all the flow control type of operations.
-///
-class TerminatorInst : public Instruction {
-protected:
-  TerminatorInst(Type *Ty, Instruction::TermOps iType,
-                 Use *Ops, unsigned NumOps,
-                 Instruction *InsertBefore = nullptr)
-    : Instruction(Ty, iType, Ops, NumOps, InsertBefore) {}
-
-  TerminatorInst(Type *Ty, Instruction::TermOps iType,
-                 Use *Ops, unsigned NumOps, BasicBlock *InsertAtEnd)
-    : Instruction(Ty, iType, Ops, NumOps, InsertAtEnd) {}
-
-public:
-  // Methods for support type inquiry through isa, cast, and dyn_cast:
-  static bool classof(const Instruction *I) {
-    return I->isTerminator();
-  }
-  static bool classof(const Value *V) {
-    return isa<Instruction>(V) && classof(cast<Instruction>(V));
-  }
-};
-
-//===----------------------------------------------------------------------===//
 //                          UnaryInstruction Class
 //===----------------------------------------------------------------------===//
 
@@ -336,21 +308,12 @@ public:
   static BinaryOperator *CreateNot(Value *Op, const Twine &Name,
                                    BasicBlock *InsertAtEnd);
 
-  /// Check if the given Value is a NEG, FNeg, or NOT instruction.
-  ///
-  static bool isNeg(const Value *V);
+  /// Check if the given Value is an FNeg instruction.
   static bool isFNeg(const Value *V, bool IgnoreZeroSign=false);
-  static bool isNot(const Value *V);
 
-  /// Helper functions to extract the unary argument of a NEG, FNEG or NOT
-  /// operation implemented via Sub, FSub, or Xor.
-  ///
-  static const Value *getNegArgument(const Value *BinOp);
-  static       Value *getNegArgument(      Value *BinOp);
+  /// Helper functions to extract the unary argument of an FNeg.
   static const Value *getFNegArgument(const Value *BinOp);
   static       Value *getFNegArgument(      Value *BinOp);
-  static const Value *getNotArgument(const Value *BinOp);
-  static       Value *getNotArgument(      Value *BinOp);
 
   BinaryOps getOpcode() const {
     return static_cast<BinaryOps>(Instruction::getOpcode());

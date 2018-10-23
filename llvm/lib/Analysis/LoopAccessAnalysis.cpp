@@ -509,7 +509,7 @@ public:
   /// Register a load  and whether it is only read from.
   void addLoad(MemoryLocation &Loc, bool IsReadOnly) {
     Value *Ptr = const_cast<Value*>(Loc.Ptr);
-    AST.add(Ptr, MemoryLocation::UnknownSize, Loc.AATags);
+    AST.add(Ptr, LocationSize::unknown(), Loc.AATags);
     Accesses.insert(MemAccessInfo(Ptr, false));
     if (IsReadOnly)
       ReadOnlyPtr.insert(Ptr);
@@ -518,7 +518,7 @@ public:
   /// Register a store.
   void addStore(MemoryLocation &Loc) {
     Value *Ptr = const_cast<Value*>(Loc.Ptr);
-    AST.add(Ptr, MemoryLocation::UnknownSize, Loc.AATags);
+    AST.add(Ptr, LocationSize::unknown(), Loc.AATags);
     Accesses.insert(MemAccessInfo(Ptr, true));
   }
 
@@ -1862,10 +1862,17 @@ void LoopAccessInfo::analyzeLoop(AliasAnalysis *AA, LoopInfo *LI,
   // writes and between reads and writes, but not between reads and reads.
   ValueSet Seen;
 
+  // Record uniform store addresses to identify if we have multiple stores
+  // to the same address.
+  ValueSet UniformStores;
+
   for (StoreInst *ST : Stores) {
     Value *Ptr = ST->getPointerOperand();
-    // Check for store to loop invariant address.
-    StoreToLoopInvariantAddress |= isUniform(Ptr);
+
+    if (isUniform(Ptr))
+      HasMultipleStoresToLoopInvariantAddress |=
+          !UniformStores.insert(Ptr).second;
+
     // If we did *not* see this pointer before, insert it to  the read-write
     // list. At this phase it is only a 'write' list.
     if (Seen.insert(Ptr).second) {
@@ -2265,7 +2272,7 @@ LoopAccessInfo::LoopAccessInfo(Loop *L, ScalarEvolution *SE,
       PtrRtChecking(llvm::make_unique<RuntimePointerChecking>(SE)),
       DepChecker(llvm::make_unique<MemoryDepChecker>(*PSE, L)), TheLoop(L),
       NumLoads(0), NumStores(0), MaxSafeDepDistBytes(-1), CanVecMem(false),
-      StoreToLoopInvariantAddress(false) {
+      HasMultipleStoresToLoopInvariantAddress(false) {
   if (canAnalyzeLoop())
     analyzeLoop(AA, LI, TLI, DT);
 }
@@ -2297,8 +2304,8 @@ void LoopAccessInfo::print(raw_ostream &OS, unsigned Depth) const {
   PtrRtChecking->print(OS, Depth);
   OS << "\n";
 
-  OS.indent(Depth) << "Store to invariant address was "
-                   << (StoreToLoopInvariantAddress ? "" : "not ")
+  OS.indent(Depth) << "Multiple stores to invariant address were "
+                   << (HasMultipleStoresToLoopInvariantAddress ? "" : "not ")
                    << "found in loop.\n";
 
   OS.indent(Depth) << "SCEV assumptions:\n";

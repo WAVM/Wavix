@@ -540,7 +540,7 @@ static Optional<EstimatedUnrollCost> analyzeLoopUnrollCost(
         }
       }
 
-      TerminatorInst *TI = BB->getTerminator();
+      Instruction *TI = BB->getTerminator();
 
       // Add in the live successors by first checking whether we have terminator
       // that may be simplified based on the values simplified by this call.
@@ -801,7 +801,7 @@ bool llvm::computeUnrollCount(
     }
   }
 
-  // 4th priority is loop peeling
+  // 4th priority is loop peeling.
   computePeelCount(L, LoopSize, UP, TripCount, SE);
   if (UP.PeelCount) {
     UP.Runtime = false;

@@ -355,15 +355,14 @@ namespace llvm {
       // Bit field extract.
       BEXTR,
 
+      // Zero High Bits Starting with Specified Bit Position.
+      BZHI,
+
       // LOW, HI, FLAGS = umul LHS, RHS.
       UMUL,
 
       // 8-bit SMUL/UMUL - AX, FLAGS = smul8/umul8 AL, RHS.
       SMUL8, UMUL8,
-
-      // 8-bit divrem that zero-extend the high result (AH).
-      UDIVREM8_ZEXT_HREG,
-      SDIVREM8_SEXT_HREG,
 
       // X86-specific multiply by immediate.
       MUL_IMM,
@@ -868,6 +867,13 @@ namespace llvm {
                                              const SelectionDAG &DAG,
                                              unsigned Depth) const override;
 
+    bool SimplifyDemandedVectorEltsForTargetNode(SDValue Op,
+                                                 const APInt &DemandedElts,
+                                                 APInt &KnownUndef,
+                                                 APInt &KnownZero,
+                                                 TargetLoweringOpt &TLO,
+                                                 unsigned Depth) const override;
+
     SDValue unwrapAddress(SDValue N) const override;
 
     bool isGAPlusOffset(SDNode *N, const GlobalValue* &GA,
@@ -1033,6 +1039,8 @@ namespace llvm {
                                            Type *Ty) const override;
 
     bool convertSelectOfConstantsToMath(EVT VT) const override;
+
+    bool decomposeMulByConstant(EVT VT, SDValue C) const override;
 
     /// Return true if EXTRACT_SUBVECTOR is cheap for this result type
     /// with this index.

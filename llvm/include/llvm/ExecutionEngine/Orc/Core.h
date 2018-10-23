@@ -18,12 +18,12 @@
 #include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/ExecutionEngine/Orc/SymbolStringPool.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/Debug.h"
 
-#include <list>
-#include <map>
 #include <memory>
-#include <set>
 #include <vector>
+
+#define DEBUG_TYPE "orc"
 
 namespace llvm {
 namespace orc {
@@ -41,33 +41,49 @@ using VModuleKey = uint64_t;
 
 /// A set of symbol names (represented by SymbolStringPtrs for
 //         efficiency).
-using SymbolNameSet = std::set<SymbolStringPtr>;
-
-/// Render a SymbolNameSet to an ostream.
-raw_ostream &operator<<(raw_ostream &OS, const SymbolNameSet &Symbols);
+using SymbolNameSet = DenseSet<SymbolStringPtr>;
 
 /// A map from symbol names (as SymbolStringPtrs) to JITSymbols
 ///        (address/flags pairs).
-using SymbolMap = std::map<SymbolStringPtr, JITEvaluatedSymbol>;
-
-/// Render a SymbolMap to an ostream.
-raw_ostream &operator<<(raw_ostream &OS, const SymbolMap &Symbols);
+using SymbolMap = DenseMap<SymbolStringPtr, JITEvaluatedSymbol>;
 
 /// A map from symbol names (as SymbolStringPtrs) to JITSymbolFlags.
-using SymbolFlagsMap = std::map<SymbolStringPtr, JITSymbolFlags>;
-
-/// Render a SymbolMap to an ostream.
-raw_ostream &operator<<(raw_ostream &OS, const SymbolFlagsMap &Symbols);
+using SymbolFlagsMap = DenseMap<SymbolStringPtr, JITSymbolFlags>;
 
 /// A base class for materialization failures that allows the failing
 ///        symbols to be obtained for logging.
-using SymbolDependenceMap = std::map<JITDylib *, SymbolNameSet>;
+using SymbolDependenceMap = DenseMap<JITDylib *, SymbolNameSet>;
+
+/// A list of JITDylib pointers.
+using JITDylibList = std::vector<JITDylib *>;
+
+/// Render a SymbolStringPtr.
+raw_ostream &operator<<(raw_ostream &OS, const SymbolStringPtr &Sym);
+
+/// Render a SymbolNameSet.
+raw_ostream &operator<<(raw_ostream &OS, const SymbolNameSet &Symbols);
+
+/// Render a SymbolFlagsMap entry.
+raw_ostream &operator<<(raw_ostream &OS, const SymbolFlagsMap::value_type &KV);
+
+/// Render a SymbolMap entry.
+raw_ostream &operator<<(raw_ostream &OS, const SymbolMap::value_type &KV);
+
+/// Render a SymbolFlagsMap.
+raw_ostream &operator<<(raw_ostream &OS, const SymbolFlagsMap &SymbolFlags);
+
+/// Render a SymbolMap.
+raw_ostream &operator<<(raw_ostream &OS, const SymbolMap &Symbols);
+
+/// Render a SymbolDependenceMap entry.
+raw_ostream &operator<<(raw_ostream &OS,
+                        const SymbolDependenceMap::value_type &KV);
 
 /// Render a SymbolDependendeMap.
 raw_ostream &operator<<(raw_ostream &OS, const SymbolDependenceMap &Deps);
 
-/// A list of JITDylib pointers.
-using JITDylibList = std::vector<JITDylib *>;
+/// Render a MaterializationUnit.
+raw_ostream &operator<<(raw_ostream &OS, const MaterializationUnit &MU);
 
 /// Render a JITDylibList.
 raw_ostream &operator<<(raw_ostream &OS, const JITDylibList &JDs);
@@ -115,6 +131,20 @@ private:
   SymbolNameSet Symbols;
 };
 
+/// Used to notify clients that a set of symbols could not be removed.
+class SymbolsCouldNotBeRemoved : public ErrorInfo<SymbolsCouldNotBeRemoved> {
+public:
+  static char ID;
+
+  SymbolsCouldNotBeRemoved(SymbolNameSet Symbols);
+  std::error_code convertToErrorCode() const override;
+  void log(raw_ostream &OS) const override;
+  const SymbolNameSet &getSymbols() const { return Symbols; }
+
+private:
+  SymbolNameSet Symbols;
+};
+
 /// Tracks responsibility for materialization, and mediates interactions between
 /// MaterializationUnits and JDs.
 ///
@@ -127,7 +157,7 @@ class MaterializationResponsibility {
 public:
   MaterializationResponsibility(MaterializationResponsibility &&) = default;
   MaterializationResponsibility &
-  operator=(MaterializationResponsibility &&) = default;
+  operator=(MaterializationResponsibility &&) = delete;
 
   /// Destruct a MaterializationResponsibility instance. In debug mode
   ///        this asserts that all symbols being tracked have been either
@@ -137,6 +167,9 @@ public:
   /// Returns the target JITDylib that these symbols are being materialized
   ///        into.
   JITDylib &getTargetJITDylib() const { return JD; }
+
+  /// Returns the VModuleKey for this instance.
+  VModuleKey getVModuleKey() const { return K; }
 
   /// Returns the symbol flags map for this responsibility instance.
   /// Note: The returned flags may have transient flags (Lazy, Materializing)
@@ -148,7 +181,7 @@ public:
   /// MaterializationResponsibility object that have queries pending. This
   /// information can be used to return responsibility for unrequested symbols
   /// back to the JITDylib via the delegate method.
-  SymbolNameSet getRequestedSymbols();
+  SymbolNameSet getRequestedSymbols() const;
 
   /// Notifies the target JITDylib that the given symbols have been resolved.
   /// This will update the given symbols' addresses in the JITDylib, and notify
@@ -188,7 +221,8 @@ public:
   /// Delegates responsibility for the given symbols to the returned
   /// materialization responsibility. Useful for breaking up work between
   /// threads, or different kinds of materialization processes.
-  MaterializationResponsibility delegate(const SymbolNameSet &Symbols);
+  MaterializationResponsibility delegate(const SymbolNameSet &Symbols,
+                                         VModuleKey NewKey = VModuleKey());
 
   void addDependencies(const SymbolStringPtr &Name,
                        const SymbolDependenceMap &Dependencies);
@@ -199,10 +233,12 @@ public:
 private:
   /// Create a MaterializationResponsibility for the given JITDylib and
   ///        initial symbols.
-  MaterializationResponsibility(JITDylib &JD, SymbolFlagsMap SymbolFlags);
+  MaterializationResponsibility(JITDylib &JD, SymbolFlagsMap SymbolFlags,
+                                VModuleKey K);
 
   JITDylib &JD;
   SymbolFlagsMap SymbolFlags;
+  VModuleKey K;
 };
 
 /// A MaterializationUnit represents a set of symbol definitions that can
@@ -215,10 +251,14 @@ private:
 /// stronger definition is added or already present.
 class MaterializationUnit {
 public:
-  MaterializationUnit(SymbolFlagsMap InitalSymbolFlags)
-      : SymbolFlags(std::move(InitalSymbolFlags)) {}
+  MaterializationUnit(SymbolFlagsMap InitalSymbolFlags, VModuleKey K)
+      : SymbolFlags(std::move(InitalSymbolFlags)), K(std::move(K)) {}
 
   virtual ~MaterializationUnit() {}
+
+  /// Return the name of this materialization unit. Useful for debugging
+  /// output.
+  virtual StringRef getName() const = 0;
 
   /// Return the set of symbols that this source provides.
   const SymbolFlagsMap &getSymbols() const { return SymbolFlags; }
@@ -227,18 +267,20 @@ public:
   /// ExecutionSession::DispatchMaterializationFunction) to trigger
   /// materialization of this MaterializationUnit.
   void doMaterialize(JITDylib &JD) {
-    materialize(MaterializationResponsibility(JD, std::move(SymbolFlags)));
+    materialize(MaterializationResponsibility(JD, std::move(SymbolFlags),
+                                              std::move(K)));
   }
 
   /// Called by JITDylibs to notify MaterializationUnits that the given symbol
   /// has been overridden.
-  void doDiscard(const JITDylib &JD, SymbolStringPtr Name) {
+  void doDiscard(const JITDylib &JD, const SymbolStringPtr &Name) {
     SymbolFlags.erase(Name);
     discard(JD, std::move(Name));
   }
 
 protected:
   SymbolFlagsMap SymbolFlags;
+  VModuleKey K;
 
 private:
   virtual void anchor();
@@ -252,7 +294,7 @@ private:
   ///        from the source (e.g. if the source is an LLVM IR Module and the
   ///        symbol is a function, delete the function body or mark it available
   ///        externally).
-  virtual void discard(const JITDylib &JD, SymbolStringPtr Name) = 0;
+  virtual void discard(const JITDylib &JD, const SymbolStringPtr &Name) = 0;
 };
 
 using MaterializationUnitList =
@@ -264,11 +306,13 @@ using MaterializationUnitList =
 /// materialized.
 class AbsoluteSymbolsMaterializationUnit : public MaterializationUnit {
 public:
-  AbsoluteSymbolsMaterializationUnit(SymbolMap Symbols);
+  AbsoluteSymbolsMaterializationUnit(SymbolMap Symbols, VModuleKey K);
+
+  StringRef getName() const override;
 
 private:
   void materialize(MaterializationResponsibility R) override;
-  void discard(const JITDylib &JD, SymbolStringPtr Name) override;
+  void discard(const JITDylib &JD, const SymbolStringPtr &Name) override;
   static SymbolFlagsMap extractFlags(const SymbolMap &Symbols);
 
   SymbolMap Symbols;
@@ -285,9 +329,9 @@ private:
 /// \endcode
 ///
 inline std::unique_ptr<AbsoluteSymbolsMaterializationUnit>
-absoluteSymbols(SymbolMap Symbols) {
+absoluteSymbols(SymbolMap Symbols, VModuleKey K = VModuleKey()) {
   return llvm::make_unique<AbsoluteSymbolsMaterializationUnit>(
-      std::move(Symbols));
+      std::move(Symbols), std::move(K));
 }
 
 struct SymbolAliasMapEntry {
@@ -300,7 +344,7 @@ struct SymbolAliasMapEntry {
 };
 
 /// A map of Symbols to (Symbol, Flags) pairs.
-using SymbolAliasMap = std::map<SymbolStringPtr, SymbolAliasMapEntry>;
+using SymbolAliasMap = DenseMap<SymbolStringPtr, SymbolAliasMapEntry>;
 
 /// A materialization unit for symbol aliases. Allows existing symbols to be
 /// aliased with alternate flags.
@@ -313,11 +357,14 @@ public:
   /// Note: Care must be taken that no sets of aliases form a cycle, as such
   ///       a cycle will result in a deadlock when any symbol in the cycle is
   ///       resolved.
-  ReExportsMaterializationUnit(JITDylib *SourceJD, SymbolAliasMap Aliases);
+  ReExportsMaterializationUnit(JITDylib *SourceJD, SymbolAliasMap Aliases,
+                               VModuleKey K);
+
+  StringRef getName() const override;
 
 private:
   void materialize(MaterializationResponsibility R) override;
-  void discard(const JITDylib &JD, SymbolStringPtr Name) override;
+  void discard(const JITDylib &JD, const SymbolStringPtr &Name) override;
   static SymbolFlagsMap extractFlags(const SymbolAliasMap &Aliases);
 
   JITDylib *SourceJD = nullptr;
@@ -336,17 +383,18 @@ private:
 ///     return Err;
 /// \endcode
 inline std::unique_ptr<ReExportsMaterializationUnit>
-symbolAliases(SymbolAliasMap Aliases) {
-  return llvm::make_unique<ReExportsMaterializationUnit>(nullptr,
-                                                         std::move(Aliases));
+symbolAliases(SymbolAliasMap Aliases, VModuleKey K = VModuleKey()) {
+  return llvm::make_unique<ReExportsMaterializationUnit>(
+      nullptr, std::move(Aliases), std::move(K));
 }
 
 /// Create a materialization unit for re-exporting symbols from another JITDylib
 /// with alternative names/flags.
 inline std::unique_ptr<ReExportsMaterializationUnit>
-reexports(JITDylib &SourceJD, SymbolAliasMap Aliases) {
-  return llvm::make_unique<ReExportsMaterializationUnit>(&SourceJD,
-                                                         std::move(Aliases));
+reexports(JITDylib &SourceJD, SymbolAliasMap Aliases,
+          VModuleKey K = VModuleKey()) {
+  return llvm::make_unique<ReExportsMaterializationUnit>(
+      &SourceJD, std::move(Aliases), std::move(K));
 }
 
 /// Build a SymbolAliasMap for the common case where you want to re-export
@@ -354,15 +402,22 @@ reexports(JITDylib &SourceJD, SymbolAliasMap Aliases) {
 Expected<SymbolAliasMap>
 buildSimpleReexportsAliasMap(JITDylib &SourceJD, const SymbolNameSet &Symbols);
 
-class ReexportsFallbackDefinitionGenerator {
+/// ReexportsGenerator can be used with JITDylib::setGenerator to automatically
+/// re-export a subset of the source JITDylib's symbols in the target.
+class ReexportsGenerator {
 public:
   using SymbolPredicate = std::function<bool(SymbolStringPtr)>;
-  ReexportsFallbackDefinitionGenerator(JITDylib &BackingJD,
-                                       SymbolPredicate Allow);
+
+  /// Create a reexports generator. If an Allow predicate is passed, only
+  /// symbols for which the predicate returns true will be reexported. If no
+  /// Allow predicate is passed, all symbols will be exported.
+  ReexportsGenerator(JITDylib &SourceJD,
+                     SymbolPredicate Allow = SymbolPredicate());
+
   SymbolNameSet operator()(JITDylib &JD, const SymbolNameSet &Names);
 
 private:
-  JITDylib &BackingJD;
+  JITDylib &SourceJD;
   SymbolPredicate Allow;
 };
 
@@ -373,6 +428,7 @@ private:
 class AsynchronousSymbolQuery {
   friend class ExecutionSession;
   friend class JITDylib;
+  friend class JITSymbolResolverAdapter;
 
 public:
 
@@ -436,11 +492,11 @@ class JITDylib {
   friend class ExecutionSession;
   friend class MaterializationResponsibility;
 public:
-  using FallbackDefinitionGeneratorFunction = std::function<SymbolNameSet(
+  using GeneratorFunction = std::function<SymbolNameSet(
       JITDylib &Parent, const SymbolNameSet &Names)>;
 
   using AsynchronousSymbolQuerySet =
-      std::set<std::shared_ptr<AsynchronousSymbolQuery>>;
+    std::set<std::shared_ptr<AsynchronousSymbolQuery>>;
 
   JITDylib(const JITDylib &) = delete;
   JITDylib &operator=(const JITDylib &) = delete;
@@ -453,12 +509,12 @@ public:
   /// Get a reference to the ExecutionSession for this JITDylib.
   ExecutionSession &getExecutionSession() const { return ES; }
 
-  /// Set a fallback defenition generator. If set, lookup and lookupFlags will
-  /// pass the unresolved symbols set to the fallback definition generator,
-  /// allowing it to add a new definition to the JITDylib.
-  void setFallbackDefinitionGenerator(
-      FallbackDefinitionGeneratorFunction FallbackDefinitionGenerator) {
-    this->FallbackDefinitionGenerator = std::move(FallbackDefinitionGenerator);
+  /// Set a definition generator. If set, whenever a symbol fails to resolve
+  /// within this JITDylib, lookup and lookupFlags will pass the unresolved
+  /// symbols set to the definition generator. The generator can optionally
+  /// add a definition for the unresolved symbols to the dylib.
+  void setGenerator(GeneratorFunction DefGenerator) {
+    this->DefGenerator = std::move(DefGenerator);
   }
 
   /// Set the search order to be used when fixing up definitions in JITDylib.
@@ -518,6 +574,18 @@ public:
   template <typename MaterializationUnitType>
   Error define(std::unique_ptr<MaterializationUnitType> &MU);
 
+  /// Tries to remove the given symbols.
+  ///
+  /// If any symbols are not defined in this JITDylib this method will return
+  /// a SymbolsNotFound error covering the missing symbols.
+  ///
+  /// If all symbols are found but some symbols are in the process of being
+  /// materialized this method will return a SymbolsCouldNotBeRemoved error.
+  ///
+  /// On success, all symbols are removed. On failure, the JITDylib state is
+  /// left unmodified (no symbols are removed).
+  Error remove(const SymbolNameSet &Names);
+
   /// Search the given JITDylib for the symbols in Symbols. If found, store
   ///        the flags for each symbol in Flags. Returns any unresolved symbols.
   SymbolFlagsMap lookupFlags(const SymbolNameSet &Names);
@@ -548,7 +616,7 @@ private:
   };
 
   using UnmaterializedInfosMap =
-      std::map<SymbolStringPtr, std::shared_ptr<UnmaterializedInfo>>;
+      DenseMap<SymbolStringPtr, std::shared_ptr<UnmaterializedInfo>>;
 
   struct MaterializingInfo {
     AsynchronousSymbolQueryList PendingQueries;
@@ -557,7 +625,7 @@ private:
     bool IsEmitted = false;
   };
 
-  using MaterializingInfosMap = std::map<SymbolStringPtr, MaterializingInfo>;
+  using MaterializingInfosMap = DenseMap<SymbolStringPtr, MaterializingInfo>;
 
   using LookupImplActionFlags = enum {
     None = 0,
@@ -574,10 +642,12 @@ private:
                                 const SymbolNameSet &Names);
 
   void lodgeQuery(std::shared_ptr<AsynchronousSymbolQuery> &Q,
-                  SymbolNameSet &Unresolved, MaterializationUnitList &MUs);
+                  SymbolNameSet &Unresolved, JITDylib *MatchNonExportedInJD,
+                  bool MatchNonExported, MaterializationUnitList &MUs);
 
   void lodgeQueryImpl(std::shared_ptr<AsynchronousSymbolQuery> &Q,
-                      SymbolNameSet &Unresolved, MaterializationUnitList &MUs);
+                      SymbolNameSet &Unresolved, JITDylib *MatchNonExportedInJD,
+                      bool MatchNonExported, MaterializationUnitList &MUs);
 
   LookupImplActionFlags
   lookupImpl(std::shared_ptr<AsynchronousSymbolQuery> &Q,
@@ -595,7 +665,7 @@ private:
 
   void replace(std::unique_ptr<MaterializationUnit> MU);
 
-  SymbolNameSet getRequestedSymbols(const SymbolFlagsMap &SymbolFlags);
+  SymbolNameSet getRequestedSymbols(const SymbolFlagsMap &SymbolFlags) const;
 
   void addDependencies(const SymbolStringPtr &Name,
                        const SymbolDependenceMap &Dependants);
@@ -611,7 +681,7 @@ private:
   SymbolMap Symbols;
   UnmaterializedInfosMap UnmaterializedInfos;
   MaterializingInfosMap MaterializingInfos;
-  FallbackDefinitionGeneratorFunction FallbackDefinitionGenerator;
+  GeneratorFunction DefGenerator;
   JITDylibList SearchOrder;
 };
 
@@ -633,8 +703,11 @@ public:
   /// SymbolStringPools may be shared between ExecutionSessions.
   ExecutionSession(std::shared_ptr<SymbolStringPool> SSP = nullptr);
 
-  /// Returns the SymbolStringPool for this ExecutionSession.
-  SymbolStringPool &getSymbolStringPool() const { return *SSP; }
+  /// Add a symbol name to the SymbolStringPool and return a pointer to it.
+  SymbolStringPtr intern(StringRef SymName) { return SSP->intern(SymName); }
+
+  /// Returns a shared_ptr to the SymbolStringPool for this ExecutionSession.
+  std::shared_ptr<SymbolStringPool> getSymbolStringPool() const { return SSP; }
 
   /// Run the given lambda with the session mutex locked.
   template <typename Func> auto runSessionLocked(Func &&F) -> decltype(F()) {
@@ -651,7 +724,9 @@ public:
                            bool AddToMainDylibSearchOrder = true);
 
   /// Allocate a module key for a new module to add to the JIT.
-  VModuleKey allocateVModule() { return ++LastKey; }
+  VModuleKey allocateVModule() {
+    return runSessionLocked([this]() { return ++LastKey; });
+  }
 
   /// Return a module key to the ExecutionSession so that it can be
   ///        re-used. This should only be done once all resources associated
@@ -707,9 +782,19 @@ public:
   /// dependenant symbols for this query (e.g. it is being made by a top level
   /// client to get an address to call) then the value NoDependenciesToRegister
   /// can be used.
-  void lookup(const JITDylibList &JDs, const SymbolNameSet &Symbols,
+  ///
+  /// If the MatchNonExportedInJD pointer is non-null, then the lookup will find
+  /// non-exported symbols defined in the JITDylib pointed to by
+  /// MatchNonExportedInJD.
+  /// If MatchNonExported is true the lookup will find non-exported symbols in
+  /// any JITDylib (setting MatchNonExportedInJD is redundant in such cases).
+  /// If MatchNonExported is false and MatchNonExportedInJD is null,
+  /// non-exported symbols will never be found.
+  void lookup(const JITDylibList &JDs, SymbolNameSet Symbols,
               SymbolsResolvedCallback OnResolve, SymbolsReadyCallback OnReady,
-              RegisterDependenciesFunction RegisterDependencies);
+              RegisterDependenciesFunction RegisterDependencies,
+              JITDylib *MatchNonExportedInJD = nullptr,
+              bool MatchNonExported = false);
 
   /// Blocking version of lookup above. Returns the resolved symbol map.
   /// If WaitUntilReady is true (the default), will not return until all
@@ -720,24 +805,35 @@ public:
   /// error will be reported via reportErrors.
   Expected<SymbolMap> lookup(const JITDylibList &JDs,
                              const SymbolNameSet &Symbols,
-                             RegisterDependenciesFunction RegisterDependencies,
-                             bool WaitUntilReady = true);
+                             RegisterDependenciesFunction RegisterDependencies =
+                                 NoDependenciesToRegister,
+                             bool WaitUntilReady = true,
+                             JITDylib *MatchNonExportedInJD = nullptr,
+                             bool MatchNonExported = false);
 
-  /// Convenience version of the blocking version of lookup above. Uses the main
-  /// JITDylib's search order as the lookup order, and registers no
-  /// dependencies.
-  Expected<SymbolMap> lookup(const SymbolNameSet &Symbols) {
-    return getMainJITDylib().withSearchOrderDo(
-        [&](const JITDylibList &SearchOrder) {
-          return lookup(SearchOrder, Symbols, NoDependenciesToRegister, true);
-        });
-  }
+  /// Convenience version of blocking lookup.
+  /// Performs a single-symbol lookup.
+  Expected<JITEvaluatedSymbol> lookup(const JITDylibList &JDs,
+                                      SymbolStringPtr Symbol,
+                                      bool MatchNonExported = false);
+
+  /// Convenience version of blocking lookup.
+  /// Performs a single-symbol lookup, auto-interning the given symbol name.
+  Expected<JITEvaluatedSymbol> lookup(const JITDylibList &JDs, StringRef Symbol,
+                                      bool MatchNonExported = false);
 
   /// Materialize the given unit.
   void dispatchMaterialization(JITDylib &JD,
                                std::unique_ptr<MaterializationUnit> MU) {
+    LLVM_DEBUG(runSessionLocked([&]() {
+                 dbgs() << "Compiling, for " << JD.getName() << ", " << *MU
+                        << "\n";
+               }););
     DispatchMaterialization(JD, std::move(MU));
   }
+
+  /// Dump the state of all the JITDylibs in this session.
+  void dump(raw_ostream &OS);
 
 private:
   static void logErrorsToStdErr(Error Err) {
@@ -807,16 +903,6 @@ Error JITDylib::define(std::unique_ptr<MaterializationUnitType> &MU) {
   });
 }
 
-/// Look up the given names in the given JITDylibs.
-/// JDs will be searched in order and no JITDylib pointer may be null.
-/// All symbols must be found within the given JITDylibs or an error
-/// will be returned.
-Expected<SymbolMap> lookup(const JITDylibList &JDs, SymbolNameSet Names);
-
-/// Look up a symbol by searching a list of JITDylibs.
-Expected<JITEvaluatedSymbol> lookup(const JITDylibList &JDs,
-                                    SymbolStringPtr Name);
-
 /// Mangles symbol names then uniques them in the context of an
 /// ExecutionSession.
 class MangleAndInterner {
@@ -831,5 +917,7 @@ private:
 
 } // End namespace orc
 } // End namespace llvm
+
+#undef DEBUG_TYPE // "orc"
 
 #endif // LLVM_EXECUTIONENGINE_ORC_CORE_H

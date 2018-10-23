@@ -19,6 +19,7 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/GlobalsModRef.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/RegionInfo.h"
 #include "llvm/Analysis/RegionIterator.h"
@@ -320,8 +321,9 @@ class CHRScope {
 class CHR {
  public:
   CHR(Function &Fin, BlockFrequencyInfo &BFIin, DominatorTree &DTin,
-      ProfileSummaryInfo &PSIin, RegionInfo &RIin)
-      : F(Fin), BFI(BFIin), DT(DTin), PSI(PSIin), RI(RIin) {}
+      ProfileSummaryInfo &PSIin, RegionInfo &RIin,
+      OptimizationRemarkEmitter &OREin)
+      : F(Fin), BFI(BFIin), DT(DTin), PSI(PSIin), RI(RIin), ORE(OREin) {}
 
   ~CHR() {
     for (CHRScope *Scope : Scopes) {
@@ -403,6 +405,7 @@ class CHR {
   DominatorTree &DT;
   ProfileSummaryInfo &PSI;
   RegionInfo &RI;
+  OptimizationRemarkEmitter &ORE;
   CHRStats Stats;
 
   // All the true-biased regions in the function
@@ -618,9 +621,10 @@ static BranchProbability getCHRBiasThreshold() {
 // CHRBiasThreshold, put Key into TrueSet and return true. If FalseProb >=
 // CHRBiasThreshold, put Key into FalseSet and return true. Otherwise, return
 // false.
-template<typename K, typename S, typename M>
-bool checkBias(K *Key, BranchProbability TrueProb, BranchProbability FalseProb,
-               S &TrueSet, S &FalseSet, M &BiasMap) {
+template <typename K, typename S, typename M>
+static bool checkBias(K *Key, BranchProbability TrueProb,
+                      BranchProbability FalseProb, S &TrueSet, S &FalseSet,
+                      M &BiasMap) {
   BranchProbability Threshold = getCHRBiasThreshold();
   if (TrueProb >= Threshold) {
     TrueSet.insert(Key);
@@ -771,6 +775,12 @@ CHRScope * CHR::findScope(Region *R) {
         Scopes.insert(Result);
         CHR_DEBUG(dbgs() << "Found a region with a branch\n");
         ++Stats.NumBranches;
+        if (!RI.HasBranch) {
+          ORE.emit([&]() {
+            return OptimizationRemarkMissed(DEBUG_TYPE, "BranchNotBiased", BI)
+                << "Branch not biased";
+          });
+        }
       }
     }
   }
@@ -811,6 +821,11 @@ CHRScope * CHR::findScope(Region *R) {
                                 FalseBiasedSelectsGlobal,
                                 SelectBiasMap))
             RI.Selects.push_back(SI);
+          else
+            ORE.emit([&]() {
+              return OptimizationRemarkMissed(DEBUG_TYPE, "SelectNotBiased", SI)
+                  << "Select not biased";
+            });
       };
       if (!Result) {
         CHR_DEBUG(dbgs() << "Found a select-only region\n");
@@ -882,6 +897,11 @@ void CHR::checkScopeHoistable(CHRScope *Scope) {
                                          DT, Unhoistables, nullptr);
       if (!IsHoistable) {
         CHR_DEBUG(dbgs() << "Dropping select " << *SI << "\n");
+        ORE.emit([&]() {
+          return OptimizationRemarkMissed(DEBUG_TYPE,
+                                          "DropUnhoistableSelect", SI)
+              << "Dropped unhoistable select";
+        });
         it = Selects.erase(it);
         // Since we are dropping the select here, we also drop it from
         // Unhoistables.
@@ -905,6 +925,13 @@ void CHR::checkScopeHoistable(CHRScope *Scope) {
             for (SelectInst *SI : Selects) {
               dbgs() << "SI " << *SI << "\n";
             });
+        for (SelectInst *SI : Selects) {
+          ORE.emit([&]() {
+            return OptimizationRemarkMissed(DEBUG_TYPE,
+                                            "DropSelectUnhoistableBranch", SI)
+                << "Dropped select due to unhoistable branch";
+          });
+        }
         Selects.erase(std::remove_if(Selects.begin(), Selects.end(),
                                      [EntryBB](SelectInst *SI) {
                                        return SI->getParent() == EntryBB;
@@ -1133,6 +1160,13 @@ SmallVector<CHRScope *, 8> CHR::splitScope(
                         ConditionValues, DT, Unhoistables)) {
           PrevConditionValues = ConditionValues;
           PrevInsertPoint = InsertPoint;
+          ORE.emit([&]() {
+            return OptimizationRemarkMissed(DEBUG_TYPE,
+                                            "SplitScopeFromOuter",
+                                            RI.R->getEntry()->getTerminator())
+                << "Split scope from outer due to unhoistable branch/select "
+                << "and/or lack of common condition values";
+          });
         } else {
           // Not splitting from the outer. Use the outer bases and insert
           // point. Union the bases.
@@ -1162,6 +1196,13 @@ SmallVector<CHRScope *, 8> CHR::splitScope(
         PrevConditionValues = ConditionValues;
         PrevInsertPoint = InsertPoint;
         PrevSplitFromOuter = true;
+        ORE.emit([&]() {
+          return OptimizationRemarkMissed(DEBUG_TYPE,
+                                          "SplitScopeFromPrev",
+                                          RI.R->getEntry()->getTerminator())
+              << "Split scope from previous due to unhoistable branch/select "
+              << "and/or lack of common condition values";
+        });
       } else {
         // Not splitting. Union the bases. Keep the hoist point.
         PrevConditionValues.insert(ConditionValues.begin(), ConditionValues.end());
@@ -1283,6 +1324,15 @@ void CHR::filterScopes(SmallVectorImpl<CHRScope *> &Input,
                 << " falsy-regions " << Scope->FalseBiasedRegions.size()
                 << " true-selects " << Scope->TrueBiasedSelects.size()
                 << " false-selects " << Scope->FalseBiasedSelects.size() << "\n");
+      ORE.emit([&]() {
+        return OptimizationRemarkMissed(
+            DEBUG_TYPE,
+            "DropScopeWithOneBranchOrSelect",
+            Scope->RegInfos[0].R->getEntry()->getTerminator())
+            << "Drop scope with < "
+            << ore::NV("CHRMergeThreshold", CHRMergeThreshold)
+            << " biased branch(es) or select(s)";
+      });
       continue;
     }
     Output.push_back(Scope);
@@ -1773,6 +1823,14 @@ void CHR::fixupBranchesAndSelects(CHRScope *Scope,
   }
   Stats.NumBranchesDelta += NumCHRedBranches - 1;
   Stats.WeightedNumBranchesDelta += (NumCHRedBranches - 1) * ProfileCount;
+  ORE.emit([&]() {
+    return OptimizationRemark(DEBUG_TYPE,
+                              "CHR",
+                              // Refer to the hot (original) path
+                              MergedBR->getSuccessor(0)->getTerminator())
+        << "Merged " << ore::NV("NumCHRedBranches", NumCHRedBranches)
+        << " branches or selects";
+  });
   MergedBR->setCondition(MergedCondition);
   SmallVector<uint32_t, 2> Weights;
   Weights.push_back(static_cast<uint32_t>(CHRBranchBias.scale(1000)));
@@ -1961,8 +2019,18 @@ bool CHR::run() {
     }
   }
 
-  if (Changed)
+  if (Changed) {
     CHR_DEBUG(dumpIR(F, "after", &Stats));
+    ORE.emit([&]() {
+      return OptimizationRemark(DEBUG_TYPE, "Stats", &F)
+          << ore::NV("Function", &F) << " "
+          << "Reduced the number of branches in hot paths by "
+          << ore::NV("NumBranchesDelta", Stats.NumBranchesDelta)
+          << " (static) and "
+          << ore::NV("WeightedNumBranchesDelta", Stats.WeightedNumBranchesDelta)
+          << " (weighted by PGO count)";
+    });
+  }
 
   return Changed;
 }
@@ -1974,7 +2042,9 @@ bool ControlHeightReductionLegacyPass::runOnFunction(Function &F) {
   ProfileSummaryInfo &PSI =
       *getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
   RegionInfo &RI = getAnalysis<RegionInfoPass>().getRegionInfo();
-  return CHR(F, BFI, DT, PSI, RI).run();
+  std::unique_ptr<OptimizationRemarkEmitter> OwnedORE =
+      llvm::make_unique<OptimizationRemarkEmitter>(&F);
+  return CHR(F, BFI, DT, PSI, RI, *OwnedORE.get()).run();
 }
 
 namespace llvm {
@@ -1992,7 +2062,8 @@ PreservedAnalyses ControlHeightReductionPass::run(
   auto &MAM = MAMProxy.getManager();
   auto &PSI = *MAM.getCachedResult<ProfileSummaryAnalysis>(*F.getParent());
   auto &RI = FAM.getResult<RegionInfoAnalysis>(F);
-  bool Changed = CHR(F, BFI, DT, PSI, RI).run();
+  auto &ORE = FAM.getResult<OptimizationRemarkEmitterAnalysis>(F);
+  bool Changed = CHR(F, BFI, DT, PSI, RI, ORE).run();
   if (!Changed)
     return PreservedAnalyses::all();
   auto PA = PreservedAnalyses();

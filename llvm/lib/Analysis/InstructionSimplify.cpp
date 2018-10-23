@@ -4508,10 +4508,8 @@ static Value *SimplifyFDivInst(Value *Op0, Value *Op1, FastMathFlags FMF,
     // -X /  X -> -1.0 and
     //  X / -X -> -1.0 are legal when NaNs are ignored.
     // We can ignore signed zeros because +-0.0/+-0.0 is NaN and ignored.
-    if ((BinaryOperator::isFNeg(Op0, /*IgnoreZeroSign=*/true) &&
-         BinaryOperator::getFNegArgument(Op0) == Op1) ||
-        (BinaryOperator::isFNeg(Op1, /*IgnoreZeroSign=*/true) &&
-         BinaryOperator::getFNegArgument(Op1) == Op0))
+    if (match(Op0, m_FNegNSZ(m_Specific(Op1))) ||
+        match(Op1, m_FNegNSZ(m_Specific(Op0))))
       return ConstantFP::get(Op0->getType(), -1.0);
   }
 
@@ -4829,13 +4827,24 @@ static Value *simplifyBinaryIntrinsic(Function *F, Value *Op0, Value *Op1,
     }
     break;
   case Intrinsic::maxnum:
-  case Intrinsic::minnum: {
+  case Intrinsic::minnum:
+  case Intrinsic::maximum:
+  case Intrinsic::minimum: {
     // If the arguments are the same, this is a no-op.
     if (Op0 == Op1) return Op0;
 
-    // If one argument is NaN or undef, return the other argument.
-    if (match(Op0, m_CombineOr(m_NaN(), m_Undef()))) return Op1;
-    if (match(Op1, m_CombineOr(m_NaN(), m_Undef()))) return Op0;
+    // If one argument is undef, return the other argument.
+    if (match(Op0, m_Undef()))
+      return Op1;
+    if (match(Op1, m_Undef()))
+      return Op0;
+
+    // If one argument is NaN, return other or NaN appropriately.
+    bool PropagateNaN = IID == Intrinsic::minimum || IID == Intrinsic::maximum;
+    if (match(Op0, m_NaN()))
+      return PropagateNaN ? Op0 : Op1;
+    if (match(Op1, m_NaN()))
+      return PropagateNaN ? Op1 : Op0;
 
     // Min/max of the same operation with common operand:
     // m(m(X, Y)), X --> m(X, Y) (4 commuted variants)
@@ -4848,9 +4857,9 @@ static Value *simplifyBinaryIntrinsic(Function *F, Value *Op0, Value *Op1,
           (M1->getOperand(0) == Op0 || M1->getOperand(1) == Op0))
         return Op1;
 
-    // minnum(X, -Inf) --> -Inf (and commuted variant)
-    // maxnum(X, +Inf) --> +Inf (and commuted variant)
-    bool UseNegInf = IID == Intrinsic::minnum;
+    // min(X, -Inf) --> -Inf (and commuted variant)
+    // max(X, +Inf) --> +Inf (and commuted variant)
+    bool UseNegInf = IID == Intrinsic::minnum || IID == Intrinsic::minimum;
     const APFloat *C;
     if ((match(Op0, m_APFloat(C)) && C->isInfinity() &&
          C->isNegative() == UseNegInf) ||

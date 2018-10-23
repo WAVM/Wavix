@@ -320,7 +320,7 @@ bool LoopIdiomRecognize::runOnCountableLoop() {
 
   // The following transforms hoist stores/memsets into the loop pre-header.
   // Give up if the loop has instructions may throw.
-  LoopSafetyInfo SafetyInfo;
+  SimpleLoopSafetyInfo SafetyInfo;
   SafetyInfo.computeLoopSafetyInfo(CurLoop);
   if (SafetyInfo.anyBlockMayThrow())
     return MadeChange;
@@ -348,6 +348,9 @@ static APInt getStoreStride(const SCEVAddRecExpr *StoreEv) {
 /// Note that we don't ever attempt to use memset_pattern8 or 4, because these
 /// just replicate their input array and then pass on to memset_pattern16.
 static Constant *getMemSetPatternValue(Value *V, const DataLayout *DL) {
+  // FIXME: This could check for UndefValue because it can be merged into any
+  // other valid pattern.
+
   // If the value isn't a constant, we can't promote it to being in a constant
   // array.  We could theoretically do a store to an alloca or something, but
   // that doesn't seem worthwhile.
@@ -645,9 +648,13 @@ bool LoopIdiomRecognize::processLoopStores(SmallVectorImpl<StoreInst *> &SL,
 
       if (isConsecutiveAccess(SL[i], SL[k], *DL, *SE, false)) {
         if (For == ForMemset::Yes) {
+          if (isa<UndefValue>(FirstSplatValue))
+            FirstSplatValue = SecondSplatValue;
           if (FirstSplatValue != SecondSplatValue)
             continue;
         } else {
+          if (isa<UndefValue>(FirstPatternValue))
+            FirstPatternValue = SecondPatternValue;
           if (FirstPatternValue != SecondPatternValue)
             continue;
         }
@@ -921,10 +928,11 @@ bool LoopIdiomRecognize::processLoopStridedStore(
     Type *Int8PtrTy = DestInt8PtrTy;
 
     Module *M = TheStore->getModule();
+    StringRef FuncName = "memset_pattern16";
     Value *MSP =
-        M->getOrInsertFunction("memset_pattern16", Builder.getVoidTy(),
+        M->getOrInsertFunction(FuncName, Builder.getVoidTy(),
                                Int8PtrTy, Int8PtrTy, IntPtr);
-    inferLibFuncAttributes(*M->getFunction("memset_pattern16"), *TLI);
+    inferLibFuncAttributes(M, FuncName, *TLI);
 
     // Otherwise we should form a memset_pattern16.  PatternValue is known to be
     // an constant array of 16-bytes.  Plop the value into a mergable global.

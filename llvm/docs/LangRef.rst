@@ -1450,6 +1450,10 @@ example:
 ``noredzone``
     This attribute indicates that the code generator should not use a
     red zone, even if the target-specific ABI normally permits it.
+``indirect-tls-seg-refs``
+    This attribute indicates that the code generator should not use
+    direct TLS access through segment registers, even if the
+    target-specific ABI normally permits it.
 ``noreturn``
     This function attribute indicates that the function never returns
     normally. This produces undefined behavior at runtime if the
@@ -5827,19 +5831,19 @@ causes the building of a compact summary of the module that is emitted into
 the bitcode. The summary is emitted into the LLVM assembly and identified
 in syntax by a caret ('``^``').
 
-*Note that temporarily the summary entries are skipped when parsing the
-assembly, although the parsing support is actively being implemented. The
-following describes when the summary entries will be parsed once implemented.*
-The summary will be parsed into a ModuleSummaryIndex object under the
-same conditions where summary index is currently built from bitcode.
-Specifically, tools that test the Thin Link portion of a ThinLTO compile
-(i.e. llvm-lto and llvm-lto2), or when parsing a combined index
-for a distributed ThinLTO backend via clang's "``-fthinlto-index=<>``" flag.
-Additionally, it will be parsed into a bitcode output, along with the Module
+The summary is parsed into a bitcode output, along with the Module
 IR, via the "``llvm-as``" tool. Tools that parse the Module IR for the purposes
 of optimization (e.g. "``clang -x ir``" and "``opt``"), will ignore the
 summary entries (just as they currently ignore summary entries in a bitcode
 input file).
+
+Eventually, the summary will be parsed into a ModuleSummaryIndex object under
+the same conditions where summary index is currently built from bitcode.
+Specifically, tools that test the Thin Link portion of a ThinLTO compile
+(i.e. llvm-lto and llvm-lto2), or when parsing a combined index
+for a distributed ThinLTO backend via clang's "``-fthinlto-index=<>``" flag
+(this part is not yet implemented, use llvm-as to create a bitcode object
+before feeding into thin link tools for now).
 
 There are currently 3 types of summary entries in the LLVM assembly:
 :ref:`module paths<module_path_summary>`,
@@ -6051,7 +6055,7 @@ Where each ConstVCall has the format:
 
 .. code-block:: text
 
-    VFuncId, args: (Arg[, Arg]*)
+    (VFuncId, args: (Arg[, Arg]*))
 
 and where each VFuncId has the format described for ``TypeTestAssumeVCalls``,
 and each Arg is an integer argument number.
@@ -11559,6 +11563,82 @@ the standard and returns a quiet NaN if either input is a signaling
 NaN, the intrinsic lowering is responsible for quieting the inputs to
 correctly return the non-NaN input (e.g. by using the equivalent of
 ``llvm.canonicalize``).
+
+'``llvm.minimum.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+This is an overloaded intrinsic. You can use ``llvm.minimum`` on any
+floating-point or vector of floating-point type. Not all targets support
+all types however.
+
+::
+
+      declare float     @llvm.minimum.f32(float %Val0, float %Val1)
+      declare double    @llvm.minimum.f64(double %Val0, double %Val1)
+      declare x86_fp80  @llvm.minimum.f80(x86_fp80 %Val0, x86_fp80 %Val1)
+      declare fp128     @llvm.minimum.f128(fp128 %Val0, fp128 %Val1)
+      declare ppc_fp128 @llvm.minimum.ppcf128(ppc_fp128 %Val0, ppc_fp128 %Val1)
+
+Overview:
+"""""""""
+
+The '``llvm.minimum.*``' intrinsics return the minimum of the two
+arguments, propagating NaNs and treating -0.0 as less than +0.0.
+
+
+Arguments:
+""""""""""
+
+The arguments and return value are floating-point numbers of the same
+type.
+
+Semantics:
+""""""""""
+If either operand is a NaN, returns NaN. Otherwise returns the lesser
+of the two arguments. -0.0 is considered to be less than +0.0 for this
+intrinsic. Note that these are the semantics specified in the draft of
+IEEE 754-2018.
+
+'``llvm.maximum.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+This is an overloaded intrinsic. You can use ``llvm.maximum`` on any
+floating-point or vector of floating-point type. Not all targets support
+all types however.
+
+::
+
+      declare float     @llvm.maximum.f32(float %Val0, float %Val1)
+      declare double    @llvm.maximum.f64(double %Val0, double %Val1)
+      declare x86_fp80  @llvm.maximum.f80(x86_fp80 %Val0, x86_fp80 %Val1)
+      declare fp128     @llvm.maximum.f128(fp128 %Val0, fp128 %Val1)
+      declare ppc_fp128 @llvm.maximum.ppcf128(ppc_fp128 %Val0, ppc_fp128 %Val1)
+
+Overview:
+"""""""""
+
+The '``llvm.maximum.*``' intrinsics return the maximum of the two
+arguments, propagating NaNs and treating -0.0 as less than +0.0.
+
+
+Arguments:
+""""""""""
+
+The arguments and return value are floating-point numbers of the same
+type.
+
+Semantics:
+""""""""""
+If either operand is a NaN, returns NaN. Otherwise returns the greater
+of the two arguments. -0.0 is considered to be less than +0.0 for this
+intrinsic. Note that these are the semantics specified in the draft of
+IEEE 754-2018.
 
 '``llvm.copysign.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1535,7 +1535,7 @@ Instruction *InstCombiner::visitAnd(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // See if we can simplify any instructions used by the instruction whose sole
@@ -2134,7 +2134,7 @@ Instruction *InstCombiner::visitOr(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // See if we can simplify any instructions used by the instruction whose sole
@@ -2602,7 +2602,7 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Instruction *NewXor = foldXorToXor(I, Builder))
@@ -2897,6 +2897,17 @@ Instruction *InstCombiner::visitXor(BinaryOperator &I) {
         Value *NotX = Builder.CreateNot(LHS);
         return SelectInst::Create(
             Builder.CreateICmp(getInverseMinMaxPred(SPF), NotX, Y), NotX, Y);
+      }
+
+      // If both sides are freely invertible, then we can get rid of the xor
+      // completely.
+      if (IsFreeToInvert(LHS, !LHS->hasNUsesOrMore(3)) &&
+          IsFreeToInvert(RHS, !RHS->hasNUsesOrMore(3))) {
+        Value *NotLHS = Builder.CreateNot(LHS);
+        Value *NotRHS = Builder.CreateNot(RHS);
+        return SelectInst::Create(
+            Builder.CreateICmp(getInverseMinMaxPred(SPF), NotLHS, NotRHS),
+            NotLHS, NotRHS);
       }
     }
   }

@@ -792,13 +792,6 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
       setOperationAction(ISD::FP_TO_SINT, MVT::v2i64, Legal);
       setOperationAction(ISD::FP_TO_UINT, MVT::v2i64, Legal);
 
-      // Vector operation legalization checks the result type of
-      // SIGN_EXTEND_INREG, overall legalization checks the inner type.
-      setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i64, Legal);
-      setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i32, Legal);
-      setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i16, Custom);
-      setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i8, Custom);
-
       setOperationAction(ISD::FNEG, MVT::v4f32, Legal);
       setOperationAction(ISD::FNEG, MVT::v2f64, Legal);
       setOperationAction(ISD::FABS, MVT::v4f32, Legal);
@@ -1076,6 +1069,8 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
   setTargetDAGCombine(ISD::SIGN_EXTEND);
   setTargetDAGCombine(ISD::ZERO_EXTEND);
   setTargetDAGCombine(ISD::ANY_EXTEND);
+
+  setTargetDAGCombine(ISD::TRUNCATE);
 
   if (Subtarget.useCRBits()) {
     setTargetDAGCombine(ISD::TRUNCATE);
@@ -2705,7 +2700,8 @@ SDValue PPCTargetLowering::LowerBlockAddress(SDValue Op,
 
   // 64-bit SVR4 ABI code is always position-independent.
   // The actual BlockAddress is stored in the TOC.
-  if (Subtarget.isSVR4ABI() && isPositionIndependent()) {
+  if (Subtarget.isSVR4ABI() &&
+      (Subtarget.isPPC64() || isPositionIndependent())) {
     if (Subtarget.isPPC64())
       setUsesTOCBasePtr(DAG);
     SDValue GA = DAG.getTargetBlockAddress(BA, PtrVT, BASDN->getOffset());
@@ -3511,9 +3507,14 @@ SDValue PPCTargetLowering::LowerFormalArguments_32SVR4(
       // Argument stored in memory.
       assert(VA.isMemLoc());
 
+      // Get the extended size of the argument type in stack
       unsigned ArgSize = VA.getLocVT().getStoreSize();
-      int FI = MFI.CreateFixedObject(ArgSize, VA.getLocMemOffset(),
-                                     isImmutable);
+      // Get the actual size of the argument type
+      unsigned ObjSize = VA.getValVT().getStoreSize();
+      unsigned ArgOffset = VA.getLocMemOffset();
+      // Stack objects in PPC32 are right justified.
+      ArgOffset += ArgSize - ObjSize;
+      int FI = MFI.CreateFixedObject(ArgSize, ArgOffset, isImmutable);
 
       // Create load nodes to retrieve arguments from the stack.
       SDValue FIN = DAG.getFrameIndex(FI, PtrVT);
@@ -5468,10 +5469,15 @@ SDValue PPCTargetLowering::LowerCall_32SVR4(
       Arg = PtrOff;
     }
 
-    if (VA.isRegLoc()) {
-      if (Arg.getValueType() == MVT::i1)
-        Arg = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i32, Arg);
+    // When useCRBits() is true, there can be i1 arguments.
+    // It is because getRegisterType(MVT::i1) => MVT::i1,
+    // and for other integer types getRegisterType() => MVT::i32.
+    // Extend i1 and ensure callee will get i32.
+    if (Arg.getValueType() == MVT::i1)
+      Arg = DAG.getNode(Flags.isSExt() ? ISD::SIGN_EXTEND : ISD::ZERO_EXTEND,
+                        dl, MVT::i32, Arg);
 
+    if (VA.isRegLoc()) {
       seenFloatArg |= VA.getLocVT().isFloatingPoint();
       // Put argument in a physical register.
       RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
@@ -9112,30 +9118,6 @@ SDValue PPCTargetLowering::LowerATOMIC_CMP_SWAP(SDValue Op,
   return DAG.getMemIntrinsicNode(NodeTy, dl, Tys, Ops, MemVT, MMO);
 }
 
-SDValue PPCTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op,
-                                                  SelectionDAG &DAG) const {
-  SDLoc dl(Op);
-  // For v2i64 (VSX), we can pattern patch the v2i32 case (using fp <-> int
-  // instructions), but for smaller types, we need to first extend up to v2i32
-  // before doing going farther.
-  if (Op.getValueType() == MVT::v2i64) {
-    EVT ExtVT = cast<VTSDNode>(Op.getOperand(1))->getVT();
-    if (ExtVT != MVT::v2i32) {
-      Op = DAG.getNode(ISD::BITCAST, dl, MVT::v4i32, Op.getOperand(0));
-      Op = DAG.getNode(ISD::SIGN_EXTEND_INREG, dl, MVT::v4i32, Op,
-                       DAG.getValueType(EVT::getVectorVT(*DAG.getContext(),
-                                        ExtVT.getVectorElementType(), 4)));
-      Op = DAG.getNode(ISD::BITCAST, dl, MVT::v2i64, Op);
-      Op = DAG.getNode(ISD::SIGN_EXTEND_INREG, dl, MVT::v2i64, Op,
-                       DAG.getValueType(MVT::v2i32));
-    }
-
-    return Op;
-  }
-
-  return SDValue();
-}
-
 SDValue PPCTargetLowering::LowerSCALAR_TO_VECTOR(SDValue Op,
                                                  SelectionDAG &DAG) const {
   SDLoc dl(Op);
@@ -9575,7 +9557,6 @@ SDValue PPCTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::VECTOR_SHUFFLE:     return LowerVECTOR_SHUFFLE(Op, DAG);
   case ISD::INTRINSIC_WO_CHAIN: return LowerINTRINSIC_WO_CHAIN(Op, DAG);
   case ISD::SCALAR_TO_VECTOR:   return LowerSCALAR_TO_VECTOR(Op, DAG);
-  case ISD::SIGN_EXTEND_INREG:  return LowerSIGN_EXTEND_INREG(Op, DAG);
   case ISD::EXTRACT_VECTOR_ELT: return LowerEXTRACT_VECTOR_ELT(Op, DAG);
   case ISD::INSERT_VECTOR_ELT:  return LowerINSERT_VECTOR_ELT(Op, DAG);
   case ISD::MUL:                return LowerMUL(Op, DAG);
@@ -9654,6 +9635,9 @@ void PPCTargetLowering::ReplaceNodeResults(SDNode *N,
     if (N->getOperand(0).getValueType() == MVT::ppcf128)
       return;
     Results.push_back(LowerFP_TO_INT(SDValue(N, 0), DAG, dl));
+    return;
+  case ISD::BITCAST:
+    // Don't handle bitcast here.
     return;
   }
 }
@@ -11890,7 +11874,8 @@ static SDValue combineBVOfConsecutiveLoads(SDNode *N, SelectionDAG &DAG) {
     IsRoundOfExtLoad = LD->getExtensionType() == ISD::EXTLOAD;
   }
   // Not a build vector of (possibly fp_rounded) loads.
-  if (!IsRoundOfExtLoad && FirstInput.getOpcode() != ISD::LOAD)
+  if ((!IsRoundOfExtLoad && FirstInput.getOpcode() != ISD::LOAD) ||
+      N->getNumOperands() == 1)
     return SDValue();
 
   for (int i = 1, e = N->getNumOperands(); i < e; ++i) {
@@ -12499,6 +12484,7 @@ SDValue PPCTargetLowering::PerformDAGCombine(SDNode *N,
   case ISD::ANY_EXTEND:
     return DAGCombineExtBoolTrunc(N, DCI);
   case ISD::TRUNCATE:
+    return combineTRUNCATE(N, DCI);
   case ISD::SETCC:
   case ISD::SELECT_CC:
     return DAGCombineTruncBoolExt(N, DCI);
@@ -14273,6 +14259,58 @@ SDValue PPCTargetLowering::combineADD(SDNode *N, DAGCombinerInfo &DCI) const {
   return SDValue();
 }
 
+// Detect TRUNCATE operations on bitcasts of float128 values.
+// What we are looking for here is the situtation where we extract a subset
+// of bits from a 128 bit float.
+// This can be of two forms:
+// 1) BITCAST of f128 feeding TRUNCATE
+// 2) BITCAST of f128 feeding SRL (a shift) feeding TRUNCATE
+// The reason this is required is because we do not have a legal i128 type
+// and so we want to prevent having to store the f128 and then reload part
+// of it.
+SDValue PPCTargetLowering::combineTRUNCATE(SDNode *N,
+                                           DAGCombinerInfo &DCI) const {
+  // If we are using CRBits then try that first.
+  if (Subtarget.useCRBits()) {
+    // Check if CRBits did anything and return that if it did.
+    if (SDValue CRTruncValue = DAGCombineTruncBoolExt(N, DCI))
+      return CRTruncValue;
+  }
+
+  SDLoc dl(N);
+  SDValue Op0 = N->getOperand(0);
+
+  // Looking for a truncate of i128 to i64.
+  if (Op0.getValueType() != MVT::i128 || N->getValueType(0) != MVT::i64)
+    return SDValue();
+
+  int EltToExtract = DCI.DAG.getDataLayout().isBigEndian() ? 1 : 0;
+
+  // SRL feeding TRUNCATE.
+  if (Op0.getOpcode() == ISD::SRL) {
+    ConstantSDNode *ConstNode = dyn_cast<ConstantSDNode>(Op0.getOperand(1));
+    // The right shift has to be by 64 bits.
+    if (!ConstNode || ConstNode->getZExtValue() != 64)
+      return SDValue();
+
+    // Switch the element number to extract.
+    EltToExtract = EltToExtract ? 0 : 1;
+    // Update Op0 past the SRL.
+    Op0 = Op0.getOperand(0);
+  }
+
+  // BITCAST feeding a TRUNCATE possibly via SRL.
+  if (Op0.getOpcode() == ISD::BITCAST &&
+      Op0.getValueType() == MVT::i128 &&
+      Op0.getOperand(0).getValueType() == MVT::f128) {
+    SDValue Bitcast = DCI.DAG.getBitcast(MVT::v2i64, Op0.getOperand(0));
+    return DCI.DAG.getNode(
+        ISD::EXTRACT_VECTOR_ELT, dl, MVT::i64, Bitcast,
+        DCI.DAG.getTargetConstant(EltToExtract, dl, MVT::i32));
+  }
+  return SDValue();
+}
+
 bool PPCTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
   // Only duplicate to increase tail-calls for the 64bit SysV ABIs.
   if (!Subtarget.isSVR4ABI() || !Subtarget.isPPC64())
@@ -14306,6 +14344,15 @@ bool PPCTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
 
   // If the function is local then we have a good chance at tail-calling it
   return getTargetMachine().shouldAssumeDSOLocal(*Caller->getParent(), Callee);
+}
+
+bool PPCTargetLowering::hasBitPreservingFPLogic(EVT VT) const {
+  if (!Subtarget.hasVSX())
+    return false;
+  if (Subtarget.hasP9Vector() && VT == MVT::f128)
+    return true;
+  return VT == MVT::f32 || VT == MVT::f64 ||
+    VT == MVT::v4f32 || VT == MVT::v2f64;
 }
 
 bool PPCTargetLowering::

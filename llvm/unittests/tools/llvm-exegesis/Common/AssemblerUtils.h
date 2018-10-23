@@ -24,6 +24,7 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
+namespace llvm {
 namespace exegesis {
 
 class MachineFunctionGeneratorBaseTest : public ::testing::Test {
@@ -32,7 +33,9 @@ protected:
                                    const std::string &CpuName)
       : TT(TT), CpuName(CpuName),
         CanExecute(llvm::Triple(TT).getArch() ==
-                   llvm::Triple(llvm::sys::getProcessTriple()).getArch()) {
+                   llvm::Triple(llvm::sys::getProcessTriple()).getArch()),
+        ET(ExegesisTarget::lookup(llvm::Triple(TT))) {
+    assert(ET);
     if (!CanExecute) {
       llvm::outs() << "Skipping execution, host:"
                    << llvm::sys::getProcessTriple() << ", target:" << TT
@@ -41,12 +44,12 @@ protected:
   }
 
   template <class... Bs>
-  inline void Check(const ExegesisTarget &ET,
-                    llvm::ArrayRef<unsigned> RegsToDef, llvm::MCInst MCInst,
-                    Bs... Bytes) {
+  inline void Check(llvm::ArrayRef<RegisterValue> RegisterInitialValues,
+                    llvm::MCInst MCInst, Bs... Bytes) {
     ExecutableFunction Function =
-        (MCInst.getOpcode() == 0) ? assembleToFunction(ET, RegsToDef, {})
-                                  : assembleToFunction(ET, RegsToDef, {MCInst});
+        (MCInst.getOpcode() == 0)
+            ? assembleToFunction(RegisterInitialValues, {})
+            : assembleToFunction(RegisterInitialValues, {MCInst});
     ASSERT_THAT(Function.getFunctionBytes().str(),
                 testing::ElementsAre(Bytes...));
     if (CanExecute) {
@@ -70,14 +73,12 @@ private:
   }
 
   ExecutableFunction
-  assembleToFunction(const ExegesisTarget &ET,
-                     llvm::ArrayRef<unsigned> RegsToDef,
+  assembleToFunction(llvm::ArrayRef<RegisterValue> RegisterInitialValues,
                      llvm::ArrayRef<llvm::MCInst> Instructions) {
     llvm::SmallString<256> Buffer;
     llvm::raw_svector_ostream AsmStream(Buffer);
-    assembleToStream(ET, createTargetMachine(), /*LiveIns=*/{},
-                     RegsToDef, Instructions,
-                     AsmStream);
+    assembleToStream(*ET, createTargetMachine(), /*LiveIns=*/{},
+                     RegisterInitialValues, Instructions, AsmStream);
     return ExecutableFunction(createTargetMachine(),
                               getObjectFromBuffer(AsmStream.str()));
   }
@@ -85,8 +86,10 @@ private:
   const std::string TT;
   const std::string CpuName;
   const bool CanExecute;
+  const ExegesisTarget *const ET;
 };
 
 } // namespace exegesis
+} // namespace llvm
 
 #endif

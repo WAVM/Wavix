@@ -74,6 +74,7 @@ protected:
   bool HasInv2PiInlineImm;
   bool HasFminFmaxLegacy;
   bool EnablePromoteAlloca;
+  bool HasTrigReducedRange;
   int LocalMemorySize;
   unsigned WavefrontSize;
 
@@ -134,7 +135,7 @@ public:
     return isMesa3DOS() && !AMDGPU::isShader(F.getCallingConv());
   }
 
-  bool isAmdCodeObjectV2(const Function &F) const {
+  bool isAmdHsaOrMesa(const Function &F) const {
     return isAmdHsaOS() || isMesaKernel(F);
   }
 
@@ -178,6 +179,10 @@ public:
     return HasFminFmaxLegacy;
   }
 
+  bool hasTrigReducedRange() const {
+    return HasTrigReducedRange;
+  }
+
   bool isPromoteAllocaEnabled() const {
     return EnablePromoteAlloca;
   }
@@ -197,7 +202,7 @@ public:
   /// Returns the offset in bytes from the start of the input buffer
   ///        of the first explicit kernel argument.
   unsigned getExplicitKernelArgOffset(const Function &F) const {
-    return isAmdCodeObjectV2(F) ? 0 : 36;
+    return isAmdHsaOrMesa(F) ? 0 : 36;
   }
 
   /// \returns Maximum number of work groups per compute unit supported by the
@@ -292,6 +297,7 @@ protected:
   Triple TargetTriple;
   unsigned Gen;
   unsigned IsaVersion;
+  InstrItineraryData InstrItins;
   int LDSBankCount;
   unsigned MaxPrivateElementSize;
 
@@ -413,6 +419,10 @@ public:
   // Nothing implemented, just prevent crashes on use.
   const SelectionDAGTargetInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
+  }
+
+  const InstrItineraryData *getInstrItineraryData() const override {
+    return &InstrItins;
   }
 
   void ParseSubtargetFeatures(StringRef CPU, StringRef FS);
