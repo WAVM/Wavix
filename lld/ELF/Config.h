@@ -171,10 +171,12 @@ struct Configuration {
   bool Trace;
   bool ThinLTOEmitImportsFiles;
   bool ThinLTOIndexOnly;
+  bool TocOptimize;
   bool UndefinedVersion;
   bool UseAndroidRelrTags = false;
   bool WarnBackrefs;
   bool WarnCommon;
+  bool WarnIfuncTextrel;
   bool WarnMissingEntry;
   bool WarnSymbolOrdering;
   bool WriteAddends;
@@ -184,6 +186,7 @@ struct Configuration {
   bool ZGlobal;
   bool ZHazardplt;
   bool ZInitfirst;
+  bool ZInterpose;
   bool ZKeepTextSectionPrefix;
   bool ZNodelete;
   bool ZNodlopen;
@@ -214,6 +217,7 @@ struct Configuration {
   unsigned LTOO;
   unsigned Optimize;
   unsigned ThinLTOJobs;
+  int32_t SplitStackAdjustSize;
 
   // The following config options do not directly correspond to any
   // particualr command line options.

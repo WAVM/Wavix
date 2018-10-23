@@ -32,7 +32,6 @@ using namespace lld::elf;
 
 uint8_t Out::First;
 PhdrEntry *Out::TlsPhdr;
-OutputSection *Out::DebugInfo;
 OutputSection *Out::ElfHeader;
 OutputSection *Out::ProgramHeaders;
 OutputSection *Out::PreinitArray;
@@ -270,13 +269,13 @@ static void finalizeShtGroup(OutputSection *OS,
 
   // sh_link field for SHT_GROUP sections should contain the section index of
   // the symbol table.
-  OS->Link = InX::SymTab->getParent()->SectionIndex;
+  OS->Link = In.SymTab->getParent()->SectionIndex;
 
   // sh_info then contain index of an entry in symbol table section which
   // provides signature of the section group.
   ObjFile<ELFT> *Obj = Section->getFile<ELFT>();
   ArrayRef<Symbol *> Symbols = Obj->getSymbols();
-  OS->Info = InX::SymTab->getSymbolIndex(Symbols[Section->Info]);
+  OS->Info = In.SymTab->getSymbolIndex(Symbols[Section->Info]);
 }
 
 template <class ELFT> void OutputSection::finalize() {
@@ -308,7 +307,7 @@ template <class ELFT> void OutputSection::finalize() {
   if (isa<SyntheticSection>(First))
     return;
 
-  Link = InX::SymTab->getParent()->SectionIndex;
+  Link = In.SymTab->getParent()->SectionIndex;
   // sh_info for SHT_REL[A] sections should contain the section header index of
   // the section to which the relocation applies.
   InputSectionBase *S = First->getRelocatedSection();
