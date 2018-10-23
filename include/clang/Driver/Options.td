@@ -584,9 +584,11 @@ def fno_cuda_flush_denormals_to_zero : Flag<["-"], "fno-cuda-flush-denormals-to-
 def fcuda_approx_transcendentals : Flag<["-"], "fcuda-approx-transcendentals">,
   Flags<[CC1Option]>, HelpText<"Use approximate transcendental functions">;
 def fno_cuda_approx_transcendentals : Flag<["-"], "fno-cuda-approx-transcendentals">;
-def fcuda_rdc : Flag<["-"], "fcuda-rdc">, Flags<[CC1Option]>,
+def fgpu_rdc : Flag<["-"], "fgpu-rdc">, Flags<[CC1Option]>,
   HelpText<"Generate relocatable device code, also known as separate compilation mode.">;
-def fno_cuda_rdc : Flag<["-"], "fno-cuda-rdc">;
+def fno_gpu_rdc : Flag<["-"], "fno-gpu-rdc">;
+def : Flag<["-"], "fcuda-rdc">, Alias<fgpu_rdc>;
+def : Flag<["-"], "fno-cuda-rdc">, Alias<fno_gpu_rdc>;
 def fcuda_short_ptr : Flag<["-"], "fcuda-short-ptr">, Flags<[CC1Option]>,
   HelpText<"Use 32-bit pointers for accessing const/local/shared address spaces.">;
 def fno_cuda_short_ptr : Flag<["-"], "fno-cuda-short-ptr">;
@@ -596,6 +598,8 @@ def hip_device_lib_EQ : Joined<["--"], "hip-device-lib=">, Group<Link_Group>,
   HelpText<"HIP device library">;
 def fhip_dump_offload_linker_script : Flag<["-"], "fhip-dump-offload-linker-script">,
   Group<f_Group>, Flags<[NoArgumentUnused, HelpHidden]>;
+def libomptarget_nvptx_path_EQ : Joined<["--"], "libomptarget-nvptx-path=">, Group<i_Group>,
+  HelpText<"Path to libomptarget-nvptx libraries">;
 def dA : Flag<["-"], "dA">, Group<d_Group>;
 def dD : Flag<["-"], "dD">, Group<d_Group>, Flags<[CC1Option]>,
   HelpText<"Print macro definitions in -E mode in addition to normal output">;
@@ -731,6 +735,11 @@ def fprofile_instr_use : Flag<["-"], "fprofile-instr-use">, Group<f_Group>,
 def fprofile_instr_use_EQ : Joined<["-"], "fprofile-instr-use=">,
     Group<f_Group>, Flags<[CoreOption]>,
     HelpText<"Use instrumentation data for profile-guided optimization">;
+def fprofile_remapping_file_EQ : Joined<["-"], "fprofile-remapping-file=">,
+    Group<f_Group>, Flags<[CC1Option, CoreOption]>, MetaVarName<"<file>">,
+    HelpText<"Use the remappings described in <file> to match the profile data against names in the program">;
+def fprofile_remapping_file : Separate<["-"], "fprofile-remapping-file">,
+    Group<f_Group>, Flags<[CoreOption]>, Alias<fprofile_remapping_file_EQ>;
 def fcoverage_mapping : Flag<["-"], "fcoverage-mapping">,
     Group<f_Group>, Flags<[CC1Option, CoreOption]>,
     HelpText<"Generate coverage mapping to enable code coverage analysis">;
@@ -2002,6 +2011,8 @@ def mno_global_merge : Flag<["-"], "mno-global-merge">, Group<m_Group>, Flags<[C
 def mno_pascal_strings : Flag<["-"], "mno-pascal-strings">,
   Alias<fno_pascal_strings>;
 def mno_red_zone : Flag<["-"], "mno-red-zone">, Group<m_Group>;
+def mno_tls_direct_seg_refs : Flag<["-"], "mno-tls-direct-seg-refs">, Group<m_Group>, Flags<[CC1Option]>,
+  HelpText<"Disable direct TLS access through segment registers">;
 def mno_relax_all : Flag<["-"], "mno-relax-all">, Group<m_Group>;
 def mno_rtd: Flag<["-"], "mno-rtd">, Group<m_Group>;
 def mno_soft_float : Flag<["-"], "mno-soft-float">, Group<m_Group>;
@@ -2050,10 +2061,13 @@ def mfix_cortex_a53_835769 : Flag<["-"], "mfix-cortex-a53-835769">,
 def mno_fix_cortex_a53_835769 : Flag<["-"], "mno-fix-cortex-a53-835769">,
   Group<m_aarch64_Features_Group>,
   HelpText<"Don't workaround Cortex-A53 erratum 835769 (AArch64 only)">;
-def ffixed_x18 : Flag<["-"], "ffixed-x18">, Group<m_aarch64_Features_Group>,
-  HelpText<"Reserve the x18 register (AArch64 only)">;
-def ffixed_x20 : Flag<["-"], "ffixed-x20">, Group<m_aarch64_Features_Group>,
-  HelpText<"Reserve the x20 register (AArch64 only)">;
+foreach i = {1-7,18,20} in
+  def ffixed_x#i : Flag<["-"], "ffixed-x"#i>, Group<m_aarch64_Features_Group>,
+    HelpText<"Reserve the "#i#" register (AArch64 only)">;
+
+foreach i = {8-15,18} in
+  def fcall_saved_x#i : Flag<["-"], "fcall-saved-x"#i>, Group<m_aarch64_Features_Group>,
+    HelpText<"Make the x"#i#" register call-saved (AArch64 only)">;
 
 def msign_return_address : Joined<["-"], "msign-return-address=">,
   Flags<[CC1Option]>, Group<m_Group>,
@@ -2073,6 +2087,11 @@ def mamdgpu_debugger_abi : Joined<["-"], "mamdgpu-debugger-abi=">,
   Group<m_Group>,
   HelpText<"Generate additional code for specified <version> of debugger ABI (AMDGPU only)">,
   MetaVarName<"<version>">;
+
+def mcode_object_v3 : Flag<["-"], "mcode-object-v3">, Group<m_amdgpu_Features_Group>,
+  HelpText<"Enable code object v3 (AMDGPU only)">;
+def mno_code_object_v3 : Flag<["-"], "mno-code-object-v3">, Group<m_amdgpu_Features_Group>,
+  HelpText<"Disable code object v3 (AMDGPU only)">;
 def mxnack : Flag<["-"], "mxnack">, Group<m_amdgpu_Features_Group>,
   HelpText<"Enable XNACK (AMDGPU only)">;
 def mno_xnack : Flag<["-"], "mno-xnack">, Group<m_amdgpu_Features_Group>,
@@ -2154,6 +2173,8 @@ def momit_leaf_frame_pointer : Flag<["-"], "momit-leaf-frame-pointer">, Group<m_
 def moslib_EQ : Joined<["-"], "moslib=">, Group<m_Group>;
 def mpascal_strings : Flag<["-"], "mpascal-strings">, Alias<fpascal_strings>;
 def mred_zone : Flag<["-"], "mred-zone">, Group<m_Group>;
+def mtls_direct_seg_refs : Flag<["-"], "mtls-direct-seg-refs">, Group<m_Group>,
+  HelpText<"Enable direct TLS access through segment registers (default)">;
 def mregparm_EQ : Joined<["-"], "mregparm=">, Group<m_Group>;
 def mrelax_all : Flag<["-"], "mrelax-all">, Group<m_Group>, Flags<[CC1Option,CC1AsOption]>,
   HelpText<"(integrated-as) Relax all machine instructions">;
@@ -2640,8 +2661,6 @@ def _ : Joined<["--"], "">, Flags<[Unsupported]>;
 // Hexagon feature flags.
 def mieee_rnd_near : Flag<["-"], "mieee-rnd-near">,
   Group<m_hexagon_Features_Group>;
-def mv4 : Flag<["-"], "mv4">, Group<m_hexagon_Features_Group>,
-  Alias<mcpu_EQ>, AliasArgs<["hexagonv4"]>;
 def mv5 : Flag<["-"], "mv5">, Group<m_hexagon_Features_Group>, Alias<mcpu_EQ>,
   AliasArgs<["hexagonv5"]>;
 def mv55 : Flag<["-"], "mv55">, Group<m_hexagon_Features_Group>,

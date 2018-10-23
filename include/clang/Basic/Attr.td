@@ -1977,6 +1977,39 @@ def Target : InheritableAttr {
       return parse(getFeaturesStr());
     }
 
+    StringRef getArchitecture() const {
+      StringRef Features = getFeaturesStr();
+      if (Features == "default") return {};
+
+      SmallVector<StringRef, 1> AttrFeatures;
+      Features.split(AttrFeatures, ",");
+
+      for (auto &Feature : AttrFeatures) {
+        Feature = Feature.trim();
+        if (Feature.startswith("arch="))
+          return Feature.drop_front(sizeof("arch=") - 1);
+      }
+      return "";
+    }
+
+    // Gets the list of features as simple string-refs with no +/- or 'no-'.
+    // Only adds the items to 'Out' that are additions.
+    void getAddedFeatures(llvm::SmallVectorImpl<StringRef> &Out) const {
+      StringRef Features = getFeaturesStr();
+      if (Features == "default") return;
+
+      SmallVector<StringRef, 1> AttrFeatures;
+      Features.split(AttrFeatures, ",");
+
+      for (auto &Feature : AttrFeatures) {
+        Feature = Feature.trim();
+
+        if (!Feature.startswith("no-") && !Feature.startswith("arch=") &&
+            !Feature.startswith("fpmath=") && !Feature.startswith("tune="))
+          Out.push_back(Feature);
+      }
+    }
+
     template<class Compare>
     ParsedTargetAttr parse(Compare cmp) const {
       ParsedTargetAttr Attrs = parse();
@@ -3007,6 +3040,13 @@ def InternalLinkage : InheritableAttr {
   let Spellings = [Clang<"internal_linkage">];
   let Subjects = SubjectList<[Var, Function, CXXRecord]>;
   let Documentation = [InternalLinkageDocs];
+}
+
+def ExcludeFromExplicitInstantiation : InheritableAttr {
+  let Spellings = [Clang<"exclude_from_explicit_instantiation">];
+  let Subjects = SubjectList<[Var, Function, CXXRecord]>;
+  let Documentation = [ExcludeFromExplicitInstantiationDocs];
+  let MeaningfulToClassTemplateDefinition = 1;
 }
 
 def Reinitializes : InheritableAttr {

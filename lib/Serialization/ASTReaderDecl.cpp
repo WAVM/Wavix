@@ -30,6 +30,7 @@
 #include "clang/AST/ExternalASTSource.h"
 #include "clang/AST/LambdaCapture.h"
 #include "clang/AST/NestedNameSpecifier.h"
+#include "clang/AST/OpenMPClause.h"
 #include "clang/AST/Redeclarable.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/TemplateBase.h"
@@ -274,7 +275,7 @@ namespace clang {
 
       if (auto &Old = LazySpecializations) {
         IDs.insert(IDs.end(), Old + 1, Old + 1 + Old[0]);
-        llvm::sort(IDs.begin(), IDs.end());
+        llvm::sort(IDs);
         IDs.erase(std::unique(IDs.begin(), IDs.end()), IDs.end());
       }
 
@@ -446,6 +447,7 @@ namespace clang {
     void VisitObjCPropertyImplDecl(ObjCPropertyImplDecl *D);
     void VisitOMPThreadPrivateDecl(OMPThreadPrivateDecl *D);
     void VisitOMPDeclareReductionDecl(OMPDeclareReductionDecl *D);
+    void VisitOMPRequiresDecl(OMPRequiresDecl *D);
     void VisitOMPCapturedExprDecl(OMPCapturedExprDecl *D);
   };
 
@@ -1363,6 +1365,7 @@ ASTDeclReader::RedeclarableResult ASTDeclReader::VisitVarDeclImpl(VarDecl *VD) {
     VD->NonParmVarDeclBits.IsInitCapture = Record.readInt();
     VD->NonParmVarDeclBits.PreviousDeclInSameBlockScope = Record.readInt();
     VD->NonParmVarDeclBits.ImplicitParamKind = Record.readInt();
+    VD->NonParmVarDeclBits.EscapingByref = Record.readInt();
   }
   auto VarLinkage = Linkage(Record.readInt());
   VD->setCachedLinkage(VarLinkage);
@@ -2630,13 +2633,31 @@ void ASTDeclReader::VisitOMPThreadPrivateDecl(OMPThreadPrivateDecl *D) {
   D->setVars(Vars);
 }
 
+void ASTDeclReader::VisitOMPRequiresDecl(OMPRequiresDecl * D) {
+  VisitDecl(D);
+  unsigned NumClauses = D->clauselist_size();
+  SmallVector<OMPClause *, 8> Clauses;
+  Clauses.reserve(NumClauses);
+  OMPClauseReader ClauseReader(Record);
+  for (unsigned I = 0; I != NumClauses; ++I)
+    Clauses.push_back(ClauseReader.readClause());
+  D->setClauses(Clauses);
+}
+
 void ASTDeclReader::VisitOMPDeclareReductionDecl(OMPDeclareReductionDecl *D) {
   VisitValueDecl(D);
   D->setLocation(ReadSourceLocation());
-  D->setCombiner(Record.readExpr());
-  D->setInitializer(
-      Record.readExpr(),
-      static_cast<OMPDeclareReductionDecl::InitKind>(Record.readInt()));
+  Expr *In = Record.readExpr();
+  Expr *Out = Record.readExpr();
+  D->setCombinerData(In, Out);
+  Expr *Combiner = Record.readExpr();
+  D->setCombiner(Combiner);
+  Expr *Orig = Record.readExpr();
+  Expr *Priv = Record.readExpr();
+  D->setInitializerData(Orig, Priv);
+  Expr *Init = Record.readExpr();
+  auto IK = static_cast<OMPDeclareReductionDecl::InitKind>(Record.readInt());
+  D->setInitializer(Init, IK);
   D->PrevDeclInScope = ReadDeclID();
 }
 
@@ -3822,6 +3843,9 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
     break;
   case DECL_OMP_THREADPRIVATE:
     D = OMPThreadPrivateDecl::CreateDeserialized(Context, ID, Record.readInt());
+    break;
+  case DECL_OMP_REQUIRES:
+    D = OMPRequiresDecl::CreateDeserialized(Context, ID, Record.readInt());
     break;
   case DECL_OMP_DECLARE_REDUCTION:
     D = OMPDeclareReductionDecl::CreateDeserialized(Context, ID);

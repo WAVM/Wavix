@@ -37,10 +37,10 @@ createVirtualFileIfNeeded(ASTUnit *ToAST, StringRef FileName,
                           std::unique_ptr<llvm::MemoryBuffer> &&Buffer) {
   assert(ToAST);
   ASTContext &ToCtx = ToAST->getASTContext();
-  auto *OFS = static_cast<vfs::OverlayFileSystem *>(
+  auto *OFS = static_cast<llvm::vfs::OverlayFileSystem *>(
       ToCtx.getSourceManager().getFileManager().getVirtualFileSystem().get());
-  auto *MFS =
-      static_cast<vfs::InMemoryFileSystem *>(OFS->overlays_begin()->get());
+  auto *MFS = static_cast<llvm::vfs::InMemoryFileSystem *>(
+      OFS->overlays_begin()->get());
   MFS->addFile(FileName, 0, std::move(Buffer));
 }
 
@@ -1828,11 +1828,60 @@ TEST_P(ASTImporterTestBase, ImportDoesUpdateUsedFlag) {
   {
     Decl *FromTU =
         getTuDecl("extern int x; int f() { return x; }", Lang_CXX, "input2.cc");
-    auto *FromD =
-        FirstDeclMatcher<FunctionDecl>().match(FromTU, functionDecl());
+    auto *FromD = FirstDeclMatcher<FunctionDecl>().match(
+        FromTU, functionDecl(hasName("f")));
     Import(FromD, Lang_CXX);
   }
   EXPECT_TRUE(Imported2->isUsed(false));
+}
+
+TEST_P(ASTImporterTestBase, ImportDoesUpdateUsedFlag2) {
+  auto Pattern = varDecl(hasName("x"));
+  VarDecl *ExistingD;
+  {
+    Decl *ToTU = getToTuDecl("int x = 1;", Lang_CXX);
+    ExistingD = FirstDeclMatcher<VarDecl>().match(ToTU, Pattern);
+  }
+  EXPECT_FALSE(ExistingD->isUsed(false));
+  {
+    Decl *FromTU = getTuDecl(
+        "int x = 1; int f() { return x; }", Lang_CXX, "input1.cc");
+    auto *FromD = FirstDeclMatcher<FunctionDecl>().match(
+        FromTU, functionDecl(hasName("f")));
+    Import(FromD, Lang_CXX);
+  }
+  EXPECT_TRUE(ExistingD->isUsed(false));
+}
+
+TEST_P(ASTImporterTestBase, ImportDoesUpdateUsedFlag3) {
+  auto Pattern = varDecl(hasName("a"));
+  VarDecl *ExistingD;
+  {
+    Decl *ToTU = getToTuDecl(
+        R"(
+        struct A {
+          static const int a = 1;
+        };
+        )", Lang_CXX);
+    ExistingD = FirstDeclMatcher<VarDecl>().match(ToTU, Pattern);
+  }
+  EXPECT_FALSE(ExistingD->isUsed(false));
+  {
+    Decl *FromTU = getTuDecl(
+        R"(
+        struct A {
+          static const int a = 1;
+        };
+        const int *f() { return &A::a; } // requires storage,
+                                         // thus used flag will be set
+        )", Lang_CXX, "input1.cc");
+    auto *FromFunD = FirstDeclMatcher<FunctionDecl>().match(
+        FromTU, functionDecl(hasName("f")));
+    auto *FromD = FirstDeclMatcher<VarDecl>().match(FromTU, Pattern);
+    ASSERT_TRUE(FromD->isUsed(false));
+    Import(FromFunD, Lang_CXX);
+  }
+  EXPECT_TRUE(ExistingD->isUsed(false));
 }
 
 TEST_P(ASTImporterTestBase, ReimportWithUsedFlag) {
@@ -2433,7 +2482,7 @@ TEST_P(ImportFriendFunctions, ImportFriendChangesLookup) {
   LookupRes = ToTU->noload_lookup(ToName);
   EXPECT_EQ(LookupRes.size(), 1u);
   EXPECT_EQ(DeclCounter<FunctionDecl>().match(ToTU, Pattern), 1u);
-  
+
   auto *ToFriendF = cast<FunctionDecl>(Import(FromFriendF, Lang_CXX));
   LookupRes = ToTU->noload_lookup(ToName);
   EXPECT_EQ(LookupRes.size(), 1u);
@@ -2709,7 +2758,7 @@ TEST_P(ASTImporterTestBase, ImportOfEquivalentRecord) {
 
     ToR2 = Import(FromR, Lang_CXX);
   }
-  
+
   EXPECT_EQ(ToR1, ToR2);
 }
 
@@ -2873,8 +2922,9 @@ TEST_P(ASTImporterTestBase, ImportUnnamedFieldsInCorrectOrder) {
     ASSERT_FALSE(FromField->getDeclName());
     auto *ToField = cast_or_null<FieldDecl>(Import(FromField, Lang_CXX11));
     EXPECT_TRUE(ToField);
-    unsigned ToIndex = ASTImporter::getFieldIndex(ToField);
-    EXPECT_EQ(ToIndex, FromIndex + 1);
+    Optional<unsigned> ToIndex = ASTImporter::getFieldIndex(ToField);
+    EXPECT_TRUE(ToIndex);
+    EXPECT_EQ(*ToIndex, FromIndex);
     ++FromIndex;
   }
 
@@ -3242,6 +3292,94 @@ TEST_P(ASTImporterTestBase, InitListExprValueKindShouldBeImported) {
   auto *ToInitExpr = cast<VarDecl>(ToD)->getAnyInitializer();
   EXPECT_TRUE(ToInitExpr);
   EXPECT_TRUE(ToInitExpr->isGLValue());
+}
+
+struct ImportVariables : ASTImporterTestBase {};
+
+TEST_P(ImportVariables, ImportOfOneDeclBringsInTheWholeChain) {
+  Decl *FromTU = getTuDecl(
+      R"(
+      struct A {
+        static const int a = 1 + 2;
+      };
+      const int A::a;
+      )", Lang_CXX, "input1.cc");
+
+  auto *FromDWithInit = FirstDeclMatcher<VarDecl>().match(
+      FromTU, varDecl(hasName("a"))); // Decl with init
+  auto *FromDWithDef = LastDeclMatcher<VarDecl>().match(
+      FromTU, varDecl(hasName("a"))); // Decl with definition
+  ASSERT_NE(FromDWithInit, FromDWithDef);
+  ASSERT_EQ(FromDWithDef->getPreviousDecl(), FromDWithInit);
+
+  auto *ToD0 = cast<VarDecl>(Import(FromDWithInit, Lang_CXX11));
+  auto *ToD1 = cast<VarDecl>(Import(FromDWithDef, Lang_CXX11));
+  ASSERT_TRUE(ToD0);
+  ASSERT_TRUE(ToD1);
+  EXPECT_NE(ToD0, ToD1);
+  EXPECT_EQ(ToD1->getPreviousDecl(), ToD0);
+}
+
+TEST_P(ImportVariables, InitAndDefinitionAreInDifferentTUs) {
+  auto StructA =
+      R"(
+      struct A {
+        static const int a = 1 + 2;
+      };
+      )";
+  Decl *ToTU = getToTuDecl(StructA, Lang_CXX);
+  Decl *FromTU = getTuDecl(std::string(StructA) + "const int A::a;", Lang_CXX,
+                           "input1.cc");
+
+  auto *FromDWithInit = FirstDeclMatcher<VarDecl>().match(
+      FromTU, varDecl(hasName("a"))); // Decl with init
+  auto *FromDWithDef = LastDeclMatcher<VarDecl>().match(
+      FromTU, varDecl(hasName("a"))); // Decl with definition
+  ASSERT_EQ(FromDWithInit, FromDWithDef->getPreviousDecl());
+  ASSERT_TRUE(FromDWithInit->getInit());
+  ASSERT_FALSE(FromDWithInit->isThisDeclarationADefinition());
+  ASSERT_TRUE(FromDWithDef->isThisDeclarationADefinition());
+  ASSERT_FALSE(FromDWithDef->getInit());
+
+  auto *ToD = FirstDeclMatcher<VarDecl>().match(
+      ToTU, varDecl(hasName("a"))); // Decl with init
+  ASSERT_TRUE(ToD->getInit());
+  ASSERT_FALSE(ToD->getDefinition());
+
+  auto *ImportedD = cast<VarDecl>(Import(FromDWithDef, Lang_CXX11));
+  EXPECT_TRUE(ImportedD->getAnyInitializer());
+  EXPECT_TRUE(ImportedD->getDefinition());
+}
+
+TEST_P(ImportVariables, InitAndDefinitionAreInTheFromContext) {
+  auto StructA =
+      R"(
+      struct A {
+        static const int a;
+      };
+      )";
+  Decl *ToTU = getToTuDecl(StructA, Lang_CXX);
+  Decl *FromTU = getTuDecl(std::string(StructA) + "const int A::a = 1 + 2;",
+                           Lang_CXX, "input1.cc");
+
+  auto *FromDDeclarationOnly = FirstDeclMatcher<VarDecl>().match(
+      FromTU, varDecl(hasName("a")));
+  auto *FromDWithDef = LastDeclMatcher<VarDecl>().match(
+      FromTU, varDecl(hasName("a"))); // Decl with definition and with init.
+  ASSERT_EQ(FromDDeclarationOnly, FromDWithDef->getPreviousDecl());
+  ASSERT_FALSE(FromDDeclarationOnly->getInit());
+  ASSERT_FALSE(FromDDeclarationOnly->isThisDeclarationADefinition());
+  ASSERT_TRUE(FromDWithDef->isThisDeclarationADefinition());
+  ASSERT_TRUE(FromDWithDef->getInit());
+
+  auto *ToD = FirstDeclMatcher<VarDecl>().match(
+      ToTU, varDecl(hasName("a")));
+  ASSERT_FALSE(ToD->getInit());
+  ASSERT_FALSE(ToD->getDefinition());
+
+  auto *ImportedD = cast<VarDecl>(Import(FromDWithDef, Lang_CXX11));
+  EXPECT_TRUE(ImportedD->getAnyInitializer());
+  EXPECT_TRUE(ImportedD->getDefinition());
 }
 
 struct DeclContextTest : ASTImporterTestBase {};
@@ -3621,6 +3759,12 @@ INSTANTIATE_TEST_CASE_P(ParameterizedTests, ImportFriendFunctions,
 
 INSTANTIATE_TEST_CASE_P(ParameterizedTests,
                         ImportFunctionTemplateSpecializations,
+                        DefaultTestValuesForRunOptions, );
+
+INSTANTIATE_TEST_CASE_P(ParameterizedTests, ImportImplicitMethods,
+                        DefaultTestValuesForRunOptions, );
+
+INSTANTIATE_TEST_CASE_P(ParameterizedTests, ImportVariables,
                         DefaultTestValuesForRunOptions, );
 
 } // end namespace ast_matchers

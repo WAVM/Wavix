@@ -725,7 +725,7 @@ LinkageComputer::getLVForNamespaceScopeDecl(const NamedDecl *D,
       // If we're paying attention to global visibility, apply
       // -finline-visibility-hidden if this is an inline method.
       if (useInlineVisibilityHidden(D))
-        LV.mergeVisibility(HiddenVisibility, true);
+        LV.mergeVisibility(HiddenVisibility, /*visibilityExplicit=*/false);
     }
   }
 
@@ -915,7 +915,7 @@ LinkageComputer::getLVForClassMember(const NamedDecl *D,
     // Note that we do this before merging information about
     // the class visibility.
     if (!LV.isVisibilityExplicit() && useInlineVisibilityHidden(D))
-      LV.mergeVisibility(HiddenVisibility, true);
+      LV.mergeVisibility(HiddenVisibility, /*visibilityExplicit=*/false);
   }
 
   // If this class member has an explicit visibility attribute, the only
@@ -1265,14 +1265,24 @@ LinkageInfo LinkageComputer::getLVForLocalDecl(const NamedDecl *D,
     // If a function is hidden by -fvisibility-inlines-hidden option and
     // is not explicitly attributed as a hidden function,
     // we should not make static local variables in the function hidden.
-    if (isa<VarDecl>(D) && useInlineVisibilityHidden(FD) &&
-        !(!hasExplicitVisibilityAlready(computation) &&
-          getExplicitVisibility(FD, computation))) {
-      assert(cast<VarDecl>(D)->isStaticLocal());
-      return LinkageInfo(VisibleNoLinkage, DefaultVisibility, false);
-    }
-
     LV = getLVForDecl(FD, computation);
+    if (isa<VarDecl>(D) && useInlineVisibilityHidden(FD) &&
+        !LV.isVisibilityExplicit()) {
+      assert(cast<VarDecl>(D)->isStaticLocal());
+      // If this was an implicitly hidden inline method, check again for
+      // explicit visibility on the parent class, and use that for static locals
+      // if present.
+      if (const auto *MD = dyn_cast<CXXMethodDecl>(FD))
+        LV = getLVForDecl(MD->getParent(), computation);
+      if (!LV.isVisibilityExplicit()) {
+        Visibility globalVisibility =
+            computation.isValueVisibility()
+                ? Context.getLangOpts().getValueVisibilityMode()
+                : Context.getLangOpts().getTypeVisibilityMode();
+        return LinkageInfo(VisibleNoLinkage, globalVisibility,
+                           /*visibilityExplicit=*/false);
+      }
+    }
   }
   if (!isExternallyVisible(LV.getLinkage()))
     return LinkageInfo::none();
@@ -2361,6 +2371,14 @@ static DeclT *getDefinitionOrSelf(DeclT *D) {
   return D;
 }
 
+bool VarDecl::isEscapingByref() const {
+  return hasAttr<BlocksAttr>() && NonParmVarDeclBits.EscapingByref;
+}
+
+bool VarDecl::isNonEscapingByref() const {
+  return hasAttr<BlocksAttr>() && !NonParmVarDeclBits.EscapingByref;
+}
+
 VarDecl *VarDecl::getTemplateInstantiationPattern() const {
   // If it's a variable template specialization, find the template or partial
   // specialization from which it was instantiated.
@@ -2451,7 +2469,7 @@ bool VarDecl::isKnownToBeDefined() const {
   //
   // With CUDA relocatable device code enabled, these variables don't get
   // special handling; they're treated like regular extern variables.
-  if (LangOpts.CUDA && !LangOpts.CUDARelocatableDeviceCode &&
+  if (LangOpts.CUDA && !LangOpts.GPURelocatableDeviceCode &&
       hasExternalStorage() && hasAttr<CUDASharedAttr>() &&
       isa<IncompleteArrayType>(getType()))
     return true;

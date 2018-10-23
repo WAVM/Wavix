@@ -371,23 +371,26 @@ bool CallEvent::isCalled(const CallDescription &CD) const {
   // accuracy.
   if (CD.QualifiedName.size() > 1 && D) {
     const DeclContext *Ctx = D->getDeclContext();
-    std::vector<StringRef> QualifiedName = CD.QualifiedName;
-    QualifiedName.pop_back();
+    // See if we'll be able to match them all.
+    size_t NumUnmatched = CD.QualifiedName.size() - 1;
     for (; Ctx && isa<NamedDecl>(Ctx); Ctx = Ctx->getParent()) {
+      if (NumUnmatched == 0)
+        break;
+
       if (const auto *ND = dyn_cast<NamespaceDecl>(Ctx)) {
-        if (!QualifiedName.empty() && ND->getName() == QualifiedName.back())
-          QualifiedName.pop_back();
+        if (ND->getName() == CD.QualifiedName[NumUnmatched - 1])
+          --NumUnmatched;
         continue;
       }
 
       if (const auto *RD = dyn_cast<RecordDecl>(Ctx)) {
-        if (!QualifiedName.empty() && RD->getName() == QualifiedName.back())
-          QualifiedName.pop_back();
+        if (RD->getName() == CD.QualifiedName[NumUnmatched - 1])
+          --NumUnmatched;
         continue;
       }
     }
 
-    if (!QualifiedName.empty())
+    if (NumUnmatched > 0)
       return false;
   }
 
@@ -500,10 +503,14 @@ static void addParameterValuesToBindings(const StackFrameContext *CalleeCtx,
     const ParmVarDecl *ParamDecl = *I;
     assert(ParamDecl && "Formal parameter has no decl?");
 
+    // TODO: Support allocator calls.
     if (Call.getKind() != CE_CXXAllocator)
       if (Call.isArgumentConstructedDirectly(Idx))
         continue;
 
+    // TODO: Allocators should receive the correct size and possibly alignment,
+    // determined in compile-time but not represented as arg-expressions,
+    // which makes getArgSVal() fail and return UnknownVal.
     SVal ArgVal = Call.getArgSVal(Idx);
     if (!ArgVal.isUnknown()) {
       Loc ParamLoc = SVB.makeLoc(MRMgr.getVarRegion(ParamDecl, CalleeCtx));

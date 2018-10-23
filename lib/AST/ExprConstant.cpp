@@ -759,18 +759,6 @@ namespace {
       /// context we try to fold them immediately since the optimizer never
       /// gets a chance to look at it.
       EM_PotentialConstantExpressionUnevaluated,
-
-      /// Evaluate as a constant expression. In certain scenarios, if:
-      /// - we find a MemberExpr with a base that can't be evaluated, or
-      /// - we find a variable initialized with a call to a function that has
-      ///   the alloc_size attribute on it
-      /// then we may consider evaluation to have succeeded.
-      ///
-      /// In either case, the LValue returned shall have an invalid base; in the
-      /// former, the base will be the invalid MemberExpr, in the latter, the
-      /// base will be either the alloc_size CallExpr or a CastExpr wrapping
-      /// said CallExpr.
-      EM_OffsetFold,
     } EvalMode;
 
     /// Are we checking whether the expression is a potential constant
@@ -874,7 +862,6 @@ namespace {
           case EM_PotentialConstantExpression:
           case EM_ConstantExpressionUnevaluated:
           case EM_PotentialConstantExpressionUnevaluated:
-          case EM_OffsetFold:
             HasActiveDiagnostic = false;
             return OptionalDiagnostic();
           }
@@ -966,7 +953,6 @@ namespace {
       case EM_ConstantExpression:
       case EM_ConstantExpressionUnevaluated:
       case EM_ConstantFold:
-      case EM_OffsetFold:
         return false;
       }
       llvm_unreachable("Missed EvalMode case");
@@ -985,7 +971,6 @@ namespace {
       case EM_EvaluateForOverflow:
       case EM_IgnoreSideEffects:
       case EM_ConstantFold:
-      case EM_OffsetFold:
         return true;
 
       case EM_PotentialConstantExpression:
@@ -1021,7 +1006,6 @@ namespace {
       case EM_ConstantExpressionUnevaluated:
       case EM_ConstantFold:
       case EM_IgnoreSideEffects:
-      case EM_OffsetFold:
         return false;
       }
       llvm_unreachable("Missed EvalMode case");
@@ -1093,18 +1077,18 @@ namespace {
     }
   };
 
-  /// RAII object used to treat the current evaluation as the correct pointer
-  /// offset fold for the current EvalMode
-  struct FoldOffsetRAII {
+  /// RAII object used to set the current evaluation mode to ignore
+  /// side-effects.
+  struct IgnoreSideEffectsRAII {
     EvalInfo &Info;
     EvalInfo::EvaluationMode OldMode;
-    explicit FoldOffsetRAII(EvalInfo &Info)
+    explicit IgnoreSideEffectsRAII(EvalInfo &Info)
         : Info(Info), OldMode(Info.EvalMode) {
       if (!Info.checkingPotentialConstantExpression())
-        Info.EvalMode = EvalInfo::EM_OffsetFold;
+        Info.EvalMode = EvalInfo::EM_IgnoreSideEffects;
     }
 
-    ~FoldOffsetRAII() { Info.EvalMode = OldMode; }
+    ~IgnoreSideEffectsRAII() { Info.EvalMode = OldMode; }
   };
 
   /// RAII object used to optionally suppress diagnostics and side-effects from
@@ -4217,6 +4201,13 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
     const CXXForRangeStmt *FS = cast<CXXForRangeStmt>(S);
     BlockScopeRAII Scope(Info);
 
+    // Evaluate the init-statement if present.
+    if (FS->getInit()) {
+      EvalStmtResult ESR = EvaluateStmt(Result, Info, FS->getInit());
+      if (ESR != ESR_Succeeded)
+        return ESR;
+    }
+
     // Initialize the __range variable.
     EvalStmtResult ESR = EvaluateStmt(Result, Info, FS->getRangeStmt());
     if (ESR != ESR_Succeeded)
@@ -4323,10 +4314,13 @@ static bool CheckConstexprFunction(EvalInfo &Info, SourceLocation CallLoc,
       Declaration->isConstexpr())
     return false;
 
-  // Bail out with no diagnostic if the function declaration itself is invalid.
-  // We will have produced a relevant diagnostic while parsing it.
-  if (Declaration->isInvalidDecl())
+  // Bail out if the function declaration itself is invalid.  We will
+  // have produced a relevant diagnostic while parsing it, so just
+  // note the problematic sub-expression.
+  if (Declaration->isInvalidDecl()) {
+    Info.FFDiag(CallLoc, diag::note_invalid_subexpr_in_const_expr);
     return false;
+  }
 
   // Can we evaluate this function call?
   if (Definition && Definition->isConstexpr() &&
@@ -5854,11 +5848,7 @@ bool PointerExprEvaluator::VisitCastExpr(const CastExpr *E) {
     // permitted in constant expressions in C++11. Bitcasts from cv void* are
     // also static_casts, but we disallow them as a resolution to DR1312.
     if (!E->getType()->isVoidPointerType()) {
-      // If we changed anything other than cvr-qualifiers, we can't use this
-      // value for constant folding. FIXME: Qualification conversions should
-      // always be CK_NoOp, but we get this wrong in C.
-      if (!Info.Ctx.hasCvrSimilarType(E->getType(), E->getSubExpr()->getType()))
-        Result.Designator.setInvalid();
+      Result.Designator.setInvalid();
       if (SubExpr->getType()->isVoidPointerType())
         CCEDiag(E, diag::note_constexpr_invalid_cast)
           << 3 << SubExpr->getType();
@@ -6191,12 +6181,12 @@ bool PointerExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
                 BuiltinOp == Builtin::BI__builtin_wmemmove;
 
     // The result of mem* is the first argument.
-    if (!Visit(E->getArg(0)) || Result.Designator.Invalid)
+    if (!Visit(E->getArg(0)))
       return false;
     LValue Dest = Result;
 
     LValue Src;
-    if (!EvaluatePointer(E->getArg(1), Src, Info) || Src.Designator.Invalid)
+    if (!EvaluatePointer(E->getArg(1), Src, Info))
       return false;
 
     APSInt N;
@@ -6209,6 +6199,20 @@ bool PointerExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
     if (!N)
       return true;
 
+    // Otherwise, if either of the operands is null, we can't proceed. Don't
+    // try to determine the type of the copied objects, because there aren't
+    // any.
+    if (!Src.Base || !Dest.Base) {
+      APValue Val;
+      (!Src.Base ? Src : Dest).moveInto(Val);
+      Info.FFDiag(E, diag::note_constexpr_memcpy_null)
+          << Move << WChar << !!Src.Base
+          << Val.getAsString(Info.Ctx, E->getArg(0)->getType());
+      return false;
+    }
+    if (Src.Designator.Invalid || Dest.Designator.Invalid)
+      return false;
+
     // We require that Src and Dest are both pointers to arrays of
     // trivially-copyable type. (For the wide version, the designator will be
     // invalid if the designated object is not a wchar_t.)
@@ -6216,6 +6220,10 @@ bool PointerExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
     QualType SrcT = Src.Designator.getType(Info.Ctx);
     if (!Info.Ctx.hasSameUnqualifiedType(T, SrcT)) {
       Info.FFDiag(E, diag::note_constexpr_memcpy_type_pun) << Move << SrcT << T;
+      return false;
+    }
+    if (T->isIncompleteType()) {
+      Info.FFDiag(E, diag::note_constexpr_memcpy_incomplete_type) << Move << T;
       return false;
     }
     if (!T.isTriviallyCopyableType(Info.Ctx)) {
@@ -8025,7 +8033,7 @@ static bool tryEvaluateBuiltinObjectSize(const Expr *E, unsigned Type,
     // If there are any, but we can determine the pointed-to object anyway, then
     // ignore the side-effects.
     SpeculativeEvaluationRAII SpeculativeEval(Info);
-    FoldOffsetRAII Fold(Info);
+    IgnoreSideEffectsRAII Fold(Info);
 
     if (E->isGLValue()) {
       // It's possible for us to be given GLValues if we're called via
@@ -8093,7 +8101,6 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
     case EvalInfo::EM_ConstantFold:
     case EvalInfo::EM_EvaluateForOverflow:
     case EvalInfo::EM_IgnoreSideEffects:
-    case EvalInfo::EM_OffsetFold:
       // Leave it to IR generation.
       return Error(E);
     case EvalInfo::EM_ConstantExpressionUnevaluated:
@@ -9544,11 +9551,11 @@ bool IntExprEvaluator::VisitCastExpr(const CastExpr *E) {
   case CK_IntegralComplexCast:
   case CK_IntegralComplexToFloatingComplex:
   case CK_BuiltinFnToFnPtr:
-  case CK_ZeroToOCLEvent:
-  case CK_ZeroToOCLQueue:
+  case CK_ZeroToOCLOpaqueType:
   case CK_NonAtomicToAtomic:
   case CK_AddressSpaceConversion:
   case CK_IntToOCLSampler:
+  case CK_FixedPointCast:
     llvm_unreachable("invalid cast kind for integral value");
 
   case CK_BitCast:
@@ -9581,6 +9588,14 @@ bool IntExprEvaluator::VisitCastExpr(const CastExpr *E) {
     if (BoolResult && E->getCastKind() == CK_BooleanToSignedIntegral)
       IntResult = (uint64_t)-1;
     return Success(IntResult, E);
+  }
+
+  case CK_FixedPointToBoolean: {
+    // Unsigned padding does not affect this.
+    APValue Val;
+    if (!Evaluate(Val, Info, SubExpr))
+      return false;
+    return Success(Val.getInt().getBoolValue(), E);
   }
 
   case CK_IntegralCast: {
@@ -10078,11 +10093,12 @@ bool ComplexExprEvaluator::VisitCastExpr(const CastExpr *E) {
   case CK_ARCExtendBlockObject:
   case CK_CopyAndAutoreleaseBlockObject:
   case CK_BuiltinFnToFnPtr:
-  case CK_ZeroToOCLEvent:
-  case CK_ZeroToOCLQueue:
+  case CK_ZeroToOCLOpaqueType:
   case CK_NonAtomicToAtomic:
   case CK_AddressSpaceConversion:
   case CK_IntToOCLSampler:
+  case CK_FixedPointCast:
+  case CK_FixedPointToBoolean:
     llvm_unreachable("invalid cast kind for complex value");
 
   case CK_LValueToRValue:
@@ -10835,6 +10851,19 @@ APSInt Expr::EvaluateKnownConstInt(const ASTContext &Ctx,
   EvalResult EvalResult;
   EvalResult.Diag = Diag;
   bool Result = EvaluateAsRValue(EvalResult, Ctx);
+  (void)Result;
+  assert(Result && "Could not evaluate expression");
+  assert(EvalResult.Val.isInt() && "Expression did not evaluate to integer");
+
+  return EvalResult.Val.getInt();
+}
+
+APSInt Expr::EvaluateKnownConstIntCheckOverflow(
+    const ASTContext &Ctx, SmallVectorImpl<PartialDiagnosticAt> *Diag) const {
+  EvalResult EvalResult;
+  EvalResult.Diag = Diag;
+  EvalInfo Info(Ctx, EvalResult, EvalInfo::EM_EvaluateForOverflow);
+  bool Result = ::EvaluateAsRValue(Info, this, EvalResult.Val);
   (void)Result;
   assert(Result && "Could not evaluate expression");
   assert(EvalResult.Val.isInt() && "Expression did not evaluate to integer");

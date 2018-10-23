@@ -80,6 +80,9 @@ def trim_egraph : Flag<["-"], "trim-egraph">,
   HelpText<"Only show error-related paths in the analysis graph">;
 def analyzer_viz_egraph_graphviz : Flag<["-"], "analyzer-viz-egraph-graphviz">,
   HelpText<"Display exploded graph using GraphViz">;
+def analyzer_dump_egraph : Separate<["-"], "analyzer-dump-egraph">,
+  HelpText<"Dump exploded graph to the specified file">;
+def analyzer_dump_egraph_EQ : Joined<["-"], "analyzer-dump-egraph=">, Alias<analyzer_dump_egraph>;
 
 def analyzer_inline_max_stack_depth : Separate<["-"], "analyzer-inline-max-stack-depth">,
   HelpText<"Bound on stack depth while inlining (4 by default)">;
@@ -537,12 +540,12 @@ def ast_dump_lookups : Flag<["-"], "ast-dump-lookups">,
   HelpText<"Build ASTs and then debug dump their name lookup tables">;
 def ast_view : Flag<["-"], "ast-view">,
   HelpText<"Build ASTs and view them with GraphViz">;
-def print_decl_contexts : Flag<["-"], "print-decl-contexts">,
-  HelpText<"Print DeclContexts and their Decls">;
 def emit_module : Flag<["-"], "emit-module">,
   HelpText<"Generate pre-compiled module file from a module map">;
 def emit_module_interface : Flag<["-"], "emit-module-interface">,
   HelpText<"Generate pre-compiled module file from a C++ module interface">;
+def emit_header_module : Flag<["-"], "emit-header-module">,
+  HelpText<"Generate pre-compiled module file from a set of header files">;
 def emit_pth : Flag<["-"], "emit-pth">,
   HelpText<"Generate pre-tokenized header file">;
 def emit_pch : Flag<["-"], "emit-pch">,

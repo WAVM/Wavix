@@ -323,6 +323,9 @@ public:
     /// Code completion where an Objective-C category name is expected.
     CCC_ObjCCategoryName,
 
+    /// Code completion inside the filename part of a #include directive.
+    CCC_IncludedFile,
+
     /// An unknown context, in which we are recovering from a parsing
     /// error and don't know which completions we should give.
     CCC_Recovery
@@ -942,6 +945,16 @@ public:
   CreateCodeCompletionStringForMacro(Preprocessor &PP,
                                      CodeCompletionAllocator &Allocator,
                                      CodeCompletionTUInfo &CCTUInfo);
+
+  CodeCompletionString *createCodeCompletionStringForDecl(
+      Preprocessor &PP, ASTContext &Ctx, CodeCompletionBuilder &Result,
+      bool IncludeBriefComments, const CodeCompletionContext &CCContext,
+      PrintingPolicy &Policy);
+
+  CodeCompletionString *createCodeCompletionStringForOverride(
+      Preprocessor &PP, ASTContext &Ctx, CodeCompletionBuilder &Result,
+      bool IncludeBriefComments, const CodeCompletionContext &CCContext,
+      PrintingPolicy &Policy);
 
   /// Retrieve the name that should be used to order a result.
   ///

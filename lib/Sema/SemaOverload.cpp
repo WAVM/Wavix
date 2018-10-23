@@ -9984,7 +9984,7 @@ static void DiagnoseBadDeduction(Sema &S, NamedDecl *Found, Decl *Templated,
           DeductionFailure.getFirstArg()->getNonTypeTemplateArgumentType();
       QualType T2 =
           DeductionFailure.getSecondArg()->getNonTypeTemplateArgumentType();
-      if (!S.Context.hasSameType(T1, T2)) {
+      if (!T1.isNull() && !T2.isNull() && !S.Context.hasSameType(T1, T2)) {
         S.Diag(Templated->getLocation(),
                diag::note_ovl_candidate_inconsistent_deduction_types)
           << ParamD->getDeclName() << *DeductionFailure.getFirstArg() << T1
@@ -10242,7 +10242,8 @@ static void DiagnoseOpenCLExtensionDisabled(Sema &S, OverloadCandidate *Cand) {
   FunctionDecl *Callee = Cand->Function;
 
   S.Diag(Callee->getLocation(),
-         diag::note_ovl_candidate_disabled_by_extension);
+         diag::note_ovl_candidate_disabled_by_extension)
+    << S.getOpenCLExtensionsFromDeclExtMap(Callee);
 }
 
 /// Generates a 'note' diagnostic for an overload candidate.  We've
@@ -10810,8 +10811,7 @@ void TemplateSpecCandidateSet::NoteCandidates(Sema &S, SourceLocation Loc) {
     // in general, want to list every possible builtin candidate.
   }
 
-  llvm::sort(Cands.begin(), Cands.end(),
-             CompareTemplateSpecCandidatesForDisplay(S));
+  llvm::sort(Cands, CompareTemplateSpecCandidatesForDisplay(S));
 
   // FIXME: Perhaps rename OverloadsShown and getShowOverloads()
   // for generalization purposes (?).
@@ -10997,7 +10997,7 @@ private:
 
     // Note: We explicitly leave Matches unmodified if there isn't a clear best
     // option, so we can potentially give the user a better error
-    if (!std::all_of(Matches.begin(), Matches.end(), IsBestOrInferiorToBest))
+    if (!llvm::all_of(Matches, IsBestOrInferiorToBest))
       return false;
     Matches[0] = *Best;
     Matches.resize(1);

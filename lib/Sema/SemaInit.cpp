@@ -964,6 +964,14 @@ void InitListChecker::CheckImplicitInitList(const InitializedEntity &Entity,
                      StructuredSubobjectInitList->getEndLoc()),
                  "}");
     }
+
+    // Warn if this type won't be an aggregate in future versions of C++.
+    auto *CXXRD = T->getAsCXXRecordDecl();
+    if (CXXRD && CXXRD->hasUserDeclaredConstructor()) {
+      SemaRef.Diag(StructuredSubobjectInitList->getBeginLoc(),
+                   diag::warn_cxx2a_compat_aggregate_init_with_ctors)
+          << StructuredSubobjectInitList->getSourceRange() << T;
+    }
   }
 }
 
@@ -1106,9 +1114,30 @@ void InitListChecker::CheckExplicitInitList(const InitializedEntity &Entity,
     }
   }
 
-  if (!VerifyOnly && T->isScalarType() &&
-      IList->getNumInits() == 1 && !isa<InitListExpr>(IList->getInit(0)))
-    warnBracedScalarInit(SemaRef, Entity, IList->getSourceRange());
+  if (!VerifyOnly) {
+    if (T->isScalarType() && IList->getNumInits() == 1 &&
+        !isa<InitListExpr>(IList->getInit(0)))
+      warnBracedScalarInit(SemaRef, Entity, IList->getSourceRange());
+
+    // Warn if this is a class type that won't be an aggregate in future
+    // versions of C++.
+    auto *CXXRD = T->getAsCXXRecordDecl();
+    if (CXXRD && CXXRD->hasUserDeclaredConstructor()) {
+      // Don't warn if there's an equivalent default constructor that would be
+      // used instead.
+      bool HasEquivCtor = false;
+      if (IList->getNumInits() == 0) {
+        auto *CD = SemaRef.LookupDefaultConstructor(CXXRD);
+        HasEquivCtor = CD && !CD->isDeleted();
+      }
+
+      if (!HasEquivCtor) {
+        SemaRef.Diag(IList->getBeginLoc(),
+                     diag::warn_cxx2a_compat_aggregate_init_with_ctors)
+            << IList->getSourceRange() << T;
+      }
+    }
+  }
 }
 
 void InitListChecker::CheckListElementTypes(const InitializedEntity &Entity,
@@ -3232,8 +3261,7 @@ void InitializationSequence::Step::Destroy() {
   case SK_StdInitializerList:
   case SK_StdInitializerListConstructorCall:
   case SK_OCLSamplerInit:
-  case SK_OCLZeroEvent:
-  case SK_OCLZeroQueue:
+  case SK_OCLZeroOpaqueType:
     break;
 
   case SK_ConversionSequence:
@@ -3519,16 +3547,9 @@ void InitializationSequence::AddOCLSamplerInitStep(QualType T) {
   Steps.push_back(S);
 }
 
-void InitializationSequence::AddOCLZeroEventStep(QualType T) {
+void InitializationSequence::AddOCLZeroOpaqueTypeStep(QualType T) {
   Step S;
-  S.Kind = SK_OCLZeroEvent;
-  S.Type = T;
-  Steps.push_back(S);
-}
-
-void InitializationSequence::AddOCLZeroQueueStep(QualType T) {
-  Step S;
-  S.Kind = SK_OCLZeroQueue;
+  S.Kind = SK_OCLZeroOpaqueType;
   S.Type = T;
   Steps.push_back(S);
 }
@@ -5231,39 +5252,31 @@ static bool TryOCLSamplerInitialization(Sema &S,
   return true;
 }
 
-//
-// OpenCL 1.2 spec, s6.12.10
-//
-// The event argument can also be used to associate the
-// async_work_group_copy with a previous async copy allowing
-// an event to be shared by multiple async copies; otherwise
-// event should be zero.
-//
-static bool TryOCLZeroEventInitialization(Sema &S,
-                                          InitializationSequence &Sequence,
-                                          QualType DestType,
-                                          Expr *Initializer) {
-  if (!S.getLangOpts().OpenCL || !DestType->isEventT() ||
-      !Initializer->isIntegerConstantExpr(S.getASTContext()) ||
-      (Initializer->EvaluateKnownConstInt(S.getASTContext()) != 0))
+static bool TryOCLZeroOpaqueTypeInitialization(Sema &S,
+                                               InitializationSequence &Sequence,
+                                               QualType DestType,
+                                               Expr *Initializer) {
+  if (!S.getLangOpts().OpenCL)
     return false;
 
-  Sequence.AddOCLZeroEventStep(DestType);
-  return true;
-}
+  //
+  // OpenCL 1.2 spec, s6.12.10
+  //
+  // The event argument can also be used to associate the
+  // async_work_group_copy with a previous async copy allowing
+  // an event to be shared by multiple async copies; otherwise
+  // event should be zero.
+  //
+  if (DestType->isEventT() || DestType->isQueueT()) {
+    if (!Initializer->isIntegerConstantExpr(S.getASTContext()) ||
+        (Initializer->EvaluateKnownConstInt(S.getASTContext()) != 0))
+      return false;
 
-static bool TryOCLZeroQueueInitialization(Sema &S,
-                                          InitializationSequence &Sequence,
-                                          QualType DestType,
-                                          Expr *Initializer) {
-  if (!S.getLangOpts().OpenCL || S.getLangOpts().OpenCLVersion < 200 ||
-      !DestType->isQueueT() ||
-      !Initializer->isIntegerConstantExpr(S.getASTContext()) ||
-      (Initializer->EvaluateKnownConstInt(S.getASTContext()) != 0))
-    return false;
+    Sequence.AddOCLZeroOpaqueTypeStep(DestType);
+    return true;
+  }
 
-  Sequence.AddOCLZeroQueueStep(DestType);
-  return true;
+  return false;
 }
 
 InitializationSequence::InitializationSequence(Sema &S,
@@ -5537,11 +5550,8 @@ void InitializationSequence::InitializeFrom(Sema &S,
     if (TryOCLSamplerInitialization(S, *this, DestType, Initializer))
       return;
 
-    if (TryOCLZeroEventInitialization(S, *this, DestType, Initializer))
+    if (TryOCLZeroOpaqueTypeInitialization(S, *this, DestType, Initializer))
       return;
-
-    if (TryOCLZeroQueueInitialization(S, *this, DestType, Initializer))
-       return;
 
     // Handle initialization in C
     AddCAssignmentStep(DestType);
@@ -6412,7 +6422,7 @@ static bool isVarOnPath(IndirectLocalPath &Path, VarDecl *VD) {
 }
 
 static bool pathContainsInit(IndirectLocalPath &Path) {
-  return std::any_of(Path.begin(), Path.end(), [=](IndirectLocalPathEntry E) {
+  return llvm::any_of(Path, [=](IndirectLocalPathEntry E) {
     return E.Kind == IndirectLocalPathEntry::DefaultInit ||
            E.Kind == IndirectLocalPathEntry::VarInit;
   });
@@ -6755,6 +6765,20 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
       }
     }
     return;
+  }
+
+  // The lifetime of an init-capture is that of the closure object constructed
+  // by a lambda-expression.
+  if (auto *LE = dyn_cast<LambdaExpr>(Init)) {
+    for (Expr *E : LE->capture_inits()) {
+      if (!E)
+        continue;
+      if (E->isGLValue())
+        visitLocalsRetainedByReferenceBinding(Path, E, RK_ReferenceBinding,
+                                              Visit);
+      else
+        visitLocalsRetainedByInitializer(Path, E, Visit, true);
+    }
   }
 
   if (isa<CallExpr>(Init) || isa<CXXConstructExpr>(Init))
@@ -7364,8 +7388,7 @@ InitializationSequence::Perform(Sema &S,
   case SK_ProduceObjCObject:
   case SK_StdInitializerList:
   case SK_OCLSamplerInit:
-  case SK_OCLZeroEvent:
-  case SK_OCLZeroQueue: {
+  case SK_OCLZeroOpaqueType: {
     assert(Args.size() == 1);
     CurInit = Args[0];
     if (!CurInit.get()) return ExprError();
@@ -8019,21 +8042,12 @@ InitializationSequence::Perform(Sema &S,
                                       CK_IntToOCLSampler);
       break;
     }
-    case SK_OCLZeroEvent: {
-      assert(Step->Type->isEventT() &&
-             "Event initialization on non-event type.");
+    case SK_OCLZeroOpaqueType: {
+      assert((Step->Type->isEventT() || Step->Type->isQueueT()) &&
+             "Wrong type for initialization of OpenCL opaque type.");
 
       CurInit = S.ImpCastExprToType(CurInit.get(), Step->Type,
-                                    CK_ZeroToOCLEvent,
-                                    CurInit.get()->getValueKind());
-      break;
-    }
-    case SK_OCLZeroQueue: {
-      assert(Step->Type->isQueueT() &&
-             "Event initialization on non queue type.");
-
-      CurInit = S.ImpCastExprToType(CurInit.get(), Step->Type,
-                                    CK_ZeroToOCLQueue,
+                                    CK_ZeroToOCLOpaqueType,
                                     CurInit.get()->getValueKind());
       break;
     }
@@ -8916,12 +8930,8 @@ void InitializationSequence::dump(raw_ostream &OS) const {
       OS << "OpenCL sampler_t from integer constant";
       break;
 
-    case SK_OCLZeroEvent:
-      OS << "OpenCL event_t from zero";
-      break;
-
-    case SK_OCLZeroQueue:
-      OS << "OpenCL queue_t from zero";
+    case SK_OCLZeroOpaqueType:
+      OS << "OpenCL opaque type from zero";
       break;
     }
 
@@ -9126,8 +9136,11 @@ QualType Sema::DeduceTemplateSpecializationFromInitializer(
       TSInfo->getType()->getContainedDeducedType());
   assert(DeducedTST && "not a deduced template specialization type");
 
-  // We can only perform deduction for class templates.
   auto TemplateName = DeducedTST->getTemplateName();
+  if (TemplateName.isDependent())
+    return Context.DependentTy;
+
+  // We can only perform deduction for class templates.
   auto *Template =
       dyn_cast_or_null<ClassTemplateDecl>(TemplateName.getAsTemplateDecl());
   if (!Template) {

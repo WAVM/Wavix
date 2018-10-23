@@ -645,12 +645,12 @@ AST_MATCHER(FunctionDecl, isMain) {
 ///
 /// Given
 /// \code
-///   tempalate<typename T> class A {};
-///   typedef A<int> B;
+///   template<typename T> class A {}; #1
+///   template<> class A<int> {}; #2
 /// \endcode
 /// classTemplateSpecializationDecl(hasSpecializedTemplate(classTemplateDecl()))
-///   matches 'B' with classTemplateDecl() matching the class template
-///   declaration of 'A'.
+///   matches '#2' with classTemplateDecl() matching the class template
+///   declaration of 'A' at #1.
 AST_MATCHER_P(ClassTemplateSpecializationDecl, hasSpecializedTemplate,
               internal::Matcher<ClassTemplateDecl>, InnerMatcher) {
   const ClassTemplateDecl* Decl = Node.getSpecializedTemplate();
@@ -929,7 +929,7 @@ AST_MATCHER_P(TemplateArgument, refersToType,
 /// Given
 /// \code
 ///   template<template <typename> class S> class X {};
-///   template<typename T> class Y {};"
+///   template<typename T> class Y {};
 ///   X<Y> xi;
 /// \endcode
 /// classTemplateSpecializationDecl(hasAnyTemplateArgument(
@@ -4697,13 +4697,24 @@ AST_MATCHER(CXXMethodDecl, isUserProvided) {
 /// \code
 ///   class Y {
 ///     void x() { this->x(); x(); Y y; y.x(); a; this->b; Y::b; }
+///     template <class T> void f() { this->f<T>(); f<T>(); }
 ///     int a;
 ///     static int b;
+///   };
+///   template <class T>
+///   class Z {
+///     void x() { this->m; }
 ///   };
 /// \endcode
 /// memberExpr(isArrow())
 ///   matches this->x, x, y.x, a, this->b
-AST_MATCHER(MemberExpr, isArrow) {
+/// cxxDependentScopeMemberExpr(isArrow())
+///   matches this->m
+/// unresolvedMemberExpr(isArrow())
+///   matches this->f<T>, f<T>
+AST_POLYMORPHIC_MATCHER(
+    isArrow, AST_POLYMORPHIC_SUPPORTED_TYPES(MemberExpr, UnresolvedMemberExpr,
+                                             CXXDependentScopeMemberExpr)) {
   return Node.isArrow();
 }
 
@@ -5272,7 +5283,7 @@ AST_TYPE_TRAVERSE_MATCHER(hasDeducedType, getDeducedType,
 ///   decltype(2.0) b = 2.0;
 /// \endcode
 /// decltypeType(hasUnderlyingType(isInteger()))
-///   matches "auto a"
+///   matches the type of "a"
 ///
 /// Usable as: Matcher<DecltypeType>
 AST_TYPE_TRAVERSE_MATCHER(hasUnderlyingType, getUnderlyingType,

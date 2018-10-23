@@ -865,6 +865,16 @@ __nop(void) {
 #endif
 
 /*----------------------------------------------------------------------------*\
+|* MS AArch64 specific
+\*----------------------------------------------------------------------------*/
+#if defined(__aarch64__)
+unsigned __int64 __getReg(int);
+long _InterlockedAdd(long volatile *Addend, long Value);
+int _ReadStatusReg(int);
+void _WriteStatusReg(int, int);
+#endif
+
+/*----------------------------------------------------------------------------*\
 |* Privileged intrinsics
 \*----------------------------------------------------------------------------*/
 #if defined(__i386__) || defined(__x86_64__)
