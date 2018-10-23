@@ -33,6 +33,21 @@ To bootstrap Wavix, I use Ubuntu 18.04 running on the Windows Subsystem for Linu
 
 The bootstrap process will also work on Windows (without the Windows Subsystem for Linux) to compile the compiler, runtime libraries, and WAVM, but not to compile bash+coreutils.
 
+## Bootstrapping with Docker
+
+The bootstrapping process can also be done with Docker. From the project root:
+
+```
+# Build the container
+docker build -t wavix .
+
+# Open a shell inside the container
+docker run -it wavix /bin/bash
+
+# Run the wavix bash binary
+/build/bootstrap/bin/wavix --sysroot /build/sys /build/sys/bin/bash
+```
+
 # Running Wavix
 
 To run a Wavix binary, use the command `~/wavix-build/bootstrap/bin/wavix --sysroot ~/wavix-build/sys <binary>`.

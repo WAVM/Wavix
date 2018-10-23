@@ -65,8 +65,8 @@ LIBCXXABI_OUT_DIR = os.path.join(BUILD_DIR, 'libcxxabi')
 LIBCXX_OUT_DIR = os.path.join(BUILD_DIR, 'libcxx')
 TORTURE_O_OUT_DIR = os.path.join(BUILD_DIR, 'torture-o')
 
-HELLOWORLD_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'helloworld')
-HELLOWORLD_OUT_DIR = os.path.join(BUILD_DIR, 'helloworld')
+HELLOWORLD_SRC_DIR = os.path.join(WAVIX_SRC_DIR, 'HelloWorld')
+HELLOWORLD_OUT_DIR = os.path.join(BUILD_DIR, 'HelloWorld')
 
 HOST_DIR = os.path.join(BUILD_DIR, 'host')
 HOST_BIN = os.path.join(HOST_DIR, 'bin')
@@ -260,6 +260,7 @@ def CompilerRT():
              WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
              '-DCMAKE_C_COMPILER_WORKS=ON',
+             '-DCMAKE_CXX_COMPILER_WORKS=1',
              '-DCOMPILER_RT_BAREMETAL_BUILD=On',
              '-DCOMPILER_RT_BUILD_XRAY=OFF',
              '-DCOMPILER_RT_INCLUDE_TESTS=OFF',
@@ -275,7 +276,7 @@ def CompilerRT():
   proc.check_call([NINJA_BIN, 'install'], cwd=COMPILER_RT_OUT_DIR)
 
 def HelloWorld():
-  buildbot.Step('helloworld')
+  buildbot.Step('HelloWorld')
 
   # TODO(sbc): Remove this.
   # The compiler-rt doesn't currently rebuild libraries when a new -DCMAKE_AR
@@ -311,6 +312,7 @@ def LibCXXABI():
              '-DCMAKE_TOOLCHAIN_FILE=' +
              WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
+             '-DCMAKE_CXX_COMPILER_WORKS=1',
              '-DLIBCXXABI_LIBCXX_PATH=' + LIBCXX_SRC_DIR,
              '-DLIBCXXABI_LIBCXX_INCLUDES=' + os.path.join(LIBCXX_SRC_DIR, 'include'),
              '-DLIBCXXABI_ENABLE_STATIC=ON',
@@ -349,6 +351,7 @@ def LibCXX():
              # This checks for working <atomic> header, which in turn errors
              # out on systems with threads disabled
              '-DLLVM_COMPILER_CHECKED=ON',
+             '-DCMAKE_CXX_COMPILER_WORKS=1',
              '-DLIBCXX_CXX_ABI=libcxxabi',
              '-DLIBCXX_CXX_ABI_INCLUDE_PATHS=' + WindowsFSEscape(os.path.join(LIBCXXABI_SRC_DIR, 'include')),
              '-DLIBCXX_CXX_ABI_LIBRARY_PATH=' + WindowsFSEscape(os.path.join(SYSROOT_DIR, 'lib')),
