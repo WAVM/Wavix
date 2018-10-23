@@ -155,6 +155,7 @@ static KeywordStatus getKeywordStatus(const LangOptions &LangOpts,
   if (LangOpts.WChar && (Flags & WCHARSUPPORT)) return KS_Enabled;
   if (LangOpts.Char8 && (Flags & CHAR8SUPPORT)) return KS_Enabled;
   if (LangOpts.AltiVec && (Flags & KEYALTIVEC)) return KS_Enabled;
+  if (LangOpts.ZVector && (Flags & KEYZVECTOR)) return KS_Enabled;
   if (LangOpts.OpenCL && !LangOpts.OpenCLCPlusPlus && (Flags & KEYOPENCLC))
     return KS_Enabled;
   if (LangOpts.OpenCLCPlusPlus && (Flags & KEYOPENCLCXX)) return KS_Enabled;
@@ -382,24 +383,23 @@ unsigned llvm::DenseMapInfo<clang::Selector>::getHashValue(clang::Selector S) {
 
 namespace clang {
 
-/// MultiKeywordSelector - One of these variable length records is kept for each
+/// One of these variable length records is kept for each
 /// selector containing more than one keyword. We use a folding set
 /// to unique aggregate names (keyword selectors in ObjC parlance). Access to
 /// this class is provided strictly through Selector.
-class MultiKeywordSelector
-  : public DeclarationNameExtra, public llvm::FoldingSetNode {
-  MultiKeywordSelector(unsigned nKeys) {
-    ExtraKindOrNumArgs = NUM_EXTRA_KINDS + nKeys;
-  }
+class alignas(IdentifierInfoAlignment) MultiKeywordSelector
+    : public detail::DeclarationNameExtra,
+      public llvm::FoldingSetNode {
+  MultiKeywordSelector(unsigned nKeys) : DeclarationNameExtra(nKeys) {}
 
 public:
   // Constructor for keyword selectors.
-  MultiKeywordSelector(unsigned nKeys, IdentifierInfo **IIV) {
+  MultiKeywordSelector(unsigned nKeys, IdentifierInfo **IIV)
+      : DeclarationNameExtra(nKeys) {
     assert((nKeys > 1) && "not a multi-keyword selector");
-    ExtraKindOrNumArgs = NUM_EXTRA_KINDS + nKeys;
 
     // Fill in the trailing keyword array.
-    IdentifierInfo **KeyInfo = reinterpret_cast<IdentifierInfo **>(this+1);
+    IdentifierInfo **KeyInfo = reinterpret_cast<IdentifierInfo **>(this + 1);
     for (unsigned i = 0; i != nKeys; ++i)
       KeyInfo[i] = IIV[i];
   }
@@ -407,16 +407,16 @@ public:
   // getName - Derive the full selector name and return it.
   std::string getName() const;
 
-  unsigned getNumArgs() const { return ExtraKindOrNumArgs - NUM_EXTRA_KINDS; }
+  using DeclarationNameExtra::getNumArgs;
 
   using keyword_iterator = IdentifierInfo *const *;
 
   keyword_iterator keyword_begin() const {
-    return reinterpret_cast<keyword_iterator>(this+1);
+    return reinterpret_cast<keyword_iterator>(this + 1);
   }
 
   keyword_iterator keyword_end() const {
-    return keyword_begin()+getNumArgs();
+    return keyword_begin() + getNumArgs();
   }
 
   IdentifierInfo *getIdentifierInfoForSlot(unsigned i) const {
@@ -424,8 +424,8 @@ public:
     return keyword_begin()[i];
   }
 
-  static void Profile(llvm::FoldingSetNodeID &ID,
-                      keyword_iterator ArgTys, unsigned NumArgs) {
+  static void Profile(llvm::FoldingSetNodeID &ID, keyword_iterator ArgTys,
+                      unsigned NumArgs) {
     ID.AddInteger(NumArgs);
     for (unsigned i = 0; i != NumArgs; ++i)
       ID.AddPointer(ArgTys[i]);
@@ -462,7 +462,7 @@ IdentifierInfo *Selector::getIdentifierInfoForSlot(unsigned argIndex) const {
 
 StringRef Selector::getNameForSlot(unsigned int argIndex) const {
   IdentifierInfo *II = getIdentifierInfoForSlot(argIndex);
-  return II? II->getName() : StringRef();
+  return II ? II->getName() : StringRef();
 }
 
 std::string MultiKeywordSelector::getName() const {

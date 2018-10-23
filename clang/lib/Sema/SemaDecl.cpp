@@ -9596,7 +9596,7 @@ static bool CheckTargetCausesMultiVersioning(
   const auto *OldTA = OldFD->getAttr<TargetAttr>();
   TargetAttr::ParsedTargetAttr NewParsed = NewTA->parse();
   // Sort order doesn't matter, it just needs to be consistent.
-  llvm::sort(NewParsed.Features.begin(), NewParsed.Features.end());
+  llvm::sort(NewParsed.Features);
 
   // If the old decl is NOT MultiVersioned yet, and we don't cause that
   // to change, this is a simple redeclaration.
@@ -9682,7 +9682,7 @@ static bool CheckMultiVersionAdditionalDecl(
   TargetAttr::ParsedTargetAttr NewParsed;
   if (NewTA) {
     NewParsed = NewTA->parse();
-    llvm::sort(NewParsed.Features.begin(), NewParsed.Features.end());
+    llvm::sort(NewParsed.Features);
   }
 
   bool UseMemberUsingDeclRules =
@@ -10022,11 +10022,17 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
     if (FunctionTemplateDecl *OldTemplateDecl =
             dyn_cast<FunctionTemplateDecl>(OldDecl)) {
       auto *OldFD = OldTemplateDecl->getTemplatedDecl();
-      NewFD->setPreviousDeclaration(OldFD);
-      adjustDeclContextForDeclaratorDecl(NewFD, OldFD);
       FunctionTemplateDecl *NewTemplateDecl
         = NewFD->getDescribedFunctionTemplate();
       assert(NewTemplateDecl && "Template/non-template mismatch");
+
+      // The call to MergeFunctionDecl above may have created some state in
+      // NewTemplateDecl that needs to be merged with OldTemplateDecl before we
+      // can add it as a redeclaration.
+      NewTemplateDecl->mergePrevDecl(OldTemplateDecl);
+
+      NewFD->setPreviousDeclaration(OldFD);
+      adjustDeclContextForDeclaratorDecl(NewFD, OldFD);
       if (NewFD->isCXXClassMember()) {
         NewFD->setAccess(OldTemplateDecl->getAccess());
         NewTemplateDecl->setAccess(OldTemplateDecl->getAccess());
@@ -11826,37 +11832,8 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   QualType type = var->getType();
   if (type->isDependentType()) return;
 
-  // __block variables might require us to capture a copy-initializer.
-  if (var->hasAttr<BlocksAttr>()) {
-    // It's currently invalid to ever have a __block variable with an
-    // array type; should we diagnose that here?
-
-    // Regardless, we don't want to ignore array nesting when
-    // constructing this copy.
-    if (type->isStructureOrClassType()) {
-      EnterExpressionEvaluationContext scope(
-          *this, ExpressionEvaluationContext::PotentiallyEvaluated);
-      SourceLocation poi = var->getLocation();
-      Expr *varRef =new (Context) DeclRefExpr(var, false, type, VK_LValue, poi);
-      ExprResult result
-        = PerformMoveOrCopyInitialization(
-            InitializedEntity::InitializeBlock(poi, type, false),
-            var, var->getType(), varRef, /*AllowNRVO=*/true);
-      if (!result.isInvalid()) {
-        result = MaybeCreateExprWithCleanups(result);
-        Expr *init = result.getAs<Expr>();
-        Context.setBlockVarCopyInit(var, init, canThrow(init));
-      }
-
-      // The destructor's exception spefication is needed when IRGen generates
-      // block copy/destroy functions. Resolve it here.
-      if (const CXXRecordDecl *RD = type->getAsCXXRecordDecl())
-        if (CXXDestructorDecl *DD = RD->getDestructor()) {
-          auto *FPT = DD->getType()->getAs<FunctionProtoType>();
-          FPT = ResolveExceptionSpec(poi, FPT);
-        }
-    }
-  }
+  if (var->hasAttr<BlocksAttr>())
+    getCurFunction()->addByrefBlockVar(var);
 
   Expr *Init = var->getInit();
   bool IsGlobal = GlobalStorage && !var->isStaticLocal();
@@ -13360,15 +13337,17 @@ NamedDecl *Sema::ImplicitlyDefineFunction(SourceLocation Loc,
   }
 
   // Extension in C99.  Legal in C90, but warn about it.
-  // OpenCL v2.0 s6.9.u - Implicit function declaration is not supported.
   unsigned diag_id;
   if (II.getName().startswith("__builtin_"))
     diag_id = diag::warn_builtin_unknown;
-  else if (getLangOpts().C99 || getLangOpts().OpenCL)
+  // OpenCL v2.0 s6.9.u - Implicit function declaration is not supported.
+  else if (getLangOpts().OpenCL)
+    diag_id = diag::err_opencl_implicit_function_decl;
+  else if (getLangOpts().C99)
     diag_id = diag::ext_implicit_function_decl;
   else
     diag_id = diag::warn_implicit_function_decl;
-  Diag(Loc, diag_id) << &II << getLangOpts().OpenCL;
+  Diag(Loc, diag_id) << &II;
 
   // If we found a prior declaration of this function, don't bother building
   // another one. We've already pushed that one into scope, so there's nothing
@@ -16290,8 +16269,10 @@ Decl *Sema::ActOnEnumConstant(Scope *S, Decl *theEnumDecl, Decl *lastEnumConst,
 
   // Verify that there isn't already something declared with this name in this
   // scope.
-  NamedDecl *PrevDecl = LookupSingleName(S, Id, IdLoc, LookupOrdinaryName,
-                                         ForVisibleRedeclaration);
+  LookupResult R(*this, Id, IdLoc, LookupOrdinaryName, ForVisibleRedeclaration);
+  LookupName(R, S);
+  NamedDecl *PrevDecl = R.getAsSingle<NamedDecl>();
+
   if (PrevDecl && PrevDecl->isTemplateParameter()) {
     // Maybe we will complain about the shadowed template parameter.
     DiagnoseTemplateParameterShadow(IdLoc, PrevDecl);
@@ -16314,6 +16295,11 @@ Decl *Sema::ActOnEnumConstant(Scope *S, Decl *theEnumDecl, Decl *lastEnumConst,
     return nullptr;
 
   if (PrevDecl) {
+    if (!TheEnumDecl->isScoped() && isa<ValueDecl>(PrevDecl)) {
+      // Check for other kinds of shadowing not already handled.
+      CheckShadow(New, PrevDecl, R);
+    }
+
     // When in C++, we may get a TagDecl with the same name; in this case the
     // enum constant will 'hide' the tag.
     assert((getLangOpts().CPlusPlus || !isa<TagDecl>(PrevDecl)) &&
@@ -16400,7 +16386,7 @@ static void CheckForDuplicateEnumValues(Sema &S, ArrayRef<Decl *> Elements,
   typedef SmallVector<std::unique_ptr<ECDVector>, 3> DuplicatesVector;
 
   typedef llvm::PointerUnion<EnumConstantDecl*, ECDVector*> DeclOrVector;
-  typedef llvm::DenseMap<int64_t, DeclOrVector> ValueToVectorMap;
+  typedef std::unordered_map<int64_t, DeclOrVector> ValueToVectorMap;
 
   // Use int64_t as a key to avoid needing special handling for DenseMap keys.
   auto EnumConstantToKey = [](const EnumConstantDecl *D) {
@@ -16832,6 +16818,10 @@ Sema::DeclGroupPtrTy Sema::ActOnModuleDecl(SourceLocation StartLoc,
   case LangOptions::CMK_ModuleMap:
     Diag(ModuleLoc, diag::err_module_decl_in_module_map_module);
     return nullptr;
+
+  case LangOptions::CMK_HeaderModule:
+    Diag(ModuleLoc, diag::err_module_decl_in_header_module);
+    return nullptr;
   }
 
   assert(ModuleScopes.size() == 1 && "expected to be at global module scope");
@@ -16900,7 +16890,8 @@ Sema::DeclGroupPtrTy Sema::ActOnModuleDecl(SourceLocation StartLoc,
   case ModuleDeclKind::Implementation:
     std::pair<IdentifierInfo *, SourceLocation> ModuleNameLoc(
         PP.getIdentifierInfo(ModuleName), Path[0].second);
-    Mod = getModuleLoader().loadModule(ModuleLoc, Path, Module::AllVisible,
+    Mod = getModuleLoader().loadModule(ModuleLoc, {ModuleNameLoc},
+                                       Module::AllVisible,
                                        /*IsIncludeDirective=*/false);
     if (!Mod) {
       Diag(ModuleLoc, diag::err_module_not_defined) << ModuleName;
@@ -16930,6 +16921,19 @@ Sema::DeclGroupPtrTy Sema::ActOnModuleDecl(SourceLocation StartLoc,
 DeclResult Sema::ActOnModuleImport(SourceLocation StartLoc,
                                    SourceLocation ImportLoc,
                                    ModuleIdPath Path) {
+  // Flatten the module path for a Modules TS module name.
+  std::pair<IdentifierInfo *, SourceLocation> ModuleNameLoc;
+  if (getLangOpts().ModulesTS) {
+    std::string ModuleName;
+    for (auto &Piece : Path) {
+      if (!ModuleName.empty())
+        ModuleName += ".";
+      ModuleName += Piece.first->getName();
+    }
+    ModuleNameLoc = {PP.getIdentifierInfo(ModuleName), Path[0].second};
+    Path = ModuleIdPath(ModuleNameLoc);
+  }
+
   Module *Mod =
       getModuleLoader().loadModule(ImportLoc, Path, Module::AllVisible,
                                    /*IsIncludeDirective=*/false);

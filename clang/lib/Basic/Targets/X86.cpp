@@ -169,7 +169,6 @@ bool X86TargetInfo::initFeatureMap(
     if (Kind != CK_SkylakeServer) // SKX inherits all SKL features, except SGX
       setFeatureEnabledImpl(Features, "sgx", true);
     setFeatureEnabledImpl(Features, "clflushopt", true);
-    setFeatureEnabledImpl(Features, "rtm", true);
     setFeatureEnabledImpl(Features, "aes", true);
     LLVM_FALLTHROUGH;
   case CK_Broadwell:
@@ -281,7 +280,6 @@ bool X86TargetInfo::initFeatureMap(
     setFeatureEnabledImpl(Features, "lzcnt", true);
     setFeatureEnabledImpl(Features, "bmi", true);
     setFeatureEnabledImpl(Features, "bmi2", true);
-    setFeatureEnabledImpl(Features, "rtm", true);
     setFeatureEnabledImpl(Features, "fma", true);
     setFeatureEnabledImpl(Features, "rdrnd", true);
     setFeatureEnabledImpl(Features, "f16c", true);
@@ -860,6 +858,11 @@ bool X86TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
 /// definitions for this particular subtarget.
 void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
                                      MacroBuilder &Builder) const {
+  std::string CodeModel = getTargetOpts().CodeModel;
+  if (CodeModel == "default")
+    CodeModel = "small";
+  Builder.defineMacro("__code_model_" + CodeModel + "_");
+
   // Target identification.
   if (getTriple().getArch() == llvm::Triple::x86_64) {
     Builder.defineMacro("__amd64__");
@@ -1080,6 +1083,9 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
 
   if (HasMWAITX)
     Builder.defineMacro("__MWAITX__");
+
+  if (HasMOVBE)
+    Builder.defineMacro("__MOVBE__");
 
   switch (XOPLevel) {
   case XOP:

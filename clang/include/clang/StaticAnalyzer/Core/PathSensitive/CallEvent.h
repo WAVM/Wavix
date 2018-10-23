@@ -82,7 +82,7 @@ class CallDescription {
   mutable bool IsLookupDone = false;
   // The list of the qualified names used to identify the specified CallEvent,
   // e.g. "{a, b}" represent the qualified names, like "a::b".
-  std::vector<StringRef> QualifiedName;
+  std::vector<const char *> QualifiedName;
   unsigned RequiredArgs;
 
 public:
@@ -90,28 +90,17 @@ public:
 
   /// Constructs a CallDescription object.
   ///
-  /// @param QualifiedName The list of the qualified names of the function that
-  /// will be matched. It does not require the user to provide the full list of
-  /// the qualified name. The more details provided, the more accurate the
-  /// matching.
+  /// @param QualifiedName The list of the name qualifiers of the function that
+  /// will be matched. The user is allowed to skip any of the qualifiers.
+  /// For example, {"std", "basic_string", "c_str"} would match both
+  /// std::basic_string<...>::c_str() and std::__1::basic_string<...>::c_str().
   ///
   /// @param RequiredArgs The number of arguments that is expected to match a
   /// call. Omit this parameter to match every occurrence of call with a given
   /// name regardless the number of arguments.
-  CallDescription(std::vector<StringRef> QualifiedName,
+  CallDescription(ArrayRef<const char *> QualifiedName,
                   unsigned RequiredArgs = NoArgRequirement)
       : QualifiedName(QualifiedName), RequiredArgs(RequiredArgs) {}
-
-  /// Constructs a CallDescription object.
-  ///
-  /// @param FuncName The name of the function that will be matched.
-  ///
-  /// @param RequiredArgs The number of arguments that is expected to match a
-  /// call. Omit this parameter to match every occurrence of call with a given
-  /// name regardless the number of arguments.
-  CallDescription(StringRef FuncName, unsigned RequiredArgs = NoArgRequirement)
-      : CallDescription(std::vector<StringRef>({FuncName}), NoArgRequirement) {
-  }
 
   /// Get the name of the function that this object matches.
   StringRef getFunctionName() const { return QualifiedName.back(); }
@@ -932,15 +921,30 @@ public:
     return getOriginExpr()->getOperatorNew();
   }
 
+  /// Number of non-placement arguments to the call. It is equal to 2 for
+  /// C++17 aligned operator new() calls that have alignment implicitly
+  /// passed as the second argument, and to 1 for other operator new() calls.
+  unsigned getNumImplicitArgs() const {
+    return getOriginExpr()->passAlignment() ? 2 : 1;
+  }
+
   unsigned getNumArgs() const override {
-    return getOriginExpr()->getNumPlacementArgs() + 1;
+    return getOriginExpr()->getNumPlacementArgs() + getNumImplicitArgs();
   }
 
   const Expr *getArgExpr(unsigned Index) const override {
     // The first argument of an allocator call is the size of the allocation.
-    if (Index == 0)
+    if (Index < getNumImplicitArgs())
       return nullptr;
-    return getOriginExpr()->getPlacementArg(Index - 1);
+    return getOriginExpr()->getPlacementArg(Index - getNumImplicitArgs());
+  }
+
+  /// Number of placement arguments to the operator new() call. For example,
+  /// standard std::nothrow operator new and standard placement new both have
+  /// 1 implicit argument (size) and 1 placement argument, while regular
+  /// operator new() has 1 implicit argument and 0 placement arguments.
+  const Expr *getPlacementArgExpr(unsigned Index) const {
+    return getOriginExpr()->getPlacementArg(Index);
   }
 
   Kind getKind() const override { return CE_CXXAllocator; }

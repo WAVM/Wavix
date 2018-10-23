@@ -849,6 +849,13 @@ static bool SemaOpenCLBuiltinToAddr(Sema &S, unsigned BuiltinID,
     return true;
   }
 
+  if (RT->getPointeeType().getAddressSpace() != LangAS::opencl_generic) {
+    S.Diag(Call->getArg(0)->getBeginLoc(),
+           diag::warn_opencl_generic_address_space_arg)
+        << Call->getDirectCallee()->getNameInfo().getAsString()
+        << Call->getArg(0)->getSourceRange();
+  }
+
   RT = RT->getPointeeType();
   auto Qual = RT.getQualifiers();
   switch (BuiltinID) {
@@ -922,6 +929,7 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
     break;
   case Builtin::BI__va_start: {
     switch (Context.getTargetInfo().getTriple().getArch()) {
+    case llvm::Triple::aarch64:
     case llvm::Triple::arm:
     case llvm::Triple::thumb:
       if (SemaBuiltinVAStartARMMicrosoft(TheCall))
@@ -1740,6 +1748,16 @@ bool Sema::CheckAArch64BuiltinFunctionCall(unsigned BuiltinID,
       BuiltinID == AArch64::BI__builtin_arm_wsr ||
       BuiltinID == AArch64::BI__builtin_arm_wsrp)
     return SemaBuiltinARMSpecialReg(BuiltinID, TheCall, 0, 5, true);
+
+  // Only check the valid encoding range. Any constant in this range would be
+  // converted to a register of the form S1_2_C3_C4_5. Let the hardware throw
+  // an exception for incorrect registers. This matches MSVC behavior.
+  if (BuiltinID == AArch64::BI_ReadStatusReg ||
+      BuiltinID == AArch64::BI_WriteStatusReg)
+    return SemaBuiltinConstantArgRange(TheCall, 0, 0, 0x7fff);
+
+  if (BuiltinID == AArch64::BI__getReg)
+    return SemaBuiltinConstantArgRange(TheCall, 0, 0, 31);
 
   if (CheckNeonBuiltinFunctionCall(BuiltinID, TheCall))
     return true;
@@ -2970,6 +2988,13 @@ bool Sema::CheckPPCBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
     return Diag(TheCall->getBeginLoc(), diag::err_ppc_builtin_only_on_pwr7)
            << TheCall->getSourceRange();
 
+  auto SemaVSXCheck = [&](CallExpr *TheCall) -> bool {
+    if (!Context.getTargetInfo().hasFeature("vsx"))
+      return Diag(TheCall->getBeginLoc(), diag::err_ppc_builtin_only_on_pwr7)
+             << TheCall->getSourceRange();
+    return false;
+  };
+
   switch (BuiltinID) {
   default: return false;
   case PPC::BI__builtin_altivec_crypto_vshasigmaw:
@@ -2988,6 +3013,11 @@ bool Sema::CheckPPCBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case PPC::BI__builtin_vsx_xxpermdi:
   case PPC::BI__builtin_vsx_xxsldwi:
     return SemaBuiltinVSX(TheCall);
+  case PPC::BI__builtin_unpack_vector_int128:
+    return SemaVSXCheck(TheCall) ||
+           SemaBuiltinConstantArgRange(TheCall, 1, 0, 1);
+  case PPC::BI__builtin_pack_vector_int128:
+    return SemaVSXCheck(TheCall);
   }
   return SemaBuiltinConstantArgRange(TheCall, i, l, u);
 }
@@ -10874,6 +10904,19 @@ CheckImplicitConversion(Sema &S, Expr *E, QualType T, SourceLocation CC,
       return DiagnoseImpCast(S, E, T, CC, diag::warn_impcast_integer_64_32,
                              /* pruneControlFlow */ true);
     return DiagnoseImpCast(S, E, T, CC, diag::warn_impcast_integer_precision);
+  }
+
+  if (TargetRange.Width > SourceRange.Width) {
+    if (auto *UO = dyn_cast<UnaryOperator>(E))
+      if (UO->getOpcode() == UO_Minus)
+        if (Source->isUnsignedIntegerType()) {
+          if (Target->isUnsignedIntegerType())
+            return DiagnoseImpCast(S, E, T, CC,
+                                   diag::warn_impcast_high_order_zero_bits);
+          if (Target->isSignedIntegerType())
+            return DiagnoseImpCast(S, E, T, CC,
+                                   diag::warn_impcast_nonnegative_result);
+        }
   }
 
   if (TargetRange.Width == SourceRange.Width && !TargetRange.NonNegative &&

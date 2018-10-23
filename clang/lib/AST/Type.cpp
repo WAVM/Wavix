@@ -1965,6 +1965,7 @@ Type::ScalarTypeKind Type::getScalarTypeKind() const {
     if (BT->getKind() == BuiltinType::NullPtr) return STK_CPointer;
     if (BT->isInteger()) return STK_Integral;
     if (BT->isFloatingPoint()) return STK_Floating;
+    if (BT->isFixedPointType()) return STK_FixedPoint;
     llvm_unreachable("unknown scalar builtin type");
   } else if (isa<PointerType>(T)) {
     return STK_CPointer;
@@ -2833,24 +2834,28 @@ StringRef FunctionType::getNameForCallConv(CallingConv CC) {
 FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
                                      QualType canonical,
                                      const ExtProtoInfo &epi)
-    : FunctionType(FunctionProto, result, canonical,
-                   result->isDependentType(),
+    : FunctionType(FunctionProto, result, canonical, result->isDependentType(),
                    result->isInstantiationDependentType(),
                    result->isVariablyModifiedType(),
-                   result->containsUnexpandedParameterPack(), epi.ExtInfo),
-      NumParams(params.size()),
-      NumExceptions(epi.ExceptionSpec.Exceptions.size()),
-      ExceptionSpecType(epi.ExceptionSpec.Type),
-      HasExtParameterInfos(epi.ExtParameterInfos != nullptr),
-      Variadic(epi.Variadic), HasTrailingReturn(epi.HasTrailingReturn) {
-  assert(NumParams == params.size() && "function has too many parameters");
-
+                   result->containsUnexpandedParameterPack(), epi.ExtInfo) {
   FunctionTypeBits.TypeQuals = epi.TypeQuals;
   FunctionTypeBits.RefQualifier = epi.RefQualifier;
+  FunctionTypeBits.NumParams = params.size();
+  assert(getNumParams() == params.size() && "NumParams overflow!");
+  FunctionTypeBits.ExceptionSpecType = epi.ExceptionSpec.Type;
+  FunctionTypeBits.HasExtParameterInfos = !!epi.ExtParameterInfos;
+  FunctionTypeBits.Variadic = epi.Variadic;
+  FunctionTypeBits.HasTrailingReturn = epi.HasTrailingReturn;
+
+  // Fill in the extra trailing bitfields if present.
+  if (hasExtraBitfields(epi.ExceptionSpec.Type)) {
+    auto &ExtraBits = *getTrailingObjects<FunctionTypeExtraBitfields>();
+    ExtraBits.NumExceptionType = epi.ExceptionSpec.Exceptions.size();
+  }
 
   // Fill in the trailing argument array.
-  auto *argSlot = reinterpret_cast<QualType *>(this+1);
-  for (unsigned i = 0; i != NumParams; ++i) {
+  auto *argSlot = getTrailingObjects<QualType>();
+  for (unsigned i = 0; i != getNumParams(); ++i) {
     if (params[i]->isDependentType())
       setDependent();
     else if (params[i]->isInstantiationDependentType())
@@ -2862,9 +2867,11 @@ FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
     argSlot[i] = params[i];
   }
 
+  // Fill in the exception type array if present.
   if (getExceptionSpecType() == EST_Dynamic) {
-    // Fill in the exception array.
-    QualType *exnSlot = argSlot + NumParams;
+    assert(hasExtraBitfields() && "missing trailing extra bitfields!");
+    auto *exnSlot =
+        reinterpret_cast<QualType *>(getTrailingObjects<ExceptionType>());
     unsigned I = 0;
     for (QualType ExceptionType : epi.ExceptionSpec.Exceptions) {
       // Note that, before C++17, a dependent exception specification does
@@ -2878,14 +2885,15 @@ FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
 
       exnSlot[I++] = ExceptionType;
     }
-  } else if (isComputedNoexcept(getExceptionSpecType())) {
+  }
+  // Fill in the Expr * in the exception specification if present.
+  else if (isComputedNoexcept(getExceptionSpecType())) {
     assert(epi.ExceptionSpec.NoexceptExpr && "computed noexcept with no expr");
     assert((getExceptionSpecType() == EST_DependentNoexcept) ==
            epi.ExceptionSpec.NoexceptExpr->isValueDependent());
 
     // Store the noexcept expression and context.
-    auto **noexSlot = reinterpret_cast<Expr **>(argSlot + NumParams);
-    *noexSlot = epi.ExceptionSpec.NoexceptExpr;
+    *getTrailingObjects<Expr *>() = epi.ExceptionSpec.NoexceptExpr;
 
     if (epi.ExceptionSpec.NoexceptExpr->isValueDependent() ||
         epi.ExceptionSpec.NoexceptExpr->isInstantiationDependent())
@@ -2893,10 +2901,12 @@ FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
 
     if (epi.ExceptionSpec.NoexceptExpr->containsUnexpandedParameterPack())
       setContainsUnexpandedParameterPack();
-  } else if (getExceptionSpecType() == EST_Uninstantiated) {
+  }
+  // Fill in the FunctionDecl * in the exception specification if present.
+  else if (getExceptionSpecType() == EST_Uninstantiated) {
     // Store the function decl from which we will resolve our
     // exception specification.
-    auto **slot = reinterpret_cast<FunctionDecl **>(argSlot + NumParams);
+    auto **slot = getTrailingObjects<FunctionDecl *>();
     slot[0] = epi.ExceptionSpec.SourceDecl;
     slot[1] = epi.ExceptionSpec.SourceTemplate;
     // This exception specification doesn't make the type dependent, because
@@ -2904,7 +2914,7 @@ FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
   } else if (getExceptionSpecType() == EST_Unevaluated) {
     // Store the function decl from which we will resolve our
     // exception specification.
-    auto **slot = reinterpret_cast<FunctionDecl **>(argSlot + NumParams);
+    auto **slot = getTrailingObjects<FunctionDecl *>();
     slot[0] = epi.ExceptionSpec.SourceDecl;
   }
 
@@ -2921,10 +2931,10 @@ FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
     setDependent();
   }
 
+  // Fill in the extra parameter info if present.
   if (epi.ExtParameterInfos) {
-    auto *extParamInfos =
-      const_cast<ExtParameterInfo *>(getExtParameterInfosBuffer());
-    for (unsigned i = 0; i != NumParams; ++i)
+    auto *extParamInfos = getTrailingObjects<ExtParameterInfo>();
+    for (unsigned i = 0; i != getNumParams(); ++i)
       extParamInfos[i] = epi.ExtParameterInfos[i];
   }
 }
@@ -2970,7 +2980,7 @@ CanThrowResult FunctionProtoType::canThrow() const {
   case EST_Dynamic:
     // A dynamic exception specification is throwing unless every exception
     // type is an (unexpanded) pack expansion type.
-    for (unsigned I = 0, N = NumExceptions; I != N; ++I)
+    for (unsigned I = 0; I != getNumExceptions(); ++I)
       if (!getExceptionType(I)->getAs<PackExpansionType>())
         return CT_Can;
     return CT_Dependent;
@@ -3045,8 +3055,8 @@ void FunctionProtoType::Profile(llvm::FoldingSetNodeID &ID, QualType Result,
 
 void FunctionProtoType::Profile(llvm::FoldingSetNodeID &ID,
                                 const ASTContext &Ctx) {
-  Profile(ID, getReturnType(), param_type_begin(), NumParams, getExtProtoInfo(),
-          Ctx, isCanonicalUnqualified());
+  Profile(ID, getReturnType(), param_type_begin(), getNumParams(),
+          getExtProtoInfo(), Ctx, isCanonicalUnqualified());
 }
 
 QualType TypedefType::desugar() const {

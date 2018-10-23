@@ -533,6 +533,7 @@ CastKind Sema::ScalarTypeToBooleanCastKind(QualType ScalarTy) {
   case Type::STK_Floating: return CK_FloatingToBoolean;
   case Type::STK_IntegralComplex: return CK_IntegralComplexToBoolean;
   case Type::STK_FloatingComplex: return CK_FloatingComplexToBoolean;
+  case Type::STK_FixedPoint: return CK_FixedPointToBoolean;
   }
   llvm_unreachable("unknown scalar type kind");
 }
@@ -644,7 +645,8 @@ void Sema::getUndefinedButUsed(
         continue;
       if (FD->isExternallyVisible() &&
           !isExternalWithNoLinkageType(FD) &&
-          !FD->getMostRecentDecl()->isInlined())
+          !FD->getMostRecentDecl()->isInlined() &&
+          !FD->hasAttr<ExcludeFromExplicitInstantiationAttr>())
         continue;
       if (FD->getBuiltinID())
         continue;
@@ -654,7 +656,8 @@ void Sema::getUndefinedButUsed(
         continue;
       if (VD->isExternallyVisible() &&
           !isExternalWithNoLinkageType(VD) &&
-          !VD->getMostRecentDecl()->isInline())
+          !VD->getMostRecentDecl()->isInline() &&
+          !VD->hasAttr<ExcludeFromExplicitInstantiationAttr>())
         continue;
 
       // Skip VarDecls that lack formal definitions but which we know are in
@@ -827,7 +830,9 @@ void Sema::emitAndClearUnusedLocalTypedefWarnings() {
 /// is parsed. Note that the ASTContext may have already injected some
 /// declarations.
 void Sema::ActOnStartOfTranslationUnit() {
-  if (getLangOpts().ModulesTS) {
+  if (getLangOpts().ModulesTS &&
+      (getLangOpts().getCompilingModule() == LangOptions::CMK_ModuleInterface ||
+       getLangOpts().getCompilingModule() == LangOptions::CMK_None)) {
     SourceLocation StartOfTU =
         SourceMgr.getLocForStartOfFile(SourceMgr.getMainFileID());
 
@@ -977,7 +982,8 @@ void Sema::ActOnEndOfTranslationUnit() {
     // module declaration by now.
     if (getLangOpts().getCompilingModule() ==
             LangOptions::CMK_ModuleInterface &&
-        ModuleScopes.back().Module->Kind != Module::ModuleInterfaceUnit) {
+        (ModuleScopes.empty() ||
+         ModuleScopes.back().Module->Kind != Module::ModuleInterfaceUnit)) {
       // FIXME: Make a better guess as to where to put the module declaration.
       Diag(getSourceManager().getLocForStartOfFile(
                getSourceManager().getMainFileID()),
@@ -1398,9 +1404,68 @@ void Sema::RecordParsingTemplateParameterDepth(unsigned Depth) {
       "Remove assertion if intentionally called in a non-lambda context.");
 }
 
+// Check that the type of the VarDecl has an accessible copy constructor and
+// resolve its destructor's exception spefication.
+static void checkEscapingByref(VarDecl *VD, Sema &S) {
+  QualType T = VD->getType();
+  EnterExpressionEvaluationContext scope(
+      S, Sema::ExpressionEvaluationContext::PotentiallyEvaluated);
+  SourceLocation Loc = VD->getLocation();
+  Expr *VarRef = new (S.Context) DeclRefExpr(VD, false, T, VK_LValue, Loc);
+  ExprResult Result = S.PerformMoveOrCopyInitialization(
+      InitializedEntity::InitializeBlock(Loc, T, false), VD, VD->getType(),
+      VarRef, /*AllowNRVO=*/true);
+  if (!Result.isInvalid()) {
+    Result = S.MaybeCreateExprWithCleanups(Result);
+    Expr *Init = Result.getAs<Expr>();
+    S.Context.setBlockVarCopyInit(VD, Init, S.canThrow(Init));
+  }
+
+  // The destructor's exception spefication is needed when IRGen generates
+  // block copy/destroy functions. Resolve it here.
+  if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
+    if (CXXDestructorDecl *DD = RD->getDestructor()) {
+      auto *FPT = DD->getType()->getAs<FunctionProtoType>();
+      S.ResolveExceptionSpec(Loc, FPT);
+    }
+}
+
+static void markEscapingByrefs(const FunctionScopeInfo &FSI, Sema &S) {
+  // Set the EscapingByref flag of __block variables captured by
+  // escaping blocks.
+  for (const BlockDecl *BD : FSI.Blocks) {
+    if (BD->doesNotEscape())
+      continue;
+    for (const BlockDecl::Capture &BC : BD->captures()) {
+      VarDecl *VD = BC.getVariable();
+      if (VD->hasAttr<BlocksAttr>())
+        VD->setEscapingByref();
+    }
+  }
+
+  for (VarDecl *VD : FSI.ByrefBlockVars) {
+    // __block variables might require us to capture a copy-initializer.
+    if (!VD->isEscapingByref())
+      continue;
+    // It's currently invalid to ever have a __block variable with an
+    // array type; should we diagnose that here?
+    // Regardless, we don't want to ignore array nesting when
+    // constructing this copy.
+    if (VD->getType()->isStructureOrClassType())
+      checkEscapingByref(VD, S);
+  }
+}
+
 void Sema::PopFunctionScopeInfo(const AnalysisBasedWarnings::Policy *WP,
                                 const Decl *D, const BlockExpr *blkExpr) {
   assert(!FunctionScopes.empty() && "mismatched push/pop!");
+
+  // This function shouldn't be called after popping the current function scope.
+  // markEscapingByrefs calls PerformMoveOrCopyInitialization, which can call
+  // PushFunctionScope, which can cause clearing out PreallocatedFunctionScope
+  // when FunctionScopes is empty.
+  markEscapingByrefs(*FunctionScopes.back(), *this);
+
   FunctionScopeInfo *Scope = FunctionScopes.pop_back_val();
 
   if (LangOpts.OpenMP)
@@ -1848,6 +1913,34 @@ void Sema::setCurrentOpenCLExtensionForDecl(Decl *D) {
   if (CurrOpenCLExtension.empty())
     return;
   setOpenCLExtensionForDecl(D, CurrOpenCLExtension);
+}
+
+std::string Sema::getOpenCLExtensionsFromDeclExtMap(FunctionDecl *FD) {
+  if (!OpenCLDeclExtMap.empty())
+    return getOpenCLExtensionsFromExtMap(FD, OpenCLDeclExtMap);
+
+  return "";
+}
+
+std::string Sema::getOpenCLExtensionsFromTypeExtMap(FunctionType *FT) {
+  if (!OpenCLTypeExtMap.empty())
+    return getOpenCLExtensionsFromExtMap(FT, OpenCLTypeExtMap);
+
+  return "";
+}
+
+template <typename T, typename MapT>
+std::string Sema::getOpenCLExtensionsFromExtMap(T *FDT, MapT &Map) {
+  std::string ExtensionNames = "";
+  auto Loc = Map.find(FDT);
+
+  for (auto const& I : Loc->second) {
+    ExtensionNames += I;
+    ExtensionNames += " ";
+  }
+  ExtensionNames.pop_back();
+
+  return ExtensionNames;
 }
 
 bool Sema::isOpenCLDisabledDecl(Decl *FD) {

@@ -192,7 +192,9 @@ def ext_flexible_array_init : Extension<
   "flexible array initialization is a GNU extension">, InGroup<GNUFlexibleArrayInitializer>;
 
 // Declarations.
-def ext_duplicate_declspec : ExtWarn<"duplicate '%0' declaration specifier">,
+def ext_duplicate_declspec : Extension<"duplicate '%0' declaration specifier">,
+  InGroup<DuplicateDeclSpecifier>;
+def ext_warn_duplicate_declspec : ExtWarn<"duplicate '%0' declaration specifier">,
   InGroup<DuplicateDeclSpecifier>;
 def warn_duplicate_declspec : Warning<"duplicate '%0' declaration specifier">,
   InGroup<DuplicateDeclSpecifier>;
@@ -369,7 +371,7 @@ def warn_implicit_function_decl : Warning<
   "implicit declaration of function %0">,
   InGroup<ImplicitFunctionDeclare>, DefaultIgnore;
 def ext_implicit_function_decl : ExtWarn<
-  "implicit declaration of function %0 is invalid in %select{C99|OpenCL}1">,
+  "implicit declaration of function %0 is invalid in C99">,
   InGroup<ImplicitFunctionDeclare>;
 def note_function_suggestion : Note<"did you mean %0?">;
 
@@ -452,10 +454,12 @@ def err_decomp_decl_multiple_bases_with_members : Error<
   "have non-static data members">;
 def err_decomp_decl_ambiguous_base : Error<
   "cannot decompose members of ambiguous base class %1 of %0:%2">;
-def err_decomp_decl_non_public_base : Error<
-  "cannot decompose members of non-public base class %1 of %0">;
-def err_decomp_decl_non_public_member : Error<
-  "cannot decompose non-public member %0 of %1">;
+def err_decomp_decl_inaccessible_base : Error<
+  "cannot decompose members of inaccessible base class %1 of %0">,
+  AccessControl;
+def err_decomp_decl_inaccessible_field : Error<
+  "cannot decompose %select{private|protected}0 member %1 of %3">,
+  AccessControl;
 def err_decomp_decl_anon_union_member : Error<
   "cannot decompose class type %0 because it has an anonymous "
   "%select{struct|union}1 member">;
@@ -1870,6 +1874,9 @@ def err_reference_bind_init_list : Error<
 def err_init_list_bad_dest_type : Error<
   "%select{|non-aggregate }0type %1 cannot be initialized with an initializer "
   "list">;
+def warn_cxx2a_compat_aggregate_init_with_ctors : Warning<
+  "aggregate initialization of type %0 with user-declared constructors "
+  "is incompatible with C++2a">, DefaultIgnore, InGroup<CXX2aCompat>;
 
 def err_reference_bind_to_bitfield : Error<
   "%select{non-const|volatile}0 reference cannot bind to "
@@ -2254,8 +2261,6 @@ def err_for_range_incomplete_type : Error<
   "cannot use incomplete type %0 as a range">;
 def err_for_range_iter_deduction_failure : Error<
   "cannot use type %0 as an iterator">;
-def err_for_range_member_begin_end_mismatch : Error<
-  "range type %0 has '%select{begin|end}1' member but no '%select{end|begin}1' member">;
 def ext_for_range_begin_end_types_differ : ExtWarn<
   "'begin' and 'end' returning different types (%0 and %1) is a C++17 extension">,
   InGroup<CXX17>;
@@ -2268,6 +2273,8 @@ def note_in_for_range: Note<
 def err_for_range_invalid: Error<
   "invalid range expression of type %0; no viable '%select{begin|end}1' "
   "function available">;
+def note_for_range_member_begin_end_ignored : Note<
+  "member is not a candidate because range type %0 has no '%select{end|begin}1' member">;
 def err_range_on_array_parameter : Error<
   "cannot build range expression with array function parameter %0 since "
   "parameter with array type %1 is treated as pointer type %2">;
@@ -2294,6 +2301,9 @@ def warn_for_range_copy : Warning<
   "loop variable %0 of type %1 creates a copy from type %2">,
   InGroup<RangeLoopAnalysis>, DefaultIgnore;
 def note_use_reference_type : Note<"use reference type %0 to prevent copying">;
+def err_objc_for_range_init_stmt : Error<
+  "initialization statement is not supported when iterating over Objective-C "
+  "collection">;
 
 // C++11 constexpr
 def warn_cxx98_compat_constexpr : Warning<
@@ -2498,7 +2508,8 @@ def err_attribute_invalid_vector_type : Error<"invalid vector element type %0">;
 def err_attribute_bad_neon_vector_size : Error<
   "Neon vector size must be 64 or 128 bits">;
 def err_attribute_requires_positive_integer : Error<
-  "%0 attribute requires a positive integral compile time constant expression">;
+  "%0 attribute requires a %select{positive|non-negative}1 "
+  "integral compile time constant expression">;
 def err_attribute_requires_opencl_version : Error<
   "%0 attribute requires OpenCL version %1%select{| or above}2">;
 def warn_unsupported_target_attribute
@@ -2531,8 +2542,6 @@ def err_attribute_argument_type : Error<
   "constant|a string|an identifier}1">;
 def err_attribute_argument_outof_range : Error<
   "%0 attribute requires integer constant between %1 and %2 inclusive">;
-def err_attribute_argument_negative : Error<
-  "negative argument is not allowed for %0 attribute">;
 def err_init_priority_object_attr : Error<
   "can only use 'init_priority' attribute on file-scope definitions "
   "of objects of class type">;
@@ -2880,8 +2889,6 @@ def err_cyclic_alias : Error<
   "%select{alias|ifunc}0 definition is part of a cycle">;
 def err_ifunc_resolver_return : Error<
   "ifunc resolver function must return a pointer">;
-def err_ifunc_resolver_params : Error<
-  "ifunc resolver function must have no parameters">;
 def warn_attribute_wrong_decl_type_str : Warning<
   "%0 attribute only applies to %1">, InGroup<IgnoredAttributes>;
 def err_attribute_wrong_decl_type_str : Error<
@@ -3008,6 +3015,14 @@ def warn_invalid_capability_name : Warning<
   InGroup<ThreadSafetyAttributes>, DefaultIgnore;
 def warn_thread_attribute_ignored : Warning<
   "ignoring %0 attribute because its argument is invalid">,
+  InGroup<ThreadSafetyAttributes>, DefaultIgnore;
+def warn_thread_attribute_not_on_non_static_member : Warning<
+  "%0 attribute without capability arguments can only be applied to non-static "
+  "methods of a class">,
+  InGroup<ThreadSafetyAttributes>, DefaultIgnore;
+def warn_thread_attribute_not_on_capability_member : Warning<
+  "%0 attribute without capability arguments refers to 'this', but %1 isn't "
+  "annotated with 'capability' or 'scoped_lockable' attribute">,
   InGroup<ThreadSafetyAttributes>, DefaultIgnore;
 def warn_thread_attribute_argument_not_lockable : Warning<
   "%0 attribute requires arguments whose type is annotated "
@@ -3166,10 +3181,10 @@ def err_impcast_complex_scalar : Error<
   "implicit conversion from %0 to %1 is not permitted in C++">;
 def warn_impcast_float_precision : Warning<
   "implicit conversion loses floating-point precision: %0 to %1">,
-  InGroup<Conversion>, DefaultIgnore;
+  InGroup<ImplicitFloatConversion>, DefaultIgnore;
 def warn_impcast_float_result_precision : Warning<
   "implicit conversion when assigning computation result loses floating-point precision: %0 to %1">,
-  InGroup<Conversion>, DefaultIgnore;
+  InGroup<ImplicitFloatConversion>, DefaultIgnore;
 def warn_impcast_double_promotion : Warning<
   "implicit conversion increases floating-point precision: %0 to %1">,
   InGroup<DoublePromotion>, DefaultIgnore;
@@ -3181,7 +3196,13 @@ def warn_impcast_integer_sign_conditional : Warning<
   InGroup<SignConversion>, DefaultIgnore;
 def warn_impcast_integer_precision : Warning<
   "implicit conversion loses integer precision: %0 to %1">,
-  InGroup<Conversion>, DefaultIgnore;
+  InGroup<ImplicitIntConversion>, DefaultIgnore;
+def warn_impcast_high_order_zero_bits : Warning<
+  "higher order bits are zeroes after implicit conversion">,
+  InGroup<ImplicitIntConversion>, DefaultIgnore;
+def warn_impcast_nonnegative_result : Warning<
+  "the resulting value is always non-negative after implicit conversion">,
+  InGroup<SignConversion>, DefaultIgnore;
 def warn_impcast_integer_64_32 : Warning<
   "implicit conversion loses integer precision: %0 to %1">,
   InGroup<Shorten64To32>, DefaultIgnore;
@@ -3653,7 +3674,7 @@ def warn_diagnose_if_succeeded : Warning<"%0">, InGroup<UserDefinedWarnings>,
 def note_ovl_candidate_disabled_by_function_cond_attr : Note<
     "candidate disabled: %0">;
 def note_ovl_candidate_disabled_by_extension : Note<
-    "candidate disabled due to OpenCL extension">;
+    "candidate unavailable as it requires OpenCL extension '%0' to be disabled">;
 def err_addrof_function_disabled_by_enable_if_attr : Error<
     "cannot take address of function %0 because it has one or more "
     "non-tautological enable_if conditions">;
@@ -6621,6 +6642,11 @@ let CategoryName = "Lambda Issue" in {
     InGroup<DeprecatedThisCapture>, DefaultIgnore;
   def note_deprecated_this_capture : Note<
     "add an explicit capture of 'this' to capture '*this' by reference">;
+
+  // C++2a default constructible / assignable lambdas.
+  def warn_cxx17_compat_lambda_def_ctor_assign : Warning<
+    "%select{default construction|assignment}0 of lambda is incompatible with "
+    "C++ standards before C++2a">, InGroup<CXXPre2aCompat>, DefaultIgnore;
 }
 
 def err_return_in_captured_stmt : Error<
@@ -7743,9 +7769,19 @@ def err_incorrect_defaulted_exception_spec : Error<
 def err_incorrect_defaulted_constexpr : Error<
   "defaulted definition of %sub{select_special_member_kind}0 "
   "is not constexpr">;
+def warn_defaulted_method_deleted : Warning<
+  "explicitly defaulted %sub{select_special_member_kind}0 is implicitly "
+  "deleted">, InGroup<DiagGroup<"defaulted-function-deleted">>;
 def err_out_of_line_default_deletes : Error<
   "defaulting this %sub{select_special_member_kind}0 "
   "would delete it after its first declaration">;
+def note_deleted_type_mismatch : Note<
+  "function is implicitly deleted because its declared type does not match "
+  "the type of an implicit %sub{select_special_member_kind}0">;
+def warn_cxx17_compat_defaulted_method_type_mismatch : Warning<
+  "explicitly defaulting this %sub{select_special_member_kind}0 with a type "
+  "different from the implicit type is incompatible with C++ standards before "
+  "C++2a">, InGroup<CXXPre2aCompat>, DefaultIgnore;
 def warn_vbase_moved_multiple_times : Warning<
   "defaulted move assignment operator of %0 will move assign virtual base "
   "class %1 multiple times">, InGroup<DiagGroup<"multiple-move-vbase">>;
@@ -8549,6 +8585,8 @@ def err_opencl_scalar_type_rank_greater_than_vector_type : Error<
     "element. (%0 and %1)">;
 def err_bad_kernel_param_type : Error<
   "%0 cannot be used as the type of a kernel parameter">;
+def err_opencl_implicit_function_decl : Error<
+  "implicit declaration of function %0 is invalid in OpenCL">;
 def err_record_with_pointers_kernel_param : Error<
   "%select{struct|union}0 kernel parameters may not contain pointers">;
 def note_within_field_of_type : Note<
@@ -8606,6 +8644,10 @@ def err_opencl_variadic_function : Error<
   "invalid prototype, variadic arguments are not allowed in OpenCL">;
 def err_opencl_requires_extension : Error<
   "use of %select{type|declaration}0 %1 requires %2 extension to be enabled">;
+def warn_opencl_generic_address_space_arg : Warning<
+  "passing non-generic address space pointer to %0"
+  " may cause dynamic conversion affecting performance">,
+  InGroup<Conversion>, DefaultIgnore;
 
 // OpenCL v2.0 s6.13.6 -- Builtin Pipe Functions
 def err_opencl_builtin_pipe_first_arg : Error<
@@ -9058,6 +9100,12 @@ def err_omp_linear_distribute_var_non_loop_iteration : Error<
 def warn_omp_non_trivial_type_mapped : Warning<
   "Non-trivial type %0 is mapped, only trivial types are guaranteed to be mapped correctly">,
   InGroup<OpenMPTarget>;
+def err_omp_requires_clause_redeclaration : Error <
+  "Only one %0 clause can appear on a requires directive in a single translation unit">;
+def note_omp_requires_previous_clause : Note <
+  "%0 clause previously used here">;
+def err_omp_invalid_scope : Error <
+  "'#pragma omp %0' directive must appear only in file scope">;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {
@@ -9090,6 +9138,8 @@ def err_invalid_type_for_program_scope_var : Error<
 let CategoryName = "Modules Issue" in {
 def err_module_decl_in_module_map_module : Error<
   "'module' declaration found while building module from module map">;
+def err_module_decl_in_header_module : Error<
+  "'module' declaration found while building header module">;
 def err_module_interface_implementation_mismatch : Error<
   "missing 'export' specifier in module declaration while "
   "building module interface">;
