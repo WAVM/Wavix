@@ -54,6 +54,7 @@ add_llvm_unittest(SupportTests
   SpecialCaseListTest.cpp
   StringPool.cpp
   SwapByteOrderTest.cpp
+  SymbolRemappingReaderTest.cpp
   TarWriterTest.cpp
   TargetParserTest.cpp
   TaskQueueTest.cpp
@@ -67,6 +68,7 @@ add_llvm_unittest(SupportTests
   TrigramIndexTest.cpp
   UnicodeTest.cpp
   VersionTupleTest.cpp
+  VirtualFileSystemTest.cpp
   YAMLIOTest.cpp
   YAMLParserTest.cpp
   formatted_raw_ostream_test.cpp

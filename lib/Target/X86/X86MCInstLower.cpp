@@ -527,7 +527,7 @@ ReSimplify:
   }
 
   case X86::CLEANUPRET: {
-    // Replace CATCHRET with the appropriate RET.
+    // Replace CLEANUPRET with the appropriate RET.
     OutMI = MCInst();
     OutMI.setOpcode(getRetOpcode(AsmPrinter.getSubtarget()));
     break;
@@ -1379,7 +1379,7 @@ PrevCrossBBInst(MachineBasicBlock::const_iterator MBBI) {
 
 static const Constant *getConstantFromPool(const MachineInstr &MI,
                                            const MachineOperand &Op) {
-  if (!Op.isCPI())
+  if (!Op.isCPI() || Op.getOffset() != 0)
     return nullptr;
 
   ArrayRef<MachineConstantPoolEntry> Constants =
@@ -1391,7 +1391,7 @@ static const Constant *getConstantFromPool(const MachineInstr &MI,
   if (ConstantEntry.isMachineConstantPoolEntry())
     return nullptr;
 
-  auto *C = dyn_cast<Constant>(ConstantEntry.Val.ConstVal);
+  const Constant *C = ConstantEntry.Val.ConstVal;
   assert((!C || ConstantEntry.getType() == C->getType()) &&
          "Expected a constant of the same type!");
   return C;
@@ -1482,27 +1482,34 @@ static std::string getShuffleComment(const MachineInstr *MI, unsigned SrcOp1Idx,
   return Comment;
 }
 
+static void printConstant(const APInt &Val, raw_ostream &CS) {
+  if (Val.getBitWidth() <= 64) {
+    CS << Val.getZExtValue();
+  } else {
+    // print multi-word constant as (w0,w1)
+    CS << "(";
+    for (int i = 0, N = Val.getNumWords(); i < N; ++i) {
+      if (i > 0)
+        CS << ",";
+      CS << Val.getRawData()[i];
+    }
+    CS << ")";
+  }
+}
+
+static void printConstant(const APFloat &Flt, raw_ostream &CS) {
+  SmallString<32> Str;
+  Flt.toString(Str);
+  CS << Str;
+}
+
 static void printConstant(const Constant *COp, raw_ostream &CS) {
   if (isa<UndefValue>(COp)) {
     CS << "u";
   } else if (auto *CI = dyn_cast<ConstantInt>(COp)) {
-    if (CI->getBitWidth() <= 64) {
-      CS << CI->getZExtValue();
-    } else {
-      // print multi-word constant as (w0,w1)
-      const auto &Val = CI->getValue();
-      CS << "(";
-      for (int i = 0, N = Val.getNumWords(); i < N; ++i) {
-        if (i > 0)
-          CS << ",";
-        CS << Val.getRawData()[i];
-      }
-      CS << ")";
-    }
+    printConstant(CI->getValue(), CS);
   } else if (auto *CF = dyn_cast<ConstantFP>(COp)) {
-    SmallString<32> Str;
-    CF->getValueAPF().toString(Str);
-    CS << Str;
+    printConstant(CF->getValueAPF(), CS);
   } else {
     CS << "?";
   }
@@ -1524,6 +1531,9 @@ void X86AsmPrinter::EmitSEHInstruction(const MachineInstr *MI) {
       break;
     case X86::SEH_StackAlloc:
       XTS->emitFPOStackAlloc(MI->getOperand(0).getImm());
+      break;
+    case X86::SEH_StackAlign:
+      XTS->emitFPOStackAlign(MI->getOperand(0).getImm());
       break;
     case X86::SEH_SetFrame:
       assert(MI->getOperand(1).getImm() == 0 &&
@@ -1582,6 +1592,18 @@ void X86AsmPrinter::EmitSEHInstruction(const MachineInstr *MI) {
   default:
     llvm_unreachable("expected SEH_ instruction");
   }
+}
+
+static unsigned getRegisterWidth(const MCOperandInfo &Info) {
+  if (Info.RegClass == X86::VR128RegClassID ||
+      Info.RegClass == X86::VR128XRegClassID)
+    return 128;
+  if (Info.RegClass == X86::VR256RegClassID ||
+      Info.RegClass == X86::VR256XRegClassID)
+    return 256;
+  if (Info.RegClass == X86::VR512RegClassID)
+    return 512;
+  llvm_unreachable("Unknown register class!");
 }
 
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
@@ -1802,6 +1824,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case X86::SEH_SaveReg:
   case X86::SEH_SaveXMM:
   case X86::SEH_StackAlloc:
+  case X86::SEH_StackAlign:
   case X86::SEH_SetFrame:
   case X86::SEH_PushFrame:
   case X86::SEH_EndPrologue:
@@ -1868,8 +1891,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
     const MachineOperand &MaskOp = MI->getOperand(MaskIdx);
     if (auto *C = getConstantFromPool(*MI, MaskOp)) {
+      unsigned Width = getRegisterWidth(MI->getDesc().OpInfo[0]);
       SmallVector<int, 64> Mask;
-      DecodePSHUFBMask(C, Mask);
+      DecodePSHUFBMask(C, Width, Mask);
       if (!Mask.empty())
         OutStreamer->AddComment(getShuffleComment(MI, SrcIdx, SrcIdx, Mask),
                                 !EnablePrintSchedInfo);
@@ -1940,8 +1964,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
     const MachineOperand &MaskOp = MI->getOperand(MaskIdx);
     if (auto *C = getConstantFromPool(*MI, MaskOp)) {
+      unsigned Width = getRegisterWidth(MI->getDesc().OpInfo[0]);
       SmallVector<int, 16> Mask;
-      DecodeVPERMILPMask(C, ElSize, Mask);
+      DecodeVPERMILPMask(C, ElSize, Width, Mask);
       if (!Mask.empty())
         OutStreamer->AddComment(getShuffleComment(MI, SrcIdx, SrcIdx, Mask),
                                 !EnablePrintSchedInfo);
@@ -1971,8 +1996,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
     const MachineOperand &MaskOp = MI->getOperand(6);
     if (auto *C = getConstantFromPool(*MI, MaskOp)) {
+      unsigned Width = getRegisterWidth(MI->getDesc().OpInfo[0]);
       SmallVector<int, 16> Mask;
-      DecodeVPERMIL2PMask(C, (unsigned)CtrlOp.getImm(), ElSize, Mask);
+      DecodeVPERMIL2PMask(C, (unsigned)CtrlOp.getImm(), ElSize, Width, Mask);
       if (!Mask.empty())
         OutStreamer->AddComment(getShuffleComment(MI, 1, 2, Mask),
                                 !EnablePrintSchedInfo);
@@ -1988,8 +2014,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
     const MachineOperand &MaskOp = MI->getOperand(6);
     if (auto *C = getConstantFromPool(*MI, MaskOp)) {
+      unsigned Width = getRegisterWidth(MI->getDesc().OpInfo[0]);
       SmallVector<int, 16> Mask;
-      DecodeVPPERMMask(C, Mask);
+      DecodeVPPERMMask(C, Width, Mask);
       if (!Mask.empty())
         OutStreamer->AddComment(getShuffleComment(MI, 1, 2, Mask),
                                 !EnablePrintSchedInfo);
@@ -2096,11 +2123,11 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
             if (i != 0 || l != 0)
               CS << ",";
             if (CDS->getElementType()->isIntegerTy())
-              CS << CDS->getElementAsInteger(i);
-            else if (CDS->getElementType()->isFloatTy())
-              CS << CDS->getElementAsFloat(i);
-            else if (CDS->getElementType()->isDoubleTy())
-              CS << CDS->getElementAsDouble(i);
+              printConstant(CDS->getElementAsAPInt(i), CS);
+            else if (CDS->getElementType()->isHalfTy() ||
+                     CDS->getElementType()->isFloatTy() ||
+                     CDS->getElementType()->isDoubleTy())
+              printConstant(CDS->getElementAsAPFloat(i), CS);
             else
               CS << "?";
           }
@@ -2122,6 +2149,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       }
     }
     break;
+  case X86::MOVDDUPrm:
+  case X86::VMOVDDUPrm:
+  case X86::VMOVDDUPZ128rm:
   case X86::VBROADCASTSSrm:
   case X86::VBROADCASTSSYrm:
   case X86::VBROADCASTSSZ128m:
@@ -2158,6 +2188,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       int NumElts;
       switch (MI->getOpcode()) {
       default: llvm_unreachable("Invalid opcode");
+      case X86::MOVDDUPrm:         NumElts = 2;  break;
+      case X86::VMOVDDUPrm:        NumElts = 2;  break;
+      case X86::VMOVDDUPZ128rm:    NumElts = 2;  break;
       case X86::VBROADCASTSSrm:    NumElts = 4;  break;
       case X86::VBROADCASTSSYrm:   NumElts = 8;  break;
       case X86::VBROADCASTSSZ128m: NumElts = 4;  break;

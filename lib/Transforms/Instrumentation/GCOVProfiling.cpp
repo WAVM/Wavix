@@ -275,11 +275,10 @@ namespace {
       write(Len);
       write(Number);
 
-      llvm::sort(
-          SortedLinesByFile.begin(), SortedLinesByFile.end(),
-          [](StringMapEntry<GCOVLines> *LHS, StringMapEntry<GCOVLines> *RHS) {
-            return LHS->getKey() < RHS->getKey();
-          });
+      llvm::sort(SortedLinesByFile, [](StringMapEntry<GCOVLines> *LHS,
+                                       StringMapEntry<GCOVLines> *RHS) {
+        return LHS->getKey() < RHS->getKey();
+      });
       for (auto &I : SortedLinesByFile)
         I->getValue().writeOut();
       write(0);
@@ -571,9 +570,15 @@ void GCOVProfiler::emitProfileNotes() {
                                                 Options.ExitBlockBeforeBody));
       GCOVFunction &Func = *Funcs.back();
 
+      // Add the function line number to the lines of the entry block
+      // to have a counter for the function definition.
+      Func.getBlock(&EntryBlock)
+          .getFile(SP->getFilename())
+          .addLine(SP->getLine());
+
       for (auto &BB : F) {
         GCOVBlock &Block = Func.getBlock(&BB);
-        TerminatorInst *TI = BB.getTerminator();
+        Instruction *TI = BB.getTerminator();
         if (int successors = TI->getNumSuccessors()) {
           for (int i = 0; i != successors; ++i) {
             Block.addEdge(Func.getBlock(TI->getSuccessor(i)));
@@ -593,7 +598,8 @@ void GCOVProfiler::emitProfileNotes() {
             continue;
 
           // Artificial lines such as calls to the global constructors.
-          if (Loc.getLine() == 0) continue;
+          if (Loc.getLine() == 0 || Loc.isImplicitCode())
+            continue;
 
           if (Line == Loc.getLine()) continue;
           Line = Loc.getLine();
@@ -640,7 +646,7 @@ bool GCOVProfiler::emitProfileArcs() {
       DenseMap<std::pair<BasicBlock *, BasicBlock *>, unsigned> EdgeToCounter;
       unsigned Edges = 0;
       for (auto &BB : F) {
-        TerminatorInst *TI = BB.getTerminator();
+        Instruction *TI = BB.getTerminator();
         if (isa<ReturnInst>(TI)) {
           EdgeToCounter[{&BB, nullptr}] = Edges++;
         } else {
@@ -684,7 +690,7 @@ bool GCOVProfiler::emitProfileArcs() {
           Count = Builder.CreateAdd(Count, Builder.getInt64(1));
           Builder.CreateStore(Count, Phi);
 
-          TerminatorInst *TI = BB.getTerminator();
+          Instruction *TI = BB.getTerminator();
           if (isa<ReturnInst>(TI)) {
             auto It = EdgeToCounter.find({&BB, nullptr});
             assert(It != EdgeToCounter.end());

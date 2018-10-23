@@ -192,6 +192,16 @@ public:
   bool isXFormMemOp(unsigned Opcode) const {
     return get(Opcode).TSFlags & PPCII::XFormMemOp;
   }
+  static bool isSameClassPhysRegCopy(unsigned Opcode) {
+    unsigned CopyOpcodes[] =
+      { PPC::OR, PPC::OR8, PPC::FMR, PPC::VOR, PPC::XXLOR, PPC::XXLORf,
+        PPC::XSCPSGNDP, PPC::MCRF, PPC::QVFMR, PPC::QVFMRs, PPC::QVFMRb,
+        PPC::CROR, PPC::EVOR, -1U };
+    for (int i = 0; CopyOpcodes[i] != -1U; i++)
+      if (Opcode == CopyOpcodes[i])
+        return true;
+    return false;
+  }
 
   ScheduleHazardRecognizer *
   CreateTargetHazardRecognizer(const TargetSubtargetInfo *STI,
@@ -404,7 +414,27 @@ public:
                               MachineInstr **KilledDef = nullptr) const;
   void replaceInstrWithLI(MachineInstr &MI, const LoadImmediateInfo &LII) const;
 
-  bool instrHasImmForm(const MachineInstr &MI, ImmInstrInfo &III) const;
+  bool instrHasImmForm(const MachineInstr &MI, ImmInstrInfo &III,
+                       bool PostRA) const;
+
+  /// getRegNumForOperand - some operands use different numbering schemes
+  /// for the same registers. For example, a VSX instruction may have any of
+  /// vs0-vs63 allocated whereas an Altivec instruction could only have
+  /// vs32-vs63 allocated (numbered as v0-v31). This function returns the actual
+  /// register number needed for the opcode/operand number combination.
+  /// The operand number argument will be useful when we need to extend this
+  /// to instructions that use both Altivec and VSX numbering (for different
+  /// operands).
+  static unsigned getRegNumForOperand(const MCInstrDesc &Desc, unsigned Reg,
+                                      unsigned OpNo) {
+    if (Desc.TSFlags & PPCII::UseVSXReg) {
+      if (isVRRegister(Reg))
+        Reg = PPC::VSX32 + (Reg - PPC::V0);
+      else if (isVFRegister(Reg))
+        Reg = PPC::VSX32 + (Reg - PPC::VF0);
+    }
+    return Reg;
+  }
 };
 
 }

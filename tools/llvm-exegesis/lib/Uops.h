@@ -16,27 +16,22 @@
 #define LLVM_TOOLS_LLVM_EXEGESIS_UOPS_H
 
 #include "BenchmarkRunner.h"
+#include "SnippetGenerator.h"
 
+namespace llvm {
 namespace exegesis {
 
-class UopsBenchmarkRunner : public BenchmarkRunner {
+class UopsSnippetGenerator : public SnippetGenerator {
 public:
-  UopsBenchmarkRunner(const LLVMState &State)
-      : BenchmarkRunner(State, InstructionBenchmark::Uops) {}
-  ~UopsBenchmarkRunner() override;
+  UopsSnippetGenerator(const LLVMState &State) : SnippetGenerator(State) {}
+  ~UopsSnippetGenerator() override;
 
-  llvm::Expected<CodeTemplate>
-  generateCodeTemplate(unsigned Opcode) const override;
+  llvm::Expected<std::vector<CodeTemplate>>
+  generateCodeTemplates(const Instruction &Instr) const override;
 
   static constexpr const size_t kMinNumDifferentAddresses = 6;
 
 private:
-  llvm::Error isInfeasible(const llvm::MCInstrDesc &MCInstrDesc) const;
-
-  std::vector<BenchmarkMeasure>
-  runMeasurements(const ExecutableFunction &EF, ScratchSpace &Scratch,
-                  const unsigned NumRepetitions) const override;
-
   // Instantiates memory operands within a snippet.
   // To make computations as parallel as possible, we generate independant
   // memory locations for instructions that load and store. If there are less
@@ -60,11 +55,25 @@ private:
   //   mov eax, [rdi + 128]
   //   add eax, [rdi + 192]
   //   mov eax, [rdi + 256]
-  void
-  instantiateMemoryOperands(unsigned ScratchSpaceReg,
-                            std::vector<InstructionBuilder> &Snippet) const;
+  void instantiateMemoryOperands(
+      unsigned ScratchSpaceReg,
+      std::vector<InstructionTemplate> &SnippetTemplate) const;
+};
+
+class UopsBenchmarkRunner : public BenchmarkRunner {
+public:
+  UopsBenchmarkRunner(const LLVMState &State)
+      : BenchmarkRunner(State, InstructionBenchmark::Uops) {}
+  ~UopsBenchmarkRunner() override;
+
+  static constexpr const size_t kMinNumDifferentAddresses = 6;
+
+private:
+  llvm::Expected<std::vector<BenchmarkMeasure>>
+  runMeasurements(const FunctionExecutor &Executor) const override;
 };
 
 } // namespace exegesis
+} // namespace llvm
 
 #endif // LLVM_TOOLS_LLVM_EXEGESIS_UOPS_H

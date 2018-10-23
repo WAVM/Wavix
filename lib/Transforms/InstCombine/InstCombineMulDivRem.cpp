@@ -133,7 +133,7 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Value *V = SimplifyUsingDistributiveLaws(I))
@@ -322,77 +322,8 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   if (match(Op1, m_LShr(m_Value(X), m_APInt(C))) && *C == C->getBitWidth() - 1)
     return BinaryOperator::CreateAnd(Builder.CreateAShr(X, *C), Op0);
 
-  // Check for (mul (sext x), y), see if we can merge this into an
-  // integer mul followed by a sext.
-  if (SExtInst *Op0Conv = dyn_cast<SExtInst>(Op0)) {
-    // (mul (sext x), cst) --> (sext (mul x, cst'))
-    if (auto *Op1C = dyn_cast<Constant>(Op1)) {
-      if (Op0Conv->hasOneUse()) {
-        Constant *CI =
-            ConstantExpr::getTrunc(Op1C, Op0Conv->getOperand(0)->getType());
-        if (ConstantExpr::getSExt(CI, I.getType()) == Op1C &&
-            willNotOverflowSignedMul(Op0Conv->getOperand(0), CI, I)) {
-          // Insert the new, smaller mul.
-          Value *NewMul =
-              Builder.CreateNSWMul(Op0Conv->getOperand(0), CI, "mulconv");
-          return new SExtInst(NewMul, I.getType());
-        }
-      }
-    }
-
-    // (mul (sext x), (sext y)) --> (sext (mul int x, y))
-    if (SExtInst *Op1Conv = dyn_cast<SExtInst>(Op1)) {
-      // Only do this if x/y have the same type, if at last one of them has a
-      // single use (so we don't increase the number of sexts), and if the
-      // integer mul will not overflow.
-      if (Op0Conv->getOperand(0)->getType() ==
-              Op1Conv->getOperand(0)->getType() &&
-          (Op0Conv->hasOneUse() || Op1Conv->hasOneUse()) &&
-          willNotOverflowSignedMul(Op0Conv->getOperand(0),
-                                   Op1Conv->getOperand(0), I)) {
-        // Insert the new integer mul.
-        Value *NewMul = Builder.CreateNSWMul(
-            Op0Conv->getOperand(0), Op1Conv->getOperand(0), "mulconv");
-        return new SExtInst(NewMul, I.getType());
-      }
-    }
-  }
-
-  // Check for (mul (zext x), y), see if we can merge this into an
-  // integer mul followed by a zext.
-  if (auto *Op0Conv = dyn_cast<ZExtInst>(Op0)) {
-    // (mul (zext x), cst) --> (zext (mul x, cst'))
-    if (auto *Op1C = dyn_cast<Constant>(Op1)) {
-      if (Op0Conv->hasOneUse()) {
-        Constant *CI =
-            ConstantExpr::getTrunc(Op1C, Op0Conv->getOperand(0)->getType());
-        if (ConstantExpr::getZExt(CI, I.getType()) == Op1C &&
-            willNotOverflowUnsignedMul(Op0Conv->getOperand(0), CI, I)) {
-          // Insert the new, smaller mul.
-          Value *NewMul =
-              Builder.CreateNUWMul(Op0Conv->getOperand(0), CI, "mulconv");
-          return new ZExtInst(NewMul, I.getType());
-        }
-      }
-    }
-
-    // (mul (zext x), (zext y)) --> (zext (mul int x, y))
-    if (auto *Op1Conv = dyn_cast<ZExtInst>(Op1)) {
-      // Only do this if x/y have the same type, if at last one of them has a
-      // single use (so we don't increase the number of zexts), and if the
-      // integer mul will not overflow.
-      if (Op0Conv->getOperand(0)->getType() ==
-              Op1Conv->getOperand(0)->getType() &&
-          (Op0Conv->hasOneUse() || Op1Conv->hasOneUse()) &&
-          willNotOverflowUnsignedMul(Op0Conv->getOperand(0),
-                                     Op1Conv->getOperand(0), I)) {
-        // Insert the new integer mul.
-        Value *NewMul = Builder.CreateNUWMul(
-            Op0Conv->getOperand(0), Op1Conv->getOperand(0), "mulconv");
-        return new ZExtInst(NewMul, I.getType());
-      }
-    }
-  }
+  if (Instruction *Ext = narrowMathIfNoOverflow(I))
+    return Ext;
 
   bool Changed = false;
   if (!I.hasNoSignedWrap() && willNotOverflowSignedMul(Op0, Op1, I)) {
@@ -417,7 +348,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
   if (SimplifyAssociativeOrCommutative(I))
     return &I;
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Instruction *FoldedMul = foldBinOpIntoSelectOrPhi(I))
@@ -502,7 +433,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
         match(Op0, m_OneUse(m_Intrinsic<Intrinsic::sqrt>(m_Value(X)))) &&
         match(Op1, m_OneUse(m_Intrinsic<Intrinsic::sqrt>(m_Value(Y))))) {
       Value *XY = Builder.CreateFMulFMF(X, Y, &I);
-      Value *Sqrt = Builder.CreateIntrinsic(Intrinsic::sqrt, { XY }, &I);
+      Value *Sqrt = Builder.CreateUnaryIntrinsic(Intrinsic::sqrt, XY, &I);
       return replaceInstUsesWith(I, Sqrt);
     }
 
@@ -932,7 +863,7 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // Handle the integer div common cases
@@ -1026,7 +957,7 @@ Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // Handle the integer div common cases
@@ -1174,7 +1105,7 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Instruction *R = foldFDivConstantDivisor(I))
@@ -1226,7 +1157,8 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
       IRBuilder<>::FastMathFlagGuard FMFGuard(B);
       B.setFastMathFlags(I.getFastMathFlags());
       AttributeList Attrs = CallSite(Op0).getCalledFunction()->getAttributes();
-      Value *Res = emitUnaryFloatFnCall(X, TLI.getName(LibFunc_tan), B, Attrs);
+      Value *Res = emitUnaryFloatFnCall(X, &TLI, LibFunc_tan, LibFunc_tanf,
+                                        LibFunc_tanl, B, Attrs);
       if (IsCot)
         Res = B.CreateFDiv(ConstantFP::get(I.getType(), 1.0), Res);
       return replaceInstUsesWith(I, Res);
@@ -1303,7 +1235,7 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   if (Instruction *common = commonIRemTransforms(I))
@@ -1350,7 +1282,7 @@ Instruction *InstCombiner::visitSRem(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   // Handle the integer rem common cases
@@ -1424,7 +1356,7 @@ Instruction *InstCombiner::visitFRem(BinaryOperator &I) {
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldShuffledBinop(I))
+  if (Instruction *X = foldVectorBinop(I))
     return X;
 
   return nullptr;

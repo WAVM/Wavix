@@ -46,6 +46,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
 #include "llvm/Target/TargetMachine.h"
+#include "SDNodeDbgValue.h"
 #include <cstdint>
 #include <iterator>
 
@@ -175,11 +176,15 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::FABS:                       return "fabs";
   case ISD::FMINNUM:                    return "fminnum";
   case ISD::FMAXNUM:                    return "fmaxnum";
+  case ISD::FMINNUM_IEEE:               return "fminnum_ieee";
+  case ISD::FMAXNUM_IEEE:               return "fmaxnum_ieee";
+
   case ISD::FMINNAN:                    return "fminnan";
   case ISD::FMAXNAN:                    return "fmaxnan";
   case ISD::FNEG:                       return "fneg";
   case ISD::FSQRT:                      return "fsqrt";
   case ISD::STRICT_FSQRT:               return "strict_fsqrt";
+  case ISD::FCBRT:                      return "fcbrt";
   case ISD::FSIN:                       return "fsin";
   case ISD::STRICT_FSIN:                return "strict_fsin";
   case ISD::FCOS:                       return "fcos";
@@ -279,6 +284,9 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::SHL_PARTS:                  return "shl_parts";
   case ISD::SRA_PARTS:                  return "sra_parts";
   case ISD::SRL_PARTS:                  return "srl_parts";
+
+  case ISD::SADDSAT:                    return "saddsat";
+  case ISD::UADDSAT:                    return "uaddsat";
 
   // Conversion operators.
   case ISD::SIGN_EXTEND:                return "sign_extend";
@@ -681,7 +689,24 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
     OS << ':' << L->getLine();
     if (unsigned C = L->getColumn())
       OS << ':' << C;
+
+    for (SDDbgValue *Dbg : G->GetDbgValues(this)) {
+      if (Dbg->getKind() != SDDbgValue::SDNODE || Dbg->isInvalidated())
+        continue;
+      Dbg->dump(OS);
+    }
   }
+}
+
+LLVM_DUMP_METHOD void SDDbgValue::dump(raw_ostream &OS) const {
+ OS << " DbgVal";
+ if (kind==SDNODE)
+   OS << '(' << u.s.ResNo << ')';
+ OS << ":\"" << Var->getName() << '"';
+#ifndef NDEBUG
+ if (Expr->getNumElements())
+   Expr->dump();
+#endif
 }
 
 /// Return true if this node is so simple that we should just print it inline

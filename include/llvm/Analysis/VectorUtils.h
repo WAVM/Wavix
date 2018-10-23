@@ -125,6 +125,21 @@ computeMinimumValueSizes(ArrayRef<BasicBlock*> Blocks,
 /// This function always sets a (possibly null) value for each K in Kinds.
 Instruction *propagateMetadata(Instruction *I, ArrayRef<Value *> VL);
 
+/// Create a mask with replicated elements.
+///
+/// This function creates a shuffle mask for replicating each of the \p VF 
+/// elements in a vector \p ReplicationFactor times. It can be used to
+/// transform a mask of \p VF elements into a mask of
+/// \p VF * \p ReplicationFactor elements used by a predicated
+/// interleaved-group of loads/stores whose Interleaved-factor ==
+/// \p ReplicationFactor.
+///
+/// For example, the mask for \p ReplicationFactor=3 and \p VF=4 is:
+///
+///   <0,0,0,1,1,1,2,2,2,3,3,3>
+Constant *createReplicatedMask(IRBuilder<> &Builder, unsigned ReplicationFactor,
+                               unsigned VF);
+
 /// Create an interleave shuffle mask.
 ///
 /// This function creates a shuffle mask for interleaving \p NumVecs vectors of
@@ -293,6 +308,23 @@ public:
     propagateMetadata(NewInst, VL);
   }
 
+  /// Returns true if this Group requires a scalar iteration to handle gaps.
+  bool requiresScalarEpilogue() const {
+    // If the last member of the Group exists, then a scalar epilog is not
+    // needed for this group.
+    if (getMember(getFactor() - 1))
+      return false;
+
+    // We have a group with gaps. It therefore cannot be a group of stores,
+    // and it can't be a reversed access, because such groups get invalidated.
+    assert(!getMember(0)->mayWriteToMemory() &&
+           "Group should have been invalidated");
+    assert(!isReverse() && "Group should have been invalidated");
+
+    // This is a group of loads, with gaps, and without a last-member
+    return true;
+  }
+
 private:
   unsigned Factor; // Interleave Factor.
   bool Reverse;
@@ -328,20 +360,31 @@ public:
   InterleavedAccessInfo(PredicatedScalarEvolution &PSE, Loop *L,
                         DominatorTree *DT, LoopInfo *LI,
                         const LoopAccessInfo *LAI)
-    : PSE(PSE), TheLoop(L), DT(DT), LI(LI), LAI(LAI) {}
+      : PSE(PSE), TheLoop(L), DT(DT), LI(LI), LAI(LAI) {}
 
-  ~InterleavedAccessInfo() {
+  ~InterleavedAccessInfo() { reset(); }
+
+  /// Analyze the interleaved accesses and collect them in interleave
+  /// groups. Substitute symbolic strides using \p Strides.
+  /// Consider also predicated loads/stores in the analysis if
+  /// \p EnableMaskedInterleavedGroup is true.
+  void analyzeInterleaving(bool EnableMaskedInterleavedGroup);
+
+  /// Invalidate groups, e.g., in case all blocks in loop will be predicated
+  /// contrary to original assumption. Although we currently prevent group
+  /// formation for predicated accesses, we may be able to relax this limitation
+  /// in the future once we handle more complicated blocks.
+  void reset() {
     SmallPtrSet<InterleaveGroup *, 4> DelSet;
     // Avoid releasing a pointer twice.
     for (auto &I : InterleaveGroupMap)
       DelSet.insert(I.second);
     for (auto *Ptr : DelSet)
       delete Ptr;
+    InterleaveGroupMap.clear();
+    RequiresScalarEpilogue = false;
   }
 
-  /// Analyze the interleaved accesses and collect them in interleave
-  /// groups. Substitute symbolic strides using \p Strides.
-  void analyzeInterleaving();
 
   /// Check if \p Instr belongs to any interleave group.
   bool isInterleaved(Instruction *Instr) const {
@@ -361,6 +404,11 @@ public:
   /// Returns true if an interleaved group that may access memory
   /// out-of-bounds requires a scalar epilogue iteration for correctness.
   bool requiresScalarEpilogue() const { return RequiresScalarEpilogue; }
+
+  /// Invalidate groups that require a scalar epilogue (due to gaps). This can
+  /// happen when we optimize for size and don't allow creating a scalar
+  /// epilogue.
+  void invalidateGroupsRequiringScalarEpilogue();
 
 private:
   /// A wrapper around ScalarEvolution, used to add runtime SCEV checks.

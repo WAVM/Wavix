@@ -18,6 +18,7 @@
 
 #include <memory>
 
+#include "BenchmarkCode.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -31,6 +32,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 
+namespace llvm {
 namespace exegesis {
 
 class ExegesisTarget;
@@ -46,7 +48,7 @@ llvm::BitVector getFunctionReservedRegs(const llvm::TargetMachine &TM);
 void assembleToStream(const ExegesisTarget &ET,
                       std::unique_ptr<llvm::LLVMTargetMachine> TM,
                       llvm::ArrayRef<unsigned> LiveIns,
-                      llvm::ArrayRef<unsigned> RegsToDef,
+                      llvm::ArrayRef<RegisterValue> RegisterInitialValues,
                       llvm::ArrayRef<llvm::MCInst> Instructions,
                       llvm::raw_pwrite_stream &AsmStream);
 
@@ -81,5 +83,6 @@ struct ExecutableFunction {
 };
 
 } // namespace exegesis
+} // namespace llvm
 
 #endif // LLVM_TOOLS_LLVM_EXEGESIS_ASSEMBLER_H

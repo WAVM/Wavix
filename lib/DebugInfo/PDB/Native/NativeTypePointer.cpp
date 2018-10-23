@@ -18,25 +18,35 @@ using namespace llvm::codeview;
 using namespace llvm::pdb;
 
 NativeTypePointer::NativeTypePointer(NativeSession &Session, SymIndexId Id,
-                                     codeview::CVType CVT)
-    : NativeRawSymbol(Session, PDB_SymType::PointerType, Id),
-      Record(TypeRecordKind::Pointer) {
-  assert(CVT.kind() == TypeLeafKind::LF_POINTER);
-  cantFail(TypeDeserializer::deserializeAs<PointerRecord>(CVT, Record));
+                                     codeview::TypeIndex TI)
+    : NativeRawSymbol(Session, PDB_SymType::PointerType, Id), TI(TI) {
+  assert(TI.isSimple());
+  assert(TI.getSimpleMode() != SimpleTypeMode::Direct);
 }
 
 NativeTypePointer::NativeTypePointer(NativeSession &Session, SymIndexId Id,
-                                     PointerRecord PR)
-    : NativeRawSymbol(Session, PDB_SymType::PointerType, Id),
-      Record(std::move(PR)) {}
+                                     codeview::TypeIndex TI,
+                                     codeview::PointerRecord Record)
+    : NativeRawSymbol(Session, PDB_SymType::PointerType, Id), TI(TI),
+      Record(std::move(Record)) {}
 
 NativeTypePointer::~NativeTypePointer() {}
 
-void NativeTypePointer::dump(raw_ostream &OS, int Indent) const {
-  NativeRawSymbol::dump(OS, Indent);
+void NativeTypePointer::dump(raw_ostream &OS, int Indent,
+                             PdbSymbolIdField ShowIdFields,
+                             PdbSymbolIdField RecurseIdFields) const {
+  NativeRawSymbol::dump(OS, Indent, ShowIdFields, RecurseIdFields);
 
-  dumpSymbolField(OS, "lexicalParentId", 0, Indent);
-  dumpSymbolField(OS, "typeId", getTypeId(), Indent);
+  if (isMemberPointer()) {
+    dumpSymbolIdField(OS, "classParentId", getClassParentId(), Indent, Session,
+                      PdbSymbolIdField::ClassParent, ShowIdFields,
+                      RecurseIdFields);
+  }
+  dumpSymbolIdField(OS, "lexicalParentId", 0, Indent, Session,
+                    PdbSymbolIdField::LexicalParent, ShowIdFields,
+                    RecurseIdFields);
+  dumpSymbolIdField(OS, "typeId", getTypeId(), Indent, Session,
+                    PdbSymbolIdField::Type, ShowIdFields, RecurseIdFields);
   dumpSymbolField(OS, "length", getLength(), Indent);
   dumpSymbolField(OS, "constType", isConstType(), Indent);
   dumpSymbolField(OS, "isPointerToDataMember", isPointerToDataMember(), Indent);
@@ -45,38 +55,140 @@ void NativeTypePointer::dump(raw_ostream &OS, int Indent) const {
   dumpSymbolField(OS, "RValueReference", isRValueReference(), Indent);
   dumpSymbolField(OS, "reference", isReference(), Indent);
   dumpSymbolField(OS, "restrictedType", isRestrictedType(), Indent);
+  if (isMemberPointer()) {
+    if (isSingleInheritance())
+      dumpSymbolField(OS, "isSingleInheritance", 1, Indent);
+    else if (isMultipleInheritance())
+      dumpSymbolField(OS, "isMultipleInheritance", 1, Indent);
+    else if (isVirtualInheritance())
+      dumpSymbolField(OS, "isVirtualInheritance", 1, Indent);
+  }
   dumpSymbolField(OS, "unalignedType", isUnalignedType(), Indent);
   dumpSymbolField(OS, "volatileType", isVolatileType(), Indent);
 }
 
-bool NativeTypePointer::isConstType() const { return false; }
+SymIndexId NativeTypePointer::getClassParentId() const {
+  if (!isMemberPointer())
+    return 0;
 
-uint64_t NativeTypePointer::getLength() const { return Record.getSize(); }
+  assert(Record);
+  const MemberPointerInfo &MPI = Record->getMemberInfo();
+  return Session.getSymbolCache().findSymbolByTypeIndex(MPI.ContainingType);
+}
+
+uint64_t NativeTypePointer::getLength() const {
+  if (Record)
+    return Record->getSize();
+
+  switch (TI.getSimpleMode()) {
+  case SimpleTypeMode::NearPointer:
+  case SimpleTypeMode::FarPointer:
+  case SimpleTypeMode::HugePointer:
+    return 2;
+  case SimpleTypeMode::NearPointer32:
+  case SimpleTypeMode::FarPointer32:
+    return 4;
+  case SimpleTypeMode::NearPointer64:
+    return 8;
+  case SimpleTypeMode::NearPointer128:
+    return 16;
+  default:
+    assert(false && "invalid simple type mode!");
+  }
+  return 0;
+}
 
 SymIndexId NativeTypePointer::getTypeId() const {
   // This is the pointee SymIndexId.
-  return Session.getSymbolCache().findSymbolByTypeIndex(Record.ReferentType);
+  TypeIndex Referent = Record ? Record->ReferentType : TI.makeDirect();
+
+  return Session.getSymbolCache().findSymbolByTypeIndex(Referent);
 }
 
 bool NativeTypePointer::isReference() const {
-  return Record.getMode() == PointerMode::LValueReference ||
-         isRValueReference();
+  if (!Record)
+    return false;
+  return Record->getMode() == PointerMode::LValueReference;
 }
 
 bool NativeTypePointer::isRValueReference() const {
-  return Record.getMode() == PointerMode::RValueReference;
+  if (!Record)
+    return false;
+  return Record->getMode() == PointerMode::RValueReference;
 }
 
 bool NativeTypePointer::isPointerToDataMember() const {
-  return Record.getMode() == PointerMode::PointerToDataMember;
+  if (!Record)
+    return false;
+  return Record->getMode() == PointerMode::PointerToDataMember;
 }
 
 bool NativeTypePointer::isPointerToMemberFunction() const {
-  return Record.getMode() == PointerMode::PointerToMemberFunction;
+  if (!Record)
+    return false;
+  return Record->getMode() == PointerMode::PointerToMemberFunction;
 }
 
-bool NativeTypePointer::isRestrictedType() const { return false; }
+bool NativeTypePointer::isConstType() const {
+  if (!Record)
+    return false;
+  return (Record->getOptions() & PointerOptions::Const) != PointerOptions::None;
+}
 
-bool NativeTypePointer::isVolatileType() const { return false; }
+bool NativeTypePointer::isRestrictedType() const {
+  if (!Record)
+    return false;
+  return (Record->getOptions() & PointerOptions::Restrict) !=
+         PointerOptions::None;
+}
 
-bool NativeTypePointer::isUnalignedType() const { return false; }
+bool NativeTypePointer::isVolatileType() const {
+  if (!Record)
+    return false;
+  return (Record->getOptions() & PointerOptions::Volatile) !=
+         PointerOptions::None;
+}
+
+bool NativeTypePointer::isUnalignedType() const {
+  if (!Record)
+    return false;
+  return (Record->getOptions() & PointerOptions::Unaligned) !=
+         PointerOptions::None;
+}
+
+static inline bool isInheritanceKind(const MemberPointerInfo &MPI,
+                                     PointerToMemberRepresentation P1,
+                                     PointerToMemberRepresentation P2) {
+  return (MPI.getRepresentation() == P1 || MPI.getRepresentation() == P2);
+}
+
+bool NativeTypePointer::isSingleInheritance() const {
+  if (!isMemberPointer())
+    return false;
+  return isInheritanceKind(
+      Record->getMemberInfo(),
+      PointerToMemberRepresentation::SingleInheritanceData,
+      PointerToMemberRepresentation::SingleInheritanceFunction);
+}
+
+bool NativeTypePointer::isMultipleInheritance() const {
+  if (!isMemberPointer())
+    return false;
+  return isInheritanceKind(
+      Record->getMemberInfo(),
+      PointerToMemberRepresentation::MultipleInheritanceData,
+      PointerToMemberRepresentation::MultipleInheritanceFunction);
+}
+
+bool NativeTypePointer::isVirtualInheritance() const {
+  if (!isMemberPointer())
+    return false;
+  return isInheritanceKind(
+      Record->getMemberInfo(),
+      PointerToMemberRepresentation::VirtualInheritanceData,
+      PointerToMemberRepresentation::VirtualInheritanceFunction);
+}
+
+bool NativeTypePointer::isMemberPointer() const {
+  return isPointerToDataMember() || isPointerToMemberFunction();
+}

@@ -293,6 +293,10 @@ struct VPTransformState {
     /// of replication, maps the BasicBlock of the last replica created.
     SmallDenseMap<VPBasicBlock *, BasicBlock *> VPBB2IRBB;
 
+    /// Vector of VPBasicBlocks whose terminator instruction needs to be fixed
+    /// up at the end of vector code generation.
+    SmallVector<VPBasicBlock *, 8> VPBBsToFix;
+
     CFGState() = default;
   } CFG;
 
@@ -312,6 +316,9 @@ struct VPTransformState {
   /// Hold a reference to a mapping between VPValues in VPlan and original
   /// Values they correspond to.
   VPValue2ValueTy VPValue2Value;
+
+  /// Hold the trip count of the scalar loop.
+  Value *TripCount = nullptr;
 
   /// Hold a pointer to InnerLoopVectorizer to reuse its IR generation methods.
   InnerLoopVectorizer *ILV;
@@ -603,7 +610,7 @@ class VPInstruction : public VPUser, public VPRecipeBase {
 
 public:
   /// VPlan opcodes, extending LLVM IR with idiomatics instructions.
-  enum { Not = Instruction::OtherOpsEnd + 1 };
+  enum { Not = Instruction::OtherOpsEnd + 1, ICmpULE };
 
 private:
   typedef unsigned char OpcodeTy;
@@ -765,10 +772,14 @@ public:
 class VPInterleaveRecipe : public VPRecipeBase {
 private:
   const InterleaveGroup *IG;
+  std::unique_ptr<VPUser> User;
 
 public:
-  VPInterleaveRecipe(const InterleaveGroup *IG)
-      : VPRecipeBase(VPInterleaveSC), IG(IG) {}
+  VPInterleaveRecipe(const InterleaveGroup *IG, VPValue *Mask)
+      : VPRecipeBase(VPInterleaveSC), IG(IG) {
+    if (Mask) // Create a VPInstruction to register as a user of the mask.
+      User.reset(new VPUser({Mask}));
+  }
   ~VPInterleaveRecipe() override = default;
 
   /// Method to support type inquiry through isa, cast, and dyn_cast.
@@ -1107,12 +1118,19 @@ private:
   // (operators '==' and '<').
   SmallPtrSet<VPValue *, 16> VPExternalDefs;
 
+  /// Represents the backedge taken count of the original loop, for folding
+  /// the tail.
+  VPValue *BackedgeTakenCount = nullptr;
+
   /// Holds a mapping between Values and their corresponding VPValue inside
   /// VPlan.
   Value2VPValueTy Value2VPValue;
 
   /// Holds the VPLoopInfo analysis for this VPlan.
   VPLoopInfo VPLInfo;
+
+  /// Holds the condition bit values built during VPInstruction to VPRecipe transformation.
+  SmallVector<VPValue *, 4> VPCBVs;
 
 public:
   VPlan(VPBlockBase *Entry = nullptr) : Entry(Entry) {}
@@ -1121,9 +1139,14 @@ public:
     if (Entry)
       VPBlockBase::deleteCFG(Entry);
     for (auto &MapEntry : Value2VPValue)
-      delete MapEntry.second;
+      if (MapEntry.second != BackedgeTakenCount)
+        delete MapEntry.second;
+    if (BackedgeTakenCount)
+      delete BackedgeTakenCount; // Delete once, if in Value2VPValue or not.
     for (VPValue *Def : VPExternalDefs)
       delete Def;
+    for (VPValue *CBV : VPCBVs)
+      delete CBV;
   }
 
   /// Generate the IR code for this VPlan.
@@ -1133,6 +1156,13 @@ public:
   const VPBlockBase *getEntry() const { return Entry; }
 
   VPBlockBase *setEntry(VPBlockBase *Block) { return Entry = Block; }
+
+  /// The backedge taken count of the original loop.
+  VPValue *getOrCreateBackedgeTakenCount() {
+    if (!BackedgeTakenCount)
+      BackedgeTakenCount = new VPValue();
+    return BackedgeTakenCount;
+  }
 
   void addVF(unsigned VF) { VFs.insert(VF); }
 
@@ -1146,6 +1176,11 @@ public:
   /// in the pool.
   void addExternalDef(VPValue *VPVal) {
     VPExternalDefs.insert(VPVal);
+  }
+
+  /// Add \p CBV to the vector of condition bit values.
+  void addCBV(VPValue *CBV) {
+    VPCBVs.push_back(CBV);
   }
 
   void addVPValue(Value *V) {

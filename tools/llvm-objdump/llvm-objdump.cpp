@@ -1447,8 +1447,8 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       }
     }
 
-    llvm::sort(DataMappingSymsAddr.begin(), DataMappingSymsAddr.end());
-    llvm::sort(TextMappingSymsAddr.begin(), TextMappingSymsAddr.end());
+    llvm::sort(DataMappingSymsAddr);
+    llvm::sort(TextMappingSymsAddr);
 
     if (Obj->isELF() && Obj->getArch() == Triple::amdgcn) {
       // AMDGPU disassembler uses symbolizer for printing labels
@@ -1473,7 +1473,7 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     }
 
     // Sort relocations by address.
-    llvm::sort(Rels.begin(), Rels.end(), RelocAddressLess);
+    llvm::sort(Rels, RelocAddressLess);
 
     StringRef SegmentName = "";
     if (const MachOObjectFile *MachO = dyn_cast<const MachOObjectFile>(Obj)) {
@@ -2220,8 +2220,11 @@ static void printFileHeaders(const ObjectFile *o) {
   Expected<uint64_t> StartAddrOrErr = o->getStartAddress();
   if (!StartAddrOrErr)
     report_error(o->getFileName(), StartAddrOrErr.takeError());
+
+  StringRef Fmt = o->getBytesInAddress() > 4 ? "%016" PRIx64 : "%08" PRIx64;
+  uint64_t Address = StartAddrOrErr.get();
   outs() << "start address: "
-         << format("0x%0*x", o->getBytesInAddress(), StartAddrOrErr.get())
+         << "0x" << format(Fmt.data(), Address)
          << "\n";
 }
 

@@ -34,6 +34,10 @@ public:
   bool isAnyArgRegReserved(const MachineFunction &MF) const;
   void emitReservedArgRegCallError(const MachineFunction &MF) const;
 
+  void UpdateCustomCalleeSavedRegs(MachineFunction &MF) const;
+  void UpdateCustomCallPreservedMask(MachineFunction &MF,
+                                     const uint32_t **Mask) const;
+
   /// Code Generation virtual methods...
   const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF) const override;
   const MCPhysReg *
@@ -79,8 +83,6 @@ public:
                      unsigned Kind = 0) const override;
   const TargetRegisterClass *
   getCrossCopyRegClass(const TargetRegisterClass *RC) const override;
-
-  bool enableMultipleCopyHints() const override { return true; }
 
   bool requiresRegisterScavenging(const MachineFunction &MF) const override;
   bool useFPForScavengingIndex(const MachineFunction &MF) const override;

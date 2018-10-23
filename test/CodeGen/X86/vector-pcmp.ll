@@ -86,10 +86,10 @@ define <2 x i64> @test_pcmpgtq(<2 x i64> %x) {
 define <1 x i128> @test_strange_type(<1 x i128> %x) {
 ; CHECK-LABEL: test_strange_type:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    sarq $63, %rsi
-; CHECK-NEXT:    notq %rsi
 ; CHECK-NEXT:    movq %rsi, %rax
-; CHECK-NEXT:    movq %rsi, %rdx
+; CHECK-NEXT:    sarq $63, %rax
+; CHECK-NEXT:    notq %rax
+; CHECK-NEXT:    movq %rax, %rdx
 ; CHECK-NEXT:    retq
   %sign = ashr <1 x i128> %x, <i128 127>
   %not = xor <1 x i128> %sign, <i128 -1>
@@ -409,7 +409,7 @@ define <8 x i32> @cmpgt_zext_v8i32(<8 x i32> %a, <8 x i32> %b) {
 define <2 x i64> @cmpgt_zext_v2i64(<2 x i64> %a, <2 x i64> %b) {
 ; SSE2-LABEL: cmpgt_zext_v2i64:
 ; SSE2:       # %bb.0:
-; SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,0,2147483648,0]
+; SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [2147483648,2147483648]
 ; SSE2-NEXT:    pxor %xmm2, %xmm1
 ; SSE2-NEXT:    pxor %xmm2, %xmm0
 ; SSE2-NEXT:    movdqa %xmm0, %xmm2

@@ -408,7 +408,7 @@ public:
   /// Returns the opcode of this MachineInstr.
   unsigned getOpcode() const { return MCID->Opcode; }
 
-  /// Access to explicit operands of the instruction.
+  /// Retuns the total number of operands.
   unsigned getNumOperands() const { return NumOperands; }
 
   const MachineOperand& getOperand(unsigned i) const {
@@ -1526,6 +1526,9 @@ public:
   /// not modify the MIFlags of this MachineInstr.
   uint16_t mergeFlagsWith(const MachineInstr& Other) const;
 
+  /// Copy all flags to MachineInst MIFlags
+  void copyIRFlags(const Instruction &I);
+
   /// Break any tie involving OpIdx.
   void untieRegOperand(unsigned OpIdx) {
     MachineOperand &MO = getOperand(OpIdx);
@@ -1540,6 +1543,10 @@ public:
 
   /// Scan instructions following MI and collect any matching DBG_VALUEs.
   void collectDebugValues(SmallVectorImpl<MachineInstr *> &DbgValues);
+
+  /// Find all DBG_VALUEs immediately following this instruction that point
+  /// to a register def in this instruction and point them to \p Reg instead.
+  void changeDebugValuesDefReg(unsigned Reg);
 
 private:
   /// If this instruction is embedded into a MachineFunction, return the

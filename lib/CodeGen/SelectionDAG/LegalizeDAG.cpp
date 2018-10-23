@@ -1115,6 +1115,19 @@ void SelectionDAGLegalize::LegalizeOp(SDNode *Node) {
     Action = TLI.getStrictFPOperationAction(Node->getOpcode(),
                                             Node->getValueType(0));
     break;
+  case ISD::SADDSAT:
+  case ISD::UADDSAT: {
+    Action = TLI.getOperationAction(Node->getOpcode(), Node->getValueType(0));
+    break;
+  }
+  case ISD::MSCATTER:
+    Action = TLI.getOperationAction(Node->getOpcode(),
+                    cast<MaskedScatterSDNode>(Node)->getValue().getValueType());
+    break;
+  case ISD::MSTORE:
+    Action = TLI.getOperationAction(Node->getOpcode(),
+                    cast<MaskedStoreSDNode>(Node)->getValue().getValueType());
+    break;
   default:
     if (Node->getOpcode() >= ISD::BUILTIN_OP_END) {
       Action = TargetLowering::Legal;
@@ -1248,6 +1261,7 @@ SDValue SelectionDAGLegalize::ExpandExtractFromVectorThroughStack(SDValue Op) {
   // Caches for hasPredecessorHelper
   SmallPtrSet<const SDNode *, 32> Visited;
   SmallVector<const SDNode *, 16> Worklist;
+  Visited.insert(Op.getNode());
   Worklist.push_back(Idx.getNode());
   SDValue StackPtr, Ch;
   for (SDNode::use_iterator UI = Vec.getNode()->use_begin(),
@@ -2300,9 +2314,12 @@ SelectionDAGLegalize::ExpandSinCosLibCall(SDNode *Node,
 SDValue SelectionDAGLegalize::ExpandLegalINT_TO_FP(bool isSigned, SDValue Op0,
                                                    EVT DestVT,
                                                    const SDLoc &dl) {
+  EVT SrcVT = Op0.getValueType();
+  EVT ShiftVT = TLI.getShiftAmountTy(SrcVT, DAG.getDataLayout());
+
   // TODO: Should any fast-math-flags be set for the created nodes?
   LLVM_DEBUG(dbgs() << "Legalizing INT_TO_FP\n");
-  if (Op0.getValueType() == MVT::i32 && TLI.isTypeLegal(MVT::f64)) {
+  if (SrcVT == MVT::i32 && TLI.isTypeLegal(MVT::f64)) {
     LLVM_DEBUG(dbgs() << "32-bit [signed|unsigned] integer to float/double "
                          "expansion\n");
 
@@ -2347,17 +2364,7 @@ SDValue SelectionDAGLegalize::ExpandLegalINT_TO_FP(bool isSigned, SDValue Op0,
     // subtract the bias
     SDValue Sub = DAG.getNode(ISD::FSUB, dl, MVT::f64, Load, Bias);
     // final result
-    SDValue Result;
-    // handle final rounding
-    if (DestVT == MVT::f64) {
-      // do nothing
-      Result = Sub;
-    } else if (DestVT.bitsLT(MVT::f64)) {
-      Result = DAG.getNode(ISD::FP_ROUND, dl, DestVT, Sub,
-                           DAG.getIntPtrConstant(0, dl));
-    } else if (DestVT.bitsGT(MVT::f64)) {
-      Result = DAG.getNode(ISD::FP_EXTEND, dl, DestVT, Sub);
-    }
+    SDValue Result = DAG.getFPExtendOrRound(Sub, dl, DestVT);
     return Result;
   }
   assert(!isSigned && "Legalize cannot Expand SINT_TO_FP for i64 yet");
@@ -2368,38 +2375,34 @@ SDValue SelectionDAGLegalize::ExpandLegalINT_TO_FP(bool isSigned, SDValue Op0,
   // of performing rounding correctly, both in the default rounding mode
   // and in all alternate rounding modes.
   // TODO: Generalize this for use with other types.
-  if (Op0.getValueType() == MVT::i64 && DestVT == MVT::f64) {
+  if (SrcVT == MVT::i64 && DestVT == MVT::f64) {
     LLVM_DEBUG(dbgs() << "Converting unsigned i64 to f64\n");
-    SDValue TwoP52 =
-      DAG.getConstant(UINT64_C(0x4330000000000000), dl, MVT::i64);
-    SDValue TwoP84PlusTwoP52 =
-      DAG.getConstantFP(BitsToDouble(UINT64_C(0x4530000000100000)), dl,
-                        MVT::f64);
-    SDValue TwoP84 =
-      DAG.getConstant(UINT64_C(0x4530000000000000), dl, MVT::i64);
+    SDValue TwoP52 = DAG.getConstant(UINT64_C(0x4330000000000000), dl, SrcVT);
+    SDValue TwoP84PlusTwoP52 = DAG.getConstantFP(
+        BitsToDouble(UINT64_C(0x4530000000100000)), dl, DestVT);
+    SDValue TwoP84 = DAG.getConstant(UINT64_C(0x4530000000000000), dl, SrcVT);
+    SDValue LoMask = DAG.getConstant(UINT64_C(0x00000000FFFFFFFF), dl, SrcVT);
+    SDValue HiShift = DAG.getConstant(32, dl, ShiftVT);
 
-    SDValue Lo = DAG.getZeroExtendInReg(Op0, dl, MVT::i32);
-    SDValue Hi = DAG.getNode(ISD::SRL, dl, MVT::i64, Op0,
-                             DAG.getConstant(32, dl, MVT::i64));
-    SDValue LoOr = DAG.getNode(ISD::OR, dl, MVT::i64, Lo, TwoP52);
-    SDValue HiOr = DAG.getNode(ISD::OR, dl, MVT::i64, Hi, TwoP84);
-    SDValue LoFlt = DAG.getNode(ISD::BITCAST, dl, MVT::f64, LoOr);
-    SDValue HiFlt = DAG.getNode(ISD::BITCAST, dl, MVT::f64, HiOr);
-    SDValue HiSub = DAG.getNode(ISD::FSUB, dl, MVT::f64, HiFlt,
-                                TwoP84PlusTwoP52);
-    return DAG.getNode(ISD::FADD, dl, MVT::f64, LoFlt, HiSub);
+    SDValue Lo = DAG.getNode(ISD::AND, dl, SrcVT, Op0, LoMask);
+    SDValue Hi = DAG.getNode(ISD::SRL, dl, SrcVT, Op0, HiShift);
+    SDValue LoOr = DAG.getNode(ISD::OR, dl, SrcVT, Lo, TwoP52);
+    SDValue HiOr = DAG.getNode(ISD::OR, dl, SrcVT, Hi, TwoP84);
+    SDValue LoFlt = DAG.getNode(ISD::BITCAST, dl, DestVT, LoOr);
+    SDValue HiFlt = DAG.getNode(ISD::BITCAST, dl, DestVT, HiOr);
+    SDValue HiSub = DAG.getNode(ISD::FSUB, dl, DestVT, HiFlt, TwoP84PlusTwoP52);
+    return DAG.getNode(ISD::FADD, dl, DestVT, LoFlt, HiSub);
   }
 
   // TODO: Generalize this for use with other types.
-  if (Op0.getValueType() == MVT::i64 && DestVT == MVT::f32) {
+  if (SrcVT == MVT::i64 && DestVT == MVT::f32) {
     LLVM_DEBUG(dbgs() << "Converting unsigned i64 to f32\n");
     // For unsigned conversions, convert them to signed conversions using the
     // algorithm from the x86_64 __floatundidf in compiler_rt.
     if (!isSigned) {
       SDValue Fast = DAG.getNode(ISD::SINT_TO_FP, dl, MVT::f32, Op0);
 
-      SDValue ShiftConst = DAG.getConstant(
-          1, dl, TLI.getShiftAmountTy(Op0.getValueType(), DAG.getDataLayout()));
+      SDValue ShiftConst = DAG.getConstant(1, dl, ShiftVT);
       SDValue Shr = DAG.getNode(ISD::SRL, dl, MVT::i64, Op0, ShiftConst);
       SDValue AndConst = DAG.getConstant(1, dl, MVT::i64);
       SDValue And = DAG.getNode(ISD::AND, dl, MVT::i64, Op0, AndConst);
@@ -2453,10 +2456,8 @@ SDValue SelectionDAGLegalize::ExpandLegalINT_TO_FP(bool isSigned, SDValue Op0,
 
   SDValue Tmp1 = DAG.getNode(ISD::SINT_TO_FP, dl, DestVT, Op0);
 
-  SDValue SignSet = DAG.getSetCC(dl, getSetCCResultType(Op0.getValueType()),
-                                 Op0,
-                                 DAG.getConstant(0, dl, Op0.getValueType()),
-                                 ISD::SETLT);
+  SDValue SignSet = DAG.getSetCC(dl, getSetCCResultType(SrcVT), Op0,
+                                 DAG.getConstant(0, dl, SrcVT), ISD::SETLT);
   SDValue Zero = DAG.getIntPtrConstant(0, dl),
           Four = DAG.getIntPtrConstant(4, dl);
   SDValue CstOffset = DAG.getSelect(dl, Zero.getValueType(),
@@ -2466,7 +2467,7 @@ SDValue SelectionDAGLegalize::ExpandLegalINT_TO_FP(bool isSigned, SDValue Op0,
   // as a negative number.  To counteract this, the dynamic code adds an
   // offset depending on the data type.
   uint64_t FF;
-  switch (Op0.getSimpleValueType().SimpleTy) {
+  switch (SrcVT.getSimpleVT().SimpleTy) {
   default: llvm_unreachable("Unsupported integer type!");
   case MVT::i8 : FF = 0x43800000ULL; break;  // 2^8  (as a float)
   case MVT::i16: FF = 0x47800000ULL; break;  // 2^16 (as a float)
@@ -2709,13 +2710,13 @@ SDValue SelectionDAGLegalize::ExpandBSWAP(SDValue Op, const SDLoc &dl) {
 /// Expand the specified bitcount instruction into operations.
 SDValue SelectionDAGLegalize::ExpandBitCount(unsigned Opc, SDValue Op,
                                              const SDLoc &dl) {
+  EVT VT = Op.getValueType();
+  EVT ShVT = TLI.getShiftAmountTy(VT, DAG.getDataLayout());
+  unsigned Len = VT.getScalarSizeInBits();
+
   switch (Opc) {
   default: llvm_unreachable("Cannot expand this yet!");
   case ISD::CTPOP: {
-    EVT VT = Op.getValueType();
-    EVT ShVT = TLI.getShiftAmountTy(VT, DAG.getDataLayout());
-    unsigned Len = VT.getSizeInBits();
-
     assert(VT.isInteger() && Len <= 128 && Len % 8 == 0 &&
            "CTPOP not implemented for this type.");
 
@@ -2751,77 +2752,12 @@ SDValue SelectionDAGLegalize::ExpandBitCount(unsigned Opc, SDValue Op,
                                              DAG.getConstant(4, dl, ShVT))),
                      Mask0F);
     // v = (v * 0x01010101...) >> (Len - 8)
-    Op = DAG.getNode(ISD::SRL, dl, VT,
-                     DAG.getNode(ISD::MUL, dl, VT, Op, Mask01),
-                     DAG.getConstant(Len - 8, dl, ShVT));
+    if (Len > 8)
+      Op = DAG.getNode(ISD::SRL, dl, VT,
+                       DAG.getNode(ISD::MUL, dl, VT, Op, Mask01),
+                       DAG.getConstant(Len - 8, dl, ShVT));
 
     return Op;
-  }
-  case ISD::CTLZ_ZERO_UNDEF:
-    // This trivially expands to CTLZ.
-    return DAG.getNode(ISD::CTLZ, dl, Op.getValueType(), Op);
-  case ISD::CTLZ: {
-    EVT VT = Op.getValueType();
-    unsigned Len = VT.getSizeInBits();
-
-    if (TLI.isOperationLegalOrCustom(ISD::CTLZ_ZERO_UNDEF, VT)) {
-      EVT SetCCVT = getSetCCResultType(VT);
-      SDValue CTLZ = DAG.getNode(ISD::CTLZ_ZERO_UNDEF, dl, VT, Op);
-      SDValue Zero = DAG.getConstant(0, dl, VT);
-      SDValue SrcIsZero = DAG.getSetCC(dl, SetCCVT, Op, Zero, ISD::SETEQ);
-      return DAG.getNode(ISD::SELECT, dl, VT, SrcIsZero,
-                         DAG.getConstant(Len, dl, VT), CTLZ);
-    }
-
-    // for now, we do this:
-    // x = x | (x >> 1);
-    // x = x | (x >> 2);
-    // ...
-    // x = x | (x >>16);
-    // x = x | (x >>32); // for 64-bit input
-    // return popcount(~x);
-    //
-    // Ref: "Hacker's Delight" by Henry Warren
-    EVT ShVT = TLI.getShiftAmountTy(VT, DAG.getDataLayout());
-    for (unsigned i = 0; (1U << i) <= (Len / 2); ++i) {
-      SDValue Tmp3 = DAG.getConstant(1ULL << i, dl, ShVT);
-      Op = DAG.getNode(ISD::OR, dl, VT, Op,
-                       DAG.getNode(ISD::SRL, dl, VT, Op, Tmp3));
-    }
-    Op = DAG.getNOT(dl, Op, VT);
-    return DAG.getNode(ISD::CTPOP, dl, VT, Op);
-  }
-  case ISD::CTTZ_ZERO_UNDEF:
-    // This trivially expands to CTTZ.
-    return DAG.getNode(ISD::CTTZ, dl, Op.getValueType(), Op);
-  case ISD::CTTZ: {
-    EVT VT = Op.getValueType();
-    unsigned Len = VT.getSizeInBits();
-
-    if (TLI.isOperationLegalOrCustom(ISD::CTTZ_ZERO_UNDEF, VT)) {
-      EVT SetCCVT = getSetCCResultType(VT);
-      SDValue CTTZ = DAG.getNode(ISD::CTTZ_ZERO_UNDEF, dl, VT, Op);
-      SDValue Zero = DAG.getConstant(0, dl, VT);
-      SDValue SrcIsZero = DAG.getSetCC(dl, SetCCVT, Op, Zero, ISD::SETEQ);
-      return DAG.getNode(ISD::SELECT, dl, VT, SrcIsZero,
-                         DAG.getConstant(Len, dl, VT), CTTZ);
-    }
-
-    // for now, we use: { return popcount(~x & (x - 1)); }
-    // unless the target has ctlz but not ctpop, in which case we use:
-    // { return 32 - nlz(~x & (x-1)); }
-    // Ref: "Hacker's Delight" by Henry Warren
-    SDValue Tmp3 = DAG.getNode(ISD::AND, dl, VT,
-                               DAG.getNOT(dl, Op, VT),
-                               DAG.getNode(ISD::SUB, dl, VT, Op,
-                                           DAG.getConstant(1, dl, VT)));
-    // If ISD::CTLZ is legal and CTPOP isn't, then do that instead.
-    if (!TLI.isOperationLegalOrCustom(ISD::CTPOP, VT) &&
-        TLI.isOperationLegalOrCustom(ISD::CTLZ, VT))
-      return DAG.getNode(ISD::SUB, dl, VT,
-                         DAG.getConstant(VT.getSizeInBits(), dl, VT),
-                         DAG.getNode(ISD::CTLZ, dl, VT, Tmp3));
-    return DAG.getNode(ISD::CTPOP, dl, VT, Tmp3);
   }
   }
 }
@@ -2834,12 +2770,18 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
   bool NeedInvert;
   switch (Node->getOpcode()) {
   case ISD::CTPOP:
-  case ISD::CTLZ:
-  case ISD::CTLZ_ZERO_UNDEF:
-  case ISD::CTTZ:
-  case ISD::CTTZ_ZERO_UNDEF:
     Tmp1 = ExpandBitCount(Node->getOpcode(), Node->getOperand(0), dl);
     Results.push_back(Tmp1);
+    break;
+  case ISD::CTLZ:
+  case ISD::CTLZ_ZERO_UNDEF:
+    if (TLI.expandCTLZ(Node, Tmp1, DAG))
+      Results.push_back(Tmp1);
+    break;
+  case ISD::CTTZ:
+  case ISD::CTTZ_ZERO_UNDEF:
+    if (TLI.expandCTTZ(Node, Tmp1, DAG))
+      Results.push_back(Tmp1);
     break;
   case ISD::BITREVERSE:
     Results.push_back(ExpandBITREVERSE(Node->getOperand(0), dl));
@@ -3253,7 +3195,12 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     Results.push_back(Tmp1);
     break;
   }
-
+  case ISD::FMINNUM:
+  case ISD::FMAXNUM: {
+    if (SDValue Expanded = TLI.expandFMINNUM_FMAXNUM(Node, DAG))
+      Results.push_back(Expanded);
+    break;
+  }
   case ISD::FSIN:
   case ISD::FCOS: {
     EVT VT = Node->getValueType(0);
@@ -3459,6 +3406,11 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
       Hi = DAG.getNode(ISD::SHL, dl, VT, Hi, Shift);
       Results.push_back(DAG.getNode(ISD::OR, dl, VT, Lo, Hi));
     }
+    break;
+  }
+  case ISD::SADDSAT:
+  case ISD::UADDSAT: {
+    Results.push_back(TLI.getExpandedSaturationAddition(Node, DAG));
     break;
   }
   case ISD::SADDO:
@@ -3959,7 +3911,7 @@ bool SelectionDAGLegalize::ExpandNode(SDNode *Node) {
     return false;
   }
 
-  LLVM_DEBUG(dbgs() << "Succesfully expanded node\n");
+  LLVM_DEBUG(dbgs() << "Successfully expanded node\n");
   ReplaceNode(Node, Results.data());
   return true;
 }
@@ -4046,6 +3998,11 @@ void SelectionDAGLegalize::ConvertNodeToLibcall(SDNode *Node) {
     Results.push_back(ExpandFPLibCall(Node, RTLIB::SQRT_F32, RTLIB::SQRT_F64,
                                       RTLIB::SQRT_F80, RTLIB::SQRT_F128,
                                       RTLIB::SQRT_PPCF128));
+    break;
+  case ISD::FCBRT:
+    Results.push_back(ExpandFPLibCall(Node, RTLIB::CBRT_F32, RTLIB::CBRT_F64,
+                                      RTLIB::CBRT_F80, RTLIB::CBRT_F128,
+                                      RTLIB::CBRT_PPCF128));
     break;
   case ISD::FSIN:
   case ISD::STRICT_FSIN:

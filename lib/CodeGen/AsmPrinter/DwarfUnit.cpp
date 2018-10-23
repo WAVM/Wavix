@@ -315,14 +315,21 @@ unsigned DwarfTypeUnit::getOrCreateSourceID(const DIFile *File) {
 }
 
 void DwarfUnit::addOpAddress(DIELoc &Die, const MCSymbol *Sym) {
-  if (!DD->useSplitDwarf()) {
-    addUInt(Die, dwarf::DW_FORM_data1, dwarf::DW_OP_addr);
-    addLabel(Die, dwarf::DW_FORM_udata, Sym);
-  } else {
+  if (DD->getDwarfVersion() >= 5) {
+    addUInt(Die, dwarf::DW_FORM_data1, dwarf::DW_OP_addrx);
+    addUInt(Die, dwarf::DW_FORM_addrx, DD->getAddressPool().getIndex(Sym));
+    return;
+  }
+
+  if (DD->useSplitDwarf()) {
     addUInt(Die, dwarf::DW_FORM_data1, dwarf::DW_OP_GNU_addr_index);
     addUInt(Die, dwarf::DW_FORM_GNU_addr_index,
             DD->getAddressPool().getIndex(Sym));
+    return;
   }
+
+  addUInt(Die, dwarf::DW_FORM_data1, dwarf::DW_OP_addr);
+  addLabel(Die, dwarf::DW_FORM_udata, Sym);
 }
 
 void DwarfUnit::addLabelDelta(DIE &Die, dwarf::Attribute Attribute,
@@ -1647,4 +1654,13 @@ void DwarfUnit::addRnglistsBase() {
   addSectionLabel(getUnitDie(), dwarf::DW_AT_rnglists_base,
                   DU->getRnglistsTableBaseSym(),
                   TLOF.getDwarfRnglistsSection()->getBeginSymbol());
+}
+
+void DwarfUnit::addAddrTableBase() {
+  const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
+  MCSymbol *Label = DD->getAddressPool().getLabel();
+  addSectionLabel(getUnitDie(),
+                  getDwarfVersion() >= 5 ? dwarf::DW_AT_addr_base
+                                         : dwarf::DW_AT_GNU_addr_base,
+                  Label, TLOF.getDwarfAddrSection()->getBeginSymbol());
 }

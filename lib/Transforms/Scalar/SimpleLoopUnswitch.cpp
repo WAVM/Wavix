@@ -783,7 +783,7 @@ static bool unswitchAllTrivialConditions(Loop &L, DominatorTree &DT,
                      [](Instruction &I) { return I.mayHaveSideEffects(); }))
       return Changed;
 
-    TerminatorInst *CurrentTerm = CurrentBB->getTerminator();
+    Instruction *CurrentTerm = CurrentBB->getTerminator();
 
     if (auto *SI = dyn_cast<SwitchInst>(CurrentTerm)) {
       // Don't bother trying to unswitch past a switch with a constant
@@ -1265,11 +1265,10 @@ static void buildClonedLoops(Loop &OrigL, ArrayRef<BasicBlock *> ExitBlocks,
   // matter as we're just trying to build up the map from inside-out; we use
   // the map in a more stably ordered way below.
   auto OrderedClonedExitsInLoops = ClonedExitsInLoops;
-  llvm::sort(OrderedClonedExitsInLoops.begin(), OrderedClonedExitsInLoops.end(),
-             [&](BasicBlock *LHS, BasicBlock *RHS) {
-               return ExitLoopMap.lookup(LHS)->getLoopDepth() <
-                      ExitLoopMap.lookup(RHS)->getLoopDepth();
-             });
+  llvm::sort(OrderedClonedExitsInLoops, [&](BasicBlock *LHS, BasicBlock *RHS) {
+    return ExitLoopMap.lookup(LHS)->getLoopDepth() <
+           ExitLoopMap.lookup(RHS)->getLoopDepth();
+  });
 
   // Populate the existing ExitLoopMap with everything reachable from each
   // exit, starting from the inner most exit.
@@ -1794,7 +1793,7 @@ void visitDomSubTree(DominatorTree &DT, BasicBlock *BB, CallableT Callable) {
 }
 
 static bool unswitchNontrivialInvariants(
-    Loop &L, TerminatorInst &TI, ArrayRef<Value *> Invariants,
+    Loop &L, Instruction &TI, ArrayRef<Value *> Invariants,
     DominatorTree &DT, LoopInfo &LI, AssumptionCache &AC,
     function_ref<void(bool, ArrayRef<Loop *>)> UnswitchCB,
     ScalarEvolution *SE) {
@@ -2189,7 +2188,7 @@ unswitchBestCondition(Loop &L, DominatorTree &DT, LoopInfo &LI,
                       ScalarEvolution *SE) {
   // Collect all invariant conditions within this loop (as opposed to an inner
   // loop which would be handled when visiting that inner loop).
-  SmallVector<std::pair<TerminatorInst *, TinyPtrVector<Value *>>, 4>
+  SmallVector<std::pair<Instruction *, TinyPtrVector<Value *>>, 4>
       UnswitchCandidates;
   for (auto *BB : L.blocks()) {
     if (LI.getLoopFor(BB) != &L)
@@ -2299,7 +2298,7 @@ unswitchBestCondition(Loop &L, DominatorTree &DT, LoopInfo &LI,
   SmallDenseMap<DomTreeNode *, int, 4> DTCostMap;
   // Given a terminator which might be unswitched, computes the non-duplicated
   // cost for that terminator.
-  auto ComputeUnswitchedCost = [&](TerminatorInst &TI, bool FullUnswitch) {
+  auto ComputeUnswitchedCost = [&](Instruction &TI, bool FullUnswitch) {
     BasicBlock &BB = *TI.getParent();
     SmallPtrSet<BasicBlock *, 4> Visited;
 
@@ -2350,11 +2349,11 @@ unswitchBestCondition(Loop &L, DominatorTree &DT, LoopInfo &LI,
            "Cannot unswitch a condition without multiple distinct successors!");
     return Cost * (Visited.size() - 1);
   };
-  TerminatorInst *BestUnswitchTI = nullptr;
+  Instruction *BestUnswitchTI = nullptr;
   int BestUnswitchCost;
   ArrayRef<Value *> BestUnswitchInvariants;
   for (auto &TerminatorAndInvariants : UnswitchCandidates) {
-    TerminatorInst &TI = *TerminatorAndInvariants.first;
+    Instruction &TI = *TerminatorAndInvariants.first;
     ArrayRef<Value *> Invariants = TerminatorAndInvariants.second;
     BranchInst *BI = dyn_cast<BranchInst>(&TI);
     int CandidateCost = ComputeUnswitchedCost(

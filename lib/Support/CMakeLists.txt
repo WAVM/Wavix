@@ -122,6 +122,7 @@ add_llvm_library(LLVMSupport
   StringPool.cpp
   StringSaver.cpp
   StringRef.cpp
+  SymbolRemappingReader.cpp
   SystemUtils.cpp
   TarWriter.cpp
   TargetParser.cpp
@@ -134,6 +135,7 @@ add_llvm_library(LLVMSupport
   Unicode.cpp
   UnicodeCaseFold.cpp
   VersionTuple.cpp
+  VirtualFileSystem.cpp
   WithColor.cpp
   YAMLParser.cpp
   YAMLTraits.cpp

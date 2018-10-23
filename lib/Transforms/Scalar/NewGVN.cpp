@@ -777,7 +777,7 @@ private:
 
   // Reachability handling.
   void updateReachableEdge(BasicBlock *, BasicBlock *);
-  void processOutgoingEdges(TerminatorInst *, BasicBlock *);
+  void processOutgoingEdges(Instruction *, BasicBlock *);
   Value *findConditionEquivalence(Value *) const;
 
   // Elimination.
@@ -959,8 +959,7 @@ static bool isCopyOfAPHI(const Value *V) {
 // order. The BlockInstRange numbers are generated in an RPO walk of the basic
 // blocks.
 void NewGVN::sortPHIOps(MutableArrayRef<ValPair> Ops) const {
-  llvm::sort(Ops.begin(), Ops.end(),
-             [&](const ValPair &P1, const ValPair &P2) {
+  llvm::sort(Ops, [&](const ValPair &P1, const ValPair &P2) {
     return BlockInstRange.lookup(P1.second).first <
            BlockInstRange.lookup(P2.second).first;
   });
@@ -2484,7 +2483,7 @@ Value *NewGVN::findConditionEquivalence(Value *Cond) const {
 }
 
 // Process the outgoing edges of a block for reachability.
-void NewGVN::processOutgoingEdges(TerminatorInst *TI, BasicBlock *B) {
+void NewGVN::processOutgoingEdges(Instruction *TI, BasicBlock *B) {
   // Evaluate reachability of terminator instruction.
   BranchInst *BR;
   if ((BR = dyn_cast<BranchInst>(TI)) && BR->isConditional()) {
@@ -3134,7 +3133,7 @@ void NewGVN::valueNumberInstruction(Instruction *I) {
       auto *Symbolized = createUnknownExpression(I);
       performCongruenceFinding(I, Symbolized);
     }
-    processOutgoingEdges(dyn_cast<TerminatorInst>(I), I->getParent());
+    processOutgoingEdges(I, I->getParent());
   }
 }
 
@@ -3955,7 +3954,7 @@ bool NewGVN::eliminateInstructions(Function &F) {
         convertClassToDFSOrdered(*CC, DFSOrderedSet, UseCounts, ProbablyDead);
 
         // Sort the whole thing.
-        llvm::sort(DFSOrderedSet.begin(), DFSOrderedSet.end());
+        llvm::sort(DFSOrderedSet);
         for (auto &VD : DFSOrderedSet) {
           int MemberDFSIn = VD.DFSIn;
           int MemberDFSOut = VD.DFSOut;
@@ -4118,7 +4117,7 @@ bool NewGVN::eliminateInstructions(Function &F) {
     // If we have possible dead stores to look at, try to eliminate them.
     if (CC->getStoreCount() > 0) {
       convertClassToLoadsAndStores(*CC, PossibleDeadStores);
-      llvm::sort(PossibleDeadStores.begin(), PossibleDeadStores.end());
+      llvm::sort(PossibleDeadStores);
       ValueDFSStack EliminationStack;
       for (auto &VD : PossibleDeadStores) {
         int MemberDFSIn = VD.DFSIn;

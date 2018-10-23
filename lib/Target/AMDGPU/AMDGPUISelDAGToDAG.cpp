@@ -102,6 +102,7 @@ private:
   bool isNoNanSrc(SDValue N) const;
   bool isInlineImmediate(const SDNode *N) const;
   bool isVGPRImm(const SDNode *N) const;
+  bool isUniformLoad(const SDNode *N) const;
   bool isUniformBr(const SDNode *N) const;
 
   MachineSDNode *buildSMovImm64(SDLoc &DL, uint64_t Val, EVT VT) const;
@@ -140,9 +141,6 @@ private:
                          SDValue &Offset, SDValue &SLC) const;
   bool SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc, SDValue &Soffset,
                          SDValue &Offset) const;
-  bool SelectMUBUFConstant(SDValue Constant,
-                           SDValue &SOffset,
-                           SDValue &ImmOffset) const;
 
   bool SelectFlatAtomic(SDValue Addr, SDValue &VAddr,
                         SDValue &Offset, SDValue &SLC) const;
@@ -244,12 +242,12 @@ protected:
 
 }  // end anonymous namespace
 
-INITIALIZE_PASS_BEGIN(AMDGPUDAGToDAGISel, "isel",
+INITIALIZE_PASS_BEGIN(AMDGPUDAGToDAGISel, "amdgpu-isel",
                       "AMDGPU DAG->DAG Pattern Instruction Selection", false, false)
 INITIALIZE_PASS_DEPENDENCY(AMDGPUArgumentUsageInfo)
 INITIALIZE_PASS_DEPENDENCY(AMDGPUPerfHintAnalysis)
 INITIALIZE_PASS_DEPENDENCY(LegacyDivergenceAnalysis)
-INITIALIZE_PASS_END(AMDGPUDAGToDAGISel, "isel",
+INITIALIZE_PASS_END(AMDGPUDAGToDAGISel, "amdgpu-isel",
                     "AMDGPU DAG->DAG Pattern Instruction Selection", false, false)
 
 /// This pass converts a legalized DAG into a AMDGPU-specific
@@ -980,8 +978,6 @@ bool AMDGPUDAGToDAGISel::SelectDS64Bit4ByteAligned(SDValue Addr, SDValue &Base,
 
   // default case
 
-  // FIXME: This is broken on SI where we still need to check if the base
-  // pointer is positive here.
   Base = Addr;
   Offset0 = CurDAG->getTargetConstant(0, DL, MVT::i8);
   Offset1 = CurDAG->getTargetConstant(1, DL, MVT::i8);
@@ -1278,25 +1274,6 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc,
   SDValue GLC, TFE;
 
   return SelectMUBUFOffset(Addr, SRsrc, Soffset, Offset, GLC, SLC, TFE);
-}
-
-bool AMDGPUDAGToDAGISel::SelectMUBUFConstant(SDValue Constant,
-                                             SDValue &SOffset,
-                                             SDValue &ImmOffset) const {
-  SDLoc DL(Constant);
-  uint32_t Imm = cast<ConstantSDNode>(Constant)->getZExtValue();
-  uint32_t Overflow;
-  if (!AMDGPU::splitMUBUFOffset(Imm, Overflow, Imm, Subtarget))
-    return false;
-  ImmOffset = CurDAG->getTargetConstant(Imm, DL, MVT::i16);
-  if (Overflow <= 64)
-    SOffset = CurDAG->getTargetConstant(Overflow, DL, MVT::i32);
-  else
-    SOffset = SDValue(CurDAG->getMachineNode(AMDGPU::S_MOV_B32, DL, MVT::i32,
-                      CurDAG->getTargetConstant(Overflow, DL, MVT::i32)),
-                      0);
-
-  return true;
 }
 
 template <bool IsSigned>
@@ -2117,6 +2094,30 @@ bool AMDGPUDAGToDAGISel::isVGPRImm(const SDNode * N) const {
   return !AllUsesAcceptSReg && (Limit < 10);
 }
 
+bool AMDGPUDAGToDAGISel::isUniformLoad(const SDNode * N) const {
+  auto Ld = cast<LoadSDNode>(N);
+
+  return Ld->getAlignment() >= 4 &&
+        (
+          (
+            (
+              Ld->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS       ||
+              Ld->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS_32BIT
+            )
+            &&
+            !N->isDivergent()
+          )
+          ||
+          (
+            Subtarget->getScalarizeGlobalBehavior() &&
+            Ld->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS &&
+            !Ld->isVolatile() &&
+            !N->isDivergent() &&
+            static_cast<const SITargetLowering *>(
+              getTargetLowering())->isMemOpHasNoClobberedMemOperand(N)
+          )
+        );
+}
 
 void AMDGPUDAGToDAGISel::PostprocessISelDAG() {
   const AMDGPUTargetLowering& Lowering =

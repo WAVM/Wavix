@@ -29,6 +29,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
+#include "llvm/IR/PassTimingInfo.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/LTO/LTO.h"
@@ -950,11 +951,15 @@ void ThinLTOCodeGenerator::run() {
   // Changes are made in the index, consumed in the ThinLTO backends.
   internalizeAndPromoteInIndex(ExportLists, GUIDPreservedSymbols, *Index);
 
-  // Make sure that every module has an entry in the ExportLists and
-  // ResolvedODR maps to enable threaded access to these maps below.
-  for (auto &DefinedGVSummaries : ModuleToDefinedGVSummaries) {
-    ExportLists[DefinedGVSummaries.first()];
-    ResolvedODR[DefinedGVSummaries.first()];
+  // Make sure that every module has an entry in the ExportLists, ImportList,
+  // GVSummary and ResolvedODR maps to enable threaded access to these maps
+  // below.
+  for (auto &Module : Modules) {
+    auto ModuleIdentifier = Module.getBufferIdentifier();
+    ExportLists[ModuleIdentifier];
+    ImportLists[ModuleIdentifier];
+    ResolvedODR[ModuleIdentifier];
+    ModuleToDefinedGVSummaries[ModuleIdentifier];
   }
 
   // Compute the ordering we will process the inputs: the rough heuristic here
@@ -963,12 +968,11 @@ void ThinLTOCodeGenerator::run() {
   std::vector<int> ModulesOrdering;
   ModulesOrdering.resize(Modules.size());
   std::iota(ModulesOrdering.begin(), ModulesOrdering.end(), 0);
-  llvm::sort(ModulesOrdering.begin(), ModulesOrdering.end(),
-             [&](int LeftIndex, int RightIndex) {
-               auto LSize = Modules[LeftIndex].getBuffer().size();
-               auto RSize = Modules[RightIndex].getBuffer().size();
-               return LSize > RSize;
-             });
+  llvm::sort(ModulesOrdering, [&](int LeftIndex, int RightIndex) {
+    auto LSize = Modules[LeftIndex].getBuffer().size();
+    auto RSize = Modules[RightIndex].getBuffer().size();
+    return LSize > RSize;
+  });
 
   // Parallel optimizer + codegen
   {

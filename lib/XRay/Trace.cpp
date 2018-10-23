@@ -289,16 +289,15 @@ Error loadFDRLog(StringRef Data, bool IsLittleEndian,
 
   // Then we verify the consistency of the blocks.
   {
-    BlockVerifier Verifier;
     for (auto &PTB : Index) {
       auto &Blocks = PTB.second;
       for (auto &B : Blocks) {
+        BlockVerifier Verifier;
         for (auto *R : B.Records)
           if (auto E = R->apply(Verifier))
             return E;
         if (auto E = Verifier.verify())
           return E;
-        Verifier.reset();
       }
     }
   }
@@ -312,7 +311,7 @@ Error loadFDRLog(StringRef Data, bool IsLittleEndian,
     for (auto &PTB : Index) {
       auto &Blocks = PTB.second;
       llvm::sort(
-          Blocks.begin(), Blocks.end(),
+          Blocks,
           [](const BlockIndexer::Block &L, const BlockIndexer::Block &R) {
             return (L.WallclockTime->seconds() < R.WallclockTime->seconds() &&
                     L.WallclockTime->nanos() < R.WallclockTime->nanos());

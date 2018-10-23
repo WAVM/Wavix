@@ -15,6 +15,7 @@
 #ifndef LLVM_TOOLS_LLVM_EXEGESIS_LLVMSTATE_H
 #define LLVM_TOOLS_LLVM_EXEGESIS_LLVMSTATE_H
 
+#include "RegisterAliasing.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -24,6 +25,7 @@
 #include <memory>
 #include <string>
 
+namespace llvm {
 namespace exegesis {
 
 class ExegesisTarget;
@@ -54,12 +56,15 @@ public:
   const llvm::MCSubtargetInfo &getSubtargetInfo() const {
     return *TargetMachine->getMCSubtargetInfo();
   }
+  const RegisterAliasingTrackerCache &getRATC() const { return *RATC; }
 
 private:
   const ExegesisTarget *TheExegesisTarget;
   std::unique_ptr<const llvm::TargetMachine> TargetMachine;
+  std::unique_ptr<const RegisterAliasingTrackerCache> RATC;
 };
 
 } // namespace exegesis
+} // namespace llvm
 
 #endif // LLVM_TOOLS_LLVM_EXEGESIS_LLVMSTATE_H

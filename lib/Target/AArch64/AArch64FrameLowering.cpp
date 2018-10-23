@@ -356,7 +356,7 @@ static unsigned findScratchNonCalleeSaveRegister(MachineBasicBlock *MBB) {
   LiveRegs.addLiveIns(*MBB);
 
   // Mark callee saved registers as used so we will not choose them.
-  const MCPhysReg *CSRegs = TRI.getCalleeSavedRegs(MF);
+  const MCPhysReg *CSRegs = MF->getRegInfo().getCalleeSavedRegs();
   for (unsigned i = 0; CSRegs[i]; ++i)
     LiveRegs.addReg(CSRegs[i]);
 
@@ -927,7 +927,8 @@ void AArch64FrameLowering::emitEpilogue(MachineFunction &MF,
     DL = MBBI->getDebugLoc();
     unsigned RetOpcode = MBBI->getOpcode();
     IsTailCallReturn = RetOpcode == AArch64::TCRETURNdi ||
-      RetOpcode == AArch64::TCRETURNri;
+                       RetOpcode == AArch64::TCRETURNri ||
+                       RetOpcode == AArch64::TCRETURNriBTI;
   }
   int NumBytes = MFI.getStackSize();
   const AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
@@ -1541,7 +1542,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
   unsigned UnspilledCSGPRPaired = AArch64::NoRegister;
 
   MachineFrameInfo &MFI = MF.getFrameInfo();
-  const MCPhysReg *CSRegs = RegInfo->getCalleeSavedRegs(&MF);
+  const MCPhysReg *CSRegs = MF.getRegInfo().getCalleeSavedRegs();
 
   unsigned BasePointerReg = RegInfo->hasBasePointer(MF)
                                 ? RegInfo->getBaseRegister()

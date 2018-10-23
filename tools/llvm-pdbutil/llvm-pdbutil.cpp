@@ -70,6 +70,8 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolPublicSymbol.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolThunk.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeEnum.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionArg.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionSig.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeTypedef.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeUDT.h"
 #include "llvm/Support/BinaryByteStream.h"
@@ -165,13 +167,38 @@ cl::list<std::string> InputFilenames(cl::Positional,
 cl::opt<bool> Native("native", cl::desc("Use native PDB reader instead of DIA"),
                      cl::sub(DiaDumpSubcommand));
 
+static cl::opt<bool>
+    ShowClassHierarchy("hierarchy", cl::desc("Show lexical and class parents"),
+                       cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> NoSymIndexIds(
+    "no-ids",
+    cl::desc("Don't show any SymIndexId fields (overrides -hierarchy)"),
+    cl::sub(DiaDumpSubcommand));
+
+static cl::opt<bool>
+    Recurse("recurse",
+            cl::desc("When dumping a SymIndexId, dump the full details of the "
+                     "corresponding record"),
+            cl::sub(DiaDumpSubcommand));
+
 static cl::opt<bool> Enums("enums", cl::desc("Dump enum types"),
                            cl::sub(DiaDumpSubcommand));
 static cl::opt<bool> Pointers("pointers", cl::desc("Dump enum types"),
                               cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> UDTs("udts", cl::desc("Dump udt types"),
+                          cl::sub(DiaDumpSubcommand));
 static cl::opt<bool> Compilands("compilands",
                                 cl::desc("Dump compiland information"),
                                 cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Funcsigs("funcsigs",
+                              cl::desc("Dump function signature information"),
+                              cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Arrays("arrays", cl::desc("Dump array types"),
+                            cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> VTShapes("vtshapes", cl::desc("Dump virtual table shapes"),
+                              cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Typedefs("typedefs", cl::desc("Dump typedefs"),
+                              cl::sub(DiaDumpSubcommand));
 } // namespace diadump
 
 namespace pretty {
@@ -220,6 +247,15 @@ cl::opt<bool> Enums("enums", cl::desc("Display enum types"),
                     cl::cat(TypeCategory), cl::sub(PrettySubcommand));
 cl::opt<bool> Typedefs("typedefs", cl::desc("Display typedef types"),
                        cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> Funcsigs("funcsigs", cl::desc("Display function signatures"),
+                       cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> Pointers("pointers", cl::desc("Display pointer types"),
+                       cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> Arrays("arrays", cl::desc("Display arrays"),
+                     cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> VTShapes("vtshapes", cl::desc("Display vftable shapes"),
+                       cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+
 cl::opt<SymbolSortMode> SymbolOrder(
     "symbol-order", cl::desc("symbol sort order"),
     cl::init(SymbolSortMode::None),
@@ -451,6 +487,12 @@ cl::opt<bool> DumpTypeExtras("type-extras",
                              cl::desc("dump type hashes and index offsets"),
                              cl::cat(TypeOptions), cl::sub(DumpSubcommand));
 
+cl::opt<bool> DontResolveForwardRefs(
+    "dont-resolve-forward-refs",
+    cl::desc("When dumping type records for classes, unions, enums, and "
+             "structs, don't try to resolve forward references"),
+    cl::cat(TypeOptions), cl::sub(DumpSubcommand));
+
 cl::list<uint32_t> DumpTypeIndex(
     "type-index", cl::ZeroOrMore, cl::CommaSeparated,
     cl::desc("only dump types with the specified hexadecimal type index"),
@@ -484,6 +526,11 @@ cl::opt<bool> DumpGlobals("globals", cl::desc("dump Globals symbol records"),
                           cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
 cl::opt<bool> DumpGlobalExtras("global-extras", cl::desc("dump Globals hashes"),
                                cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
+cl::list<std::string> DumpGlobalNames(
+    "global-name",
+    cl::desc(
+        "With -globals, only dump globals whose name matches the given value"),
+    cl::cat(SymbolOptions), cl::sub(DumpSubcommand), cl::ZeroOrMore);
 cl::opt<bool> DumpPublics("publics", cl::desc("dump Publics stream data"),
                           cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
 cl::opt<bool> DumpPublicExtras("public-extras",
@@ -803,7 +850,8 @@ static void yamlToPdb(StringRef Path) {
 
   Builder.getStringTableBuilder().setStrings(*Strings.strings());
 
-  ExitOnErr(Builder.commit(opts::yaml2pdb::YamlPdbOutputFile));
+  codeview::GUID IgnoredOutGuid;
+  ExitOnErr(Builder.commit(opts::yaml2pdb::YamlPdbOutputFile, &IgnoredOutGuid));
 }
 
 static PDBFile &loadPDB(StringRef Path, std::unique_ptr<IPDBSession> &Session) {
@@ -946,6 +994,21 @@ static void dumpInjectedSources(LinePrinter &Printer, IPDBSession &Session) {
   }
 }
 
+template <typename OuterT, typename ChildT>
+void diaDumpChildren(PDBSymbol &Outer, PdbSymbolIdField Ids,
+                     PdbSymbolIdField Recurse) {
+  OuterT *ConcreteOuter = dyn_cast<OuterT>(&Outer);
+  if (!ConcreteOuter)
+    return;
+
+  auto Children = ConcreteOuter->template findAllChildren<ChildT>();
+  while (auto Child = Children->getNext()) {
+    outs() << "  {";
+    Child->defaultDump(outs(), 4, Ids, Recurse);
+    outs() << "\n  }\n";
+  }
+}
+
 static void dumpDia(StringRef Path) {
   std::unique_ptr<IPDBSession> Session;
 
@@ -963,12 +1026,32 @@ static void dumpDia(StringRef Path) {
     SymTypes.push_back(PDB_SymType::Enum);
   if (opts::diadump::Pointers)
     SymTypes.push_back(PDB_SymType::PointerType);
+  if (opts::diadump::UDTs)
+    SymTypes.push_back(PDB_SymType::UDT);
+  if (opts::diadump::Funcsigs)
+    SymTypes.push_back(PDB_SymType::FunctionSig);
+  if (opts::diadump::Arrays)
+    SymTypes.push_back(PDB_SymType::ArrayType);
+  if (opts::diadump::VTShapes)
+    SymTypes.push_back(PDB_SymType::VTableShape);
+  if (opts::diadump::Typedefs)
+    SymTypes.push_back(PDB_SymType::Typedef);
+  PdbSymbolIdField Ids = opts::diadump::NoSymIndexIds ? PdbSymbolIdField::None
+                                                      : PdbSymbolIdField::All;
+
+  PdbSymbolIdField Recurse = PdbSymbolIdField::None;
+  if (opts::diadump::Recurse)
+    Recurse = PdbSymbolIdField::All;
+  if (!opts::diadump::ShowClassHierarchy)
+    Ids &= ~(PdbSymbolIdField::ClassParent | PdbSymbolIdField::LexicalParent);
 
   for (PDB_SymType ST : SymTypes) {
     auto Children = GlobalScope->findAllChildren(ST);
     while (auto Child = Children->getNext()) {
       outs() << "{";
-      Child->defaultDump(outs(), 2);
+      Child->defaultDump(outs(), 2, Ids, Recurse);
+
+      diaDumpChildren<PDBSymbolTypeEnum, PDBSymbolData>(*Child, Ids, Recurse);
       outs() << "\n}\n";
     }
   }
@@ -1119,7 +1202,9 @@ static void dumpPretty(StringRef Path) {
     }
   }
 
-  if (opts::pretty::Classes || opts::pretty::Enums || opts::pretty::Typedefs) {
+  if (opts::pretty::Classes || opts::pretty::Enums || opts::pretty::Typedefs ||
+      opts::pretty::Funcsigs || opts::pretty::Pointers ||
+      opts::pretty::Arrays || opts::pretty::VTShapes) {
     Printer.NewLine();
     WithColor(Printer, PDB_ColorItem::SectionHeader).get() << "---TYPES---";
     Printer.Indent();
@@ -1156,8 +1241,7 @@ static void dumpPretty(StringRef Path) {
           std::vector<std::unique_ptr<PDBSymbolFunc>> Funcs;
           while (auto Func = Functions->getNext())
             Funcs.push_back(std::move(Func));
-          llvm::sort(Funcs.begin(), Funcs.end(),
-                     opts::pretty::compareFunctionSymbols);
+          llvm::sort(Funcs, opts::pretty::compareFunctionSymbols);
           for (const auto &Func : Funcs) {
             Printer.NewLine();
             Dumper.start(*Func, FunctionDumper::PointerType::None);
@@ -1175,8 +1259,7 @@ static void dumpPretty(StringRef Path) {
           std::vector<std::unique_ptr<PDBSymbolData>> Datas;
           while (auto Var = Vars->getNext())
             Datas.push_back(std::move(Var));
-          llvm::sort(Datas.begin(), Datas.end(),
-                     opts::pretty::compareDataSymbols);
+          llvm::sort(Datas, opts::pretty::compareDataSymbols);
           for (const auto &Var : Datas)
             Dumper.start(*Var);
         }
@@ -1214,6 +1297,7 @@ static void dumpPretty(StringRef Path) {
       dumpInjectedSources(Printer, *Session);
   }
 
+  Printer.NewLine();
   outs().flush();
 }
 
@@ -1263,7 +1347,9 @@ static void mergePdbs() {
     OutFile = opts::merge::InputFilenames[0];
     llvm::sys::path::replace_extension(OutFile, "merged.pdb");
   }
-  ExitOnErr(Builder.commit(OutFile));
+
+  codeview::GUID IgnoredOutGuid;
+  ExitOnErr(Builder.commit(OutFile, &IgnoredOutGuid));
 }
 
 static void explain() {
@@ -1456,6 +1542,8 @@ int main(int Argc, const char **Argv) {
       opts::pretty::Classes = true;
       opts::pretty::Typedefs = true;
       opts::pretty::Enums = true;
+      opts::pretty::Pointers = true;
+      opts::pretty::Funcsigs = true;
     }
 
     // When adding filters for excluded compilands and types, we need to

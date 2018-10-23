@@ -453,6 +453,14 @@ def int_maxnum : Intrinsic<[llvm_anyfloat_ty],
   [LLVMMatchType<0>, LLVMMatchType<0>],
   [IntrNoMem, IntrSpeculatable, Commutative]
 >;
+def int_minimum : Intrinsic<[llvm_anyfloat_ty],
+  [LLVMMatchType<0>, LLVMMatchType<0>],
+  [IntrNoMem, IntrSpeculatable, Commutative]
+>;
+def int_maximum : Intrinsic<[llvm_anyfloat_ty],
+  [LLVMMatchType<0>, LLVMMatchType<0>],
+  [IntrNoMem, IntrSpeculatable, Commutative]
+>;
 
 // NOTE: these are internal interfaces.
 def int_setjmp     : Intrinsic<[llvm_i32_ty],  [llvm_ptr_ty]>;
@@ -699,6 +707,15 @@ def int_smul_with_overflow : Intrinsic<[llvm_anyint_ty, llvm_i1_ty],
 def int_umul_with_overflow : Intrinsic<[llvm_anyint_ty, llvm_i1_ty],
                                        [LLVMMatchType<0>, LLVMMatchType<0>],
                                        [IntrNoMem, IntrSpeculatable]>;
+
+//===------------------------- Fixed Point Intrinsics ---------------------===//
+//
+def int_sadd_sat : Intrinsic<[llvm_anyint_ty],
+                             [LLVMMatchType<0>, LLVMMatchType<0>],
+                             [IntrNoMem, IntrSpeculatable, Commutative]>;
+def int_uadd_sat : Intrinsic<[llvm_anyint_ty],
+                             [LLVMMatchType<0>, LLVMMatchType<0>],
+                             [IntrNoMem, IntrSpeculatable, Commutative]>;
 
 //===------------------------- Memory Use Markers -------------------------===//
 //
@@ -1008,3 +1025,4 @@ include "llvm/IR/IntrinsicsAMDGPU.td"
 include "llvm/IR/IntrinsicsBPF.td"
 include "llvm/IR/IntrinsicsSystemZ.td"
 include "llvm/IR/IntrinsicsWebAssembly.td"
+include "llvm/IR/IntrinsicsRISCV.td"

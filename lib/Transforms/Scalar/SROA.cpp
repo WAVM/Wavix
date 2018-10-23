@@ -1060,7 +1060,7 @@ AllocaSlices::AllocaSlices(const DataLayout &DL, AllocaInst &AI)
 
   // Sort the uses. This arranges for the offsets to be in ascending order,
   // and the sizes to be in descending order.
-  llvm::sort(Slices.begin(), Slices.end());
+  llvm::sort(Slices);
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -1211,7 +1211,7 @@ static bool isSafePHIToSpeculate(PHINode &PN) {
   // predecessor blocks. The only thing to watch out for is that we can't put
   // a possibly trapping load in the predecessor if it is a critical edge.
   for (unsigned Idx = 0, Num = PN.getNumIncomingValues(); Idx != Num; ++Idx) {
-    TerminatorInst *TI = PN.getIncomingBlock(Idx)->getTerminator();
+    Instruction *TI = PN.getIncomingBlock(Idx)->getTerminator();
     Value *InVal = PN.getIncomingValue(Idx);
 
     // If the value is produced by the terminator of the predecessor (an
@@ -1275,7 +1275,7 @@ static void speculatePHINodeLoads(PHINode &PN) {
       continue;
     }
 
-    TerminatorInst *TI = Pred->getTerminator();
+    Instruction *TI = Pred->getTerminator();
     IRBuilderTy PredBuilder(TI);
 
     LoadInst *Load = PredBuilder.CreateLoad(
@@ -1906,7 +1906,7 @@ static VectorType *isVectorPromotionViable(Partition &P, const DataLayout &DL) {
              "All non-integer types eliminated!");
       return RHSTy->getNumElements() < LHSTy->getNumElements();
     };
-    llvm::sort(CandidateTys.begin(), CandidateTys.end(), RankVectorTypes);
+    llvm::sort(CandidateTys, RankVectorTypes);
     CandidateTys.erase(
         std::unique(CandidateTys.begin(), CandidateTys.end(), RankVectorTypes),
         CandidateTys.end());
@@ -4221,7 +4221,7 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
   }
 
   if (!IsSorted)
-    llvm::sort(AS.begin(), AS.end());
+    llvm::sort(AS);
 
   /// Describes the allocas introduced by rewritePartition in order to migrate
   /// the debug info.
