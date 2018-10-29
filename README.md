@@ -29,7 +29,7 @@ To bootstrap Wavix, I use Ubuntu 18.04 running on the Windows Subsystem for Linu
 
 * From the `~/wavix-build` directory, run `python ~/Wavix/bootstrap/build.py`. It will probably take a while to complete.
 
-* Upon successful completion, the `~/wavix-build/bootstrap` directory will contain the bootstrap toolchain. The `~/wavix-build/sys` directory will contain the bootstrapped Wavix system: Wavix binaries for bash+coreutils, the Wavix libraries for compiler-rt, libc, and libc++, and the headers for the same. To compile a C++ file to a Wavix binary, you can run `~/wavix-build/bootstrap/bin/clang++ -target wasm32-unknown-wavix --sysroot ~/wavix-build/sys a.cpp`.
+* Upon successful completion, the `~/wavix-build/host` directory will contain the host toolchain. The `~/wavix-build/sys` directory will contain the bootstrapped Wavix system: Wavix binaries for bash+coreutils, the Wavix libraries for compiler-rt, libc, and libc++, and the headers for the same. To compile a C++ file to a Wavix binary, you can run `~/wavix-build/host/bin/clang++ -target wasm32-unknown-wavix --sysroot ~/wavix-build/sys a.cpp`.
 
 The bootstrap process will also work on Windows (without the Windows Subsystem for Linux) to compile the compiler, runtime libraries, and WAVM, but not to compile bash+coreutils.
 
@@ -45,14 +45,14 @@ docker build -t wavix .
 docker run -it wavix /bin/bash
 
 # Run the wavix bash binary
-/build/bootstrap/bin/wavix --sysroot /build/sys /build/sys/bin/bash
+/build/host/bin/wavix --sysroot /build/sys /build/sys/bin/bash
 ```
 
 # Running Wavix
 
-To run a Wavix binary, use the command `~/wavix-build/bootstrap/bin/wavix --sysroot ~/wavix-build/sys <binary>`.
+To run a Wavix binary, use the command `~/wavix-build/host/bin/wavix --sysroot ~/wavix-build/sys <binary>`.
 
-For example: `~/wavix-build/bootstrap/bin/wavix --sysroot ~/wavix-build/sys ~/wavix-build/sys/bin/bash`
+For example: `~/wavix-build/host/bin/wavix --sysroot ~/wavix-build/sys ~/wavix-build/sys/bin/bash`
 
 # Status
 
