@@ -1,5 +1,6 @@
 #pragma once
 
+#include "WAVM/Inline/Assert.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Platform/Defines.h"
 
@@ -19,16 +20,15 @@ namespace WAVM { namespace Platform {
 		PLATFORM_API void lock();
 		PLATFORM_API void unlock();
 
+#if WAVM_DEBUG || WAVM_ENABLE_RELEASE_ASSERTS
+		PLATFORM_API bool isLockedByCurrentThread();
+#endif
+
 	private:
 #ifdef WIN32
 		struct CriticalSection
 		{
-			struct _RTL_CRITICAL_SECTION_DEBUG* debugInfo;
-			I32 lockCount;
-			I32 recursionCount;
-			void* owningThreadHandle;
-			void* lockSemaphoreHandle;
-			Uptr spinCount;
+			Uptr data[5];
 		} criticalSection;
 #elif defined(__linux__)
 		struct PthreadMutex
@@ -48,5 +48,15 @@ namespace WAVM { namespace Platform {
 #else
 #error unsupported platform
 #endif
+
+#if WAVM_DEBUG || WAVM_ENABLE_RELEASE_ASSERTS
+		bool isLocked;
+#endif
 	};
 }}
+
+#if WAVM_DEBUG || WAVM_ENABLE_RELEASE_ASSERTS
+#define wavmAssertMutexIsLockedByCurrentThread(mutex) wavmAssert((mutex).isLockedByCurrentThread())
+#else
+#define wavmAssertMutexIsLockedByCurrentThread(mutex) wavmAssert(&(mutex) == &(mutex))
+#endif

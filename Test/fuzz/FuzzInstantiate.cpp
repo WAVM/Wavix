@@ -26,25 +26,25 @@ using namespace WAVM::WASM;
 
 struct StubResolver : Runtime::Resolver
 {
-	Runtime::Compartment* compartment;
+	Compartment* compartment;
 
-	StubResolver(Runtime::Compartment* inCompartment) : compartment(inCompartment) {}
+	StubResolver(Compartment* inCompartment) : compartment(inCompartment) {}
 
 	bool resolve(const std::string& moduleName,
 				 const std::string& exportName,
-				 IR::ObjectType type,
+				 IR::ExternType type,
 				 Runtime::Object*& outObject) override
 	{
 		outObject = getStubObject(exportName, type);
 		return true;
 	}
 
-	Runtime::Object* getStubObject(const std::string& exportName, IR::ObjectType type) const
+	Runtime::Object* getStubObject(const std::string& exportName, IR::ExternType type) const
 	{
 		// If the import couldn't be resolved, stub it in.
 		switch(type.kind)
 		{
-		case IR::ObjectKind::function:
+		case IR::ExternKind::function:
 		{
 			// Generate a function body that just uses the unreachable op to fault if called.
 			Serialization::ArrayOutputStream codeStream;
@@ -71,7 +71,7 @@ struct StubResolver : Runtime::Resolver
 			IR::DisassemblyNames stubModuleNames;
 			stubModule.types.push_back(asFunctionType(type));
 			stubModule.functions.defs.push_back({{0}, {}, std::move(codeStream.getBytes()), {}});
-			stubModule.exports.push_back({"importStub", IR::ObjectKind::function, 0});
+			stubModule.exports.push_back({"importStub", IR::ExternKind::function, 0});
 			stubModuleNames.functions.push_back({"importStub: " + exportName, {}, {}});
 			IR::setDisassemblyNames(stubModule, stubModuleNames);
 			IR::validatePreCodeSections(stubModule);
@@ -83,27 +83,27 @@ struct StubResolver : Runtime::Resolver
 				compartment, Runtime::compileModule(stubModule), {}, "importStub");
 			return getInstanceExport(stubModuleInstance, "importStub");
 		}
-		case IR::ObjectKind::memory:
+		case IR::ExternKind::memory:
 		{
 			return asObject(
 				Runtime::createMemory(compartment, asMemoryType(type), std::string(exportName)));
 		}
-		case IR::ObjectKind::table:
+		case IR::ExternKind::table:
 		{
 			return asObject(
 				Runtime::createTable(compartment, asTableType(type), std::string(exportName)));
 		}
-		case IR::ObjectKind::global:
+		case IR::ExternKind::global:
 		{
 			return asObject(Runtime::createGlobal(
 				compartment,
 				asGlobalType(type),
 				IR::Value(asGlobalType(type).valueType, IR::UntaggedValue())));
 		}
-		case IR::ObjectKind::exceptionType:
+		case IR::ExternKind::exceptionType:
 		{
 			return asObject(
-				Runtime::createExceptionTypeInstance(asExceptionType(type), "importStub"));
+				Runtime::createExceptionType(compartment, asExceptionType(type), "importStub"));
 		}
 		default: Errors::unreachable();
 		};
@@ -117,7 +117,7 @@ extern "C" I32 LLVMFuzzerTestOneInput(const U8* data, Uptr numBytes)
 	module.featureSpec.maxLocals = 1024;
 	if(!WASM::loadBinaryModule(data, numBytes, module, Log::debug)) { return 0; }
 
-	Compartment* compartment = createCompartment();
+	GCPointer<Compartment> compartment = createCompartment();
 	StubResolver stubResolver(compartment);
 	LinkResult linkResult = linkModule(module, stubResolver);
 	if(linkResult.success)
@@ -130,9 +130,8 @@ extern "C" I32 LLVMFuzzerTestOneInput(const U8* data, Uptr numBytes)
 								  "fuzz");
 			},
 			[&](Exception&& exception) {});
-
-		collectGarbage();
 	}
+	errorUnless(tryCollectCompartment(std::move(compartment)));
 
 	return 0;
 }

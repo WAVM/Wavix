@@ -7,6 +7,7 @@
 #include "WAVM/Inline/HashSet.h"
 #include "WAVM/Inline/IndexMap.h"
 #include "WAVM/LLVMJIT/LLVMJIT.h"
+#include "WAVM/Platform/Defines.h"
 #include "WAVM/Platform/Mutex.h"
 #include "WAVM/Runtime/Intrinsics.h"
 #include "WAVM/Runtime/Runtime.h"
@@ -21,301 +22,239 @@ namespace WAVM { namespace Intrinsics {
 }}
 
 namespace WAVM { namespace Runtime {
-	enum class CallingConvention;
-}}
 
-namespace WAVM { namespace Runtime {
-	// A private root for all runtime objects that handles garbage collection.
-	struct ObjectImpl : Object
+	// A private base class for all runtime objects that are garbage collected.
+	struct GCObject : Object
 	{
+		Compartment* const compartment;
 		std::atomic<Uptr> numRootReferences;
 
-		ObjectImpl(ObjectKind inKind);
-
-		// Called on all objects that are about to be deleted before any of them are deleted.
-		virtual void finalize() {}
-
-		virtual const AnyReferee* getAnyRef() const = 0;
-	};
-
-	struct ObjectImplWithAnyRef : ObjectImpl
-	{
-		ObjectImplWithAnyRef(ObjectKind inKind) : ObjectImpl(inKind), anyRef{this} {}
-
-		virtual const AnyReferee* getAnyRef() const override { return &anyRef; }
-
-	private:
-		AnyReferee anyRef;
-	};
-
-	// An instance of a function: a function defined in an instantiated module, or an intrinsic
-	// function.
-	struct FunctionInstance : ObjectImpl
-	{
-		ModuleInstance* moduleInstance;
-		IR::FunctionType type;
-		void* nativeFunction;
-		IR::CallingConvention callingConvention;
-		std::string debugName;
-
-		FunctionInstance(ModuleInstance* inModuleInstance,
-						 IR::FunctionType inType,
-						 void* inNativeFunction,
-						 IR::CallingConvention inCallingConvention,
-						 std::string&& inDebugName)
-		: ObjectImpl(ObjectKind::function)
-		, moduleInstance(inModuleInstance)
-		, type(inType)
-		, nativeFunction(inNativeFunction)
-		, callingConvention(inCallingConvention)
-		, debugName(std::move(inDebugName))
-		{
-		}
-
-		virtual const AnyReferee* getAnyRef() const override { return &asAnyFunc(this)->anyRef; }
+		GCObject(ObjectKind inKind, Compartment* inCompartment);
+		virtual ~GCObject() { wavmAssert(numRootReferences.load(std::memory_order_acquire) == 0); }
 	};
 
 	// An instance of a WebAssembly Table.
-	struct TableInstance : ObjectImplWithAnyRef
+	struct Table : GCObject
 	{
 		struct Element
 		{
 			std::atomic<Uptr> biasedValue;
 		};
 
-		Compartment* const compartment;
-		Uptr id;
+		Uptr id = UINTPTR_MAX;
 		const IR::TableType type;
 		std::string debugName;
 
-		Element* elements;
-		Uptr numReservedBytes;
-		Uptr numReservedElements;
+		Element* elements = nullptr;
+		Uptr numReservedBytes = 0;
+		Uptr numReservedElements = 0;
 
-		Platform::Mutex resizingMutex;
-		std::atomic<Uptr> numElements;
+		mutable Platform::Mutex resizingMutex;
+		std::atomic<Uptr> numElements{0};
 
-		TableInstance(Compartment* inCompartment,
-					  const IR::TableType& inType,
-					  std::string&& inDebugName)
-		: ObjectImplWithAnyRef(ObjectKind::table)
-		, compartment(inCompartment)
-		, id(UINTPTR_MAX)
+		Table(Compartment* inCompartment, const IR::TableType& inType, std::string&& inDebugName)
+		: GCObject(ObjectKind::table, inCompartment)
 		, type(inType)
 		, debugName(std::move(inDebugName))
-		, elements(nullptr)
-		, numReservedBytes(0)
-		, numReservedElements(0)
-		, numElements(0)
 		{
 		}
-		~TableInstance() override;
-		virtual void finalize() override;
+		~Table() override;
 	};
 
 	// This is used as a sentinel value for table elements that are out-of-bounds. The address of
-	// this AnyFunc is subtracted from every address stored in the table, so zero-initialized pages
-	// at the end of the array will, when re-adding this AnyFunc's address, point to this AnyFunc.
-	extern const AnyFunc* getOutOfBoundsAnyFunc();
-
-	// A sentinel value that is used for null values of type anyfunc.
-	extern const AnyFunc* getUninitializedAnyFunc();
+	// this Object is subtracted from every address stored in the table, so zero-initialized pages
+	// at the end of the array will, when re-adding this Function's address, point to this Object.
+	extern Object* getOutOfBoundsElement();
 
 	// An instance of a WebAssembly Memory.
-	struct MemoryInstance : ObjectImplWithAnyRef
+	struct Memory : GCObject
 	{
-		Compartment* const compartment;
-		Uptr id;
+		Uptr id = UINTPTR_MAX;
 		IR::MemoryType type;
 		std::string debugName;
 
-		U8* baseAddress;
-		Uptr numReservedBytes;
+		U8* baseAddress = nullptr;
+		Uptr numReservedBytes = 0;
 
-		Platform::Mutex resizingMutex;
-		std::atomic<Uptr> numPages;
+		mutable Platform::Mutex resizingMutex;
+		std::atomic<Uptr> numPages{0};
 
-		MemoryInstance(Compartment* inCompartment,
-					   const IR::MemoryType& inType,
-					   std::string&& inDebugName)
-		: ObjectImplWithAnyRef(ObjectKind::memory)
-		, compartment(inCompartment)
-		, id(UINTPTR_MAX)
+		Memory(Compartment* inCompartment, const IR::MemoryType& inType, std::string&& inDebugName)
+		: GCObject(ObjectKind::memory, inCompartment)
 		, type(inType)
 		, debugName(std::move(inDebugName))
-		, baseAddress(nullptr)
-		, numReservedBytes(0)
-		, numPages(0)
 		{
 		}
-		~MemoryInstance() override;
-		virtual void finalize() override;
+		~Memory() override;
 	};
 
 	// An instance of a WebAssembly global.
-	struct GlobalInstance : ObjectImplWithAnyRef
+	struct Global : GCObject
 	{
-		Compartment* const compartment;
+		Uptr id = UINTPTR_MAX;
 
 		const IR::GlobalType type;
-		const U32 mutableGlobalId;
+		const U32 mutableGlobalIndex;
 		const IR::UntaggedValue initialValue;
 
-		GlobalInstance(Compartment* inCompartment,
-					   IR::GlobalType inType,
-					   U32 inMutableGlobalId,
-					   IR::UntaggedValue inInitialValue)
-		: ObjectImplWithAnyRef(ObjectKind::global)
-		, compartment(inCompartment)
+		Global(Compartment* inCompartment,
+			   IR::GlobalType inType,
+			   U32 inMutableGlobalId,
+			   IR::UntaggedValue inInitialValue)
+		: GCObject(ObjectKind::global, inCompartment)
 		, type(inType)
-		, mutableGlobalId(inMutableGlobalId)
+		, mutableGlobalIndex(inMutableGlobalId)
 		, initialValue(inInitialValue)
 		{
 		}
-		virtual void finalize() override;
+		~Global() override;
 	};
 
 	// An instance of a WebAssembly exception type.
-	struct ExceptionTypeInstance : ObjectImplWithAnyRef
+	struct ExceptionType : GCObject
 	{
-		IR::ExceptionType type;
+		Uptr id = UINTPTR_MAX;
+
+		IR::ExceptionType sig;
 		std::string debugName;
 
-		ExceptionTypeInstance(IR::ExceptionType inType, std::string&& inDebugName)
-		: ObjectImplWithAnyRef(ObjectKind::exceptionTypeInstance)
-		, type(inType)
+		ExceptionType(Compartment* inCompartment,
+					  IR::ExceptionType inSig,
+					  std::string&& inDebugName)
+		: GCObject(ObjectKind::exceptionType, inCompartment)
+		, sig(inSig)
 		, debugName(std::move(inDebugName))
 		{
 		}
+
+		~ExceptionType() override;
 	};
 
 	// A compiled WebAssembly module.
-	struct Module : ObjectImplWithAnyRef
+	struct Module
 	{
 		IR::Module ir;
 		std::vector<U8> objectCode;
 
 		Module(IR::Module&& inIR, std::vector<U8>&& inObjectCode)
-		: ObjectImplWithAnyRef(ObjectKind::module), ir(inIR), objectCode(std::move(inObjectCode))
+		: ir(inIR), objectCode(std::move(inObjectCode))
 		{
 		}
 	};
 
+	typedef HashMap<Uptr, std::shared_ptr<std::vector<U8>>> PassiveDataSegmentMap;
+	typedef HashMap<Uptr, std::shared_ptr<std::vector<Object*>>> PassiveElemSegmentMap;
+
 	// An instance of a WebAssembly module.
-	struct ModuleInstance : ObjectImplWithAnyRef
+	struct ModuleInstance : GCObject
 	{
-		Compartment* compartment;
+		const Uptr id;
+		const std::string debugName;
 
-		HashMap<std::string, Object*> exportMap;
+		const HashMap<std::string, Object*> exportMap;
 
-		std::vector<FunctionInstance*> functionDefs;
+		const std::vector<Function*> functions;
+		const std::vector<Table*> tables;
+		const std::vector<Memory*> memories;
+		const std::vector<Global*> globals;
+		const std::vector<ExceptionType*> exceptionTypes;
 
-		std::vector<FunctionInstance*> functions;
-		std::vector<TableInstance*> tables;
-		std::vector<MemoryInstance*> memories;
-		std::vector<GlobalInstance*> globals;
-		std::vector<ExceptionTypeInstance*> exceptionTypes;
+		Function* const startFunction;
 
-		FunctionInstance* startFunction;
-		MemoryInstance* defaultMemory;
-		TableInstance* defaultTable;
+		mutable Platform::Mutex passiveDataSegmentsMutex;
+		PassiveDataSegmentMap passiveDataSegments;
 
-		Platform::Mutex passiveDataSegmentsMutex;
-		HashMap<Uptr, std::shared_ptr<const std::vector<U8>>> passiveDataSegments;
+		mutable Platform::Mutex passiveElemSegmentsMutex;
+		PassiveElemSegmentMap passiveElemSegments;
 
-		Platform::Mutex passiveElemSegmentsMutex;
-		HashMap<Uptr, std::shared_ptr<const std::vector<Object*>>> passiveElemSegments;
-
-		LLVMJIT::LoadedModule* jitModule;
-
-		std::string debugName;
+		const std::shared_ptr<LLVMJIT::Module> jitModule;
 
 		ModuleInstance(Compartment* inCompartment,
-					   std::vector<FunctionInstance*>&& inFunctionImports,
-					   std::vector<TableInstance*>&& inTableImports,
-					   std::vector<MemoryInstance*>&& inMemoryImports,
-					   std::vector<GlobalInstance*>&& inGlobalImports,
-					   std::vector<ExceptionTypeInstance*>&& inExceptionTypeImports,
+					   Uptr inID,
+					   HashMap<std::string, Object*>&& inExportMap,
+					   std::vector<Function*>&& inFunctions,
+					   std::vector<Table*>&& inTables,
+					   std::vector<Memory*>&& inMemories,
+					   std::vector<Global*>&& inGlobals,
+					   std::vector<ExceptionType*>&& inExceptionTypes,
+					   Function* inStartFunction,
+					   PassiveDataSegmentMap&& inPassiveDataSegments,
+					   PassiveElemSegmentMap&& inPassiveElemSegments,
+					   std::shared_ptr<LLVMJIT::Module>&& inJITModule,
 					   std::string&& inDebugName)
-		: ObjectImplWithAnyRef(ObjectKind::moduleInstance)
-		, compartment(inCompartment)
-		, functions(inFunctionImports)
-		, tables(inTableImports)
-		, memories(inMemoryImports)
-		, globals(inGlobalImports)
-		, exceptionTypes(inExceptionTypeImports)
-		, startFunction(nullptr)
-		, defaultMemory(nullptr)
-		, defaultTable(nullptr)
-		, jitModule(nullptr)
+		: GCObject(ObjectKind::moduleInstance, inCompartment)
+		, id(inID)
 		, debugName(std::move(inDebugName))
+		, exportMap(std::move(inExportMap))
+		, functions(std::move(inFunctions))
+		, tables(std::move(inTables))
+		, memories(std::move(inMemories))
+		, globals(std::move(inGlobals))
+		, exceptionTypes(std::move(inExceptionTypes))
+		, startFunction(inStartFunction)
+		, passiveDataSegments(std::move(inPassiveDataSegments))
+		, passiveElemSegments(std::move(inPassiveElemSegments))
+		, jitModule(std::move(inJITModule))
 		{
 		}
 
 		virtual ~ModuleInstance() override;
-		virtual void finalize() override;
 	};
 
-	struct Context : ObjectImplWithAnyRef
+	struct Context : GCObject
 	{
-		Compartment* compartment;
-		Uptr id;
-		struct ContextRuntimeData* runtimeData;
+		Uptr id = UINTPTR_MAX;
+		struct ContextRuntimeData* runtimeData = nullptr;
 
-		Context(Compartment* inCompartment)
-		: ObjectImplWithAnyRef(ObjectKind::context)
-		, compartment(inCompartment)
-		, id(UINTPTR_MAX)
-		, runtimeData(nullptr)
-		{
-		}
-
-		virtual void finalize() override;
+		Context(Compartment* inCompartment) : GCObject(ObjectKind::context, inCompartment) {}
+		~Context();
 	};
 
-	struct Compartment : ObjectImplWithAnyRef
+	struct Compartment : GCObject
 	{
 		mutable Platform::Mutex mutex;
 
 		struct CompartmentRuntimeData* runtimeData;
 		U8* unalignedRuntimeData;
 
-		// These are weak references that aren't followed by the garbage collector.
-		// If the referenced object is deleted, it will remove the reference here.
-		HashSet<ModuleInstance*> modules;
-		HashSet<GlobalInstance*> globals;
-		IndexMap<Uptr, MemoryInstance*> memories;
-		IndexMap<Uptr, TableInstance*> tables;
+		IndexMap<Uptr, Table*> tables;
+		IndexMap<Uptr, Memory*> memories;
+		IndexMap<Uptr, Global*> globals;
+		IndexMap<Uptr, ExceptionType*> exceptionTypes;
+		IndexMap<Uptr, ModuleInstance*> moduleInstances;
 		IndexMap<Uptr, Context*> contexts;
 
 		DenseStaticIntSet<U32, maxMutableGlobals> globalDataAllocationMask;
-
 		IR::UntaggedValue initialContextMutableGlobals[maxMutableGlobals];
 
-		ModuleInstance* wavmIntrinsics;
-
 		Compartment();
-		~Compartment() override;
+		~Compartment();
 	};
 
 	DECLARE_INTRINSIC_MODULE(wavmIntrinsics);
 
 	void dummyReferenceAtomics();
+	void dummyReferenceWAVMIntrinsics();
 
 	// Initializes global state used by the WAVM intrinsics.
 	Runtime::ModuleInstance* instantiateWAVMIntrinsics(Compartment* compartment);
 
 	// Checks whether an address is owned by a table or memory.
-	bool isAddressOwnedByTable(U8* address, TableInstance*& outTable, Uptr& outTableIndex);
-	bool isAddressOwnedByMemory(U8* address, MemoryInstance*& outMemory, Uptr& outMemoryAddress);
+	bool isAddressOwnedByTable(U8* address, Table*& outTable, Uptr& outTableIndex);
+	bool isAddressOwnedByMemory(U8* address, Memory*& outMemory, Uptr& outMemoryAddress);
 
-	// Clones a memory or table with the same ID in a new compartment.
-	TableInstance* cloneTable(TableInstance* memory, Compartment* newCompartment);
-	MemoryInstance* cloneMemory(MemoryInstance* memory, Compartment* newCompartment);
+	// Clones objects into a new compartment with the same ID.
+	Table* cloneTable(Table* memory, Compartment* newCompartment);
+	Memory* cloneMemory(Memory* memory, Compartment* newCompartment);
+	ExceptionType* cloneExceptionType(ExceptionType* exceptionType, Compartment* newCompartment);
+	ModuleInstance* cloneModuleInstance(ModuleInstance* moduleInstance,
+										Compartment* newCompartment);
 
 	// Clone a global with same ID and mutable data offset (if mutable) in a new compartment.
-	GlobalInstance* cloneGlobal(GlobalInstance* global, Compartment* newCompartment);
+	Global* cloneGlobal(Global* global, Compartment* newCompartment);
 
-	TableInstance* getTableFromRuntimeData(ContextRuntimeData* contextRuntimeData, Uptr tableId);
-	MemoryInstance* getMemoryFromRuntimeData(ContextRuntimeData* contextRuntimeData, Uptr memoryId);
+	ModuleInstance* getModuleInstanceFromRuntimeData(ContextRuntimeData* contextRuntimeData,
+													 Uptr moduleInstanceId);
+	Table* getTableFromRuntimeData(ContextRuntimeData* contextRuntimeData, Uptr tableId);
+	Memory* getMemoryFromRuntimeData(ContextRuntimeData* contextRuntimeData, Uptr memoryId);
 }}

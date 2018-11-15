@@ -17,69 +17,98 @@ using namespace WAVM;
 using namespace WAVM::IR;
 using namespace WAVM::Runtime;
 
-GlobalInstance* Runtime::createGlobal(Compartment* compartment, GlobalType type, Value initialValue)
+Global* Runtime::createGlobal(Compartment* compartment, GlobalType type, Value initialValue)
 {
-	wavmAssert(isSubtype(initialValue.type, type.valueType));
+	errorUnless(isSubtype(initialValue.type, type.valueType));
+	errorUnless(!isReferenceType(type.valueType) || !initialValue.object
+				|| isInCompartment(initialValue.object, compartment));
 
-	U32 mutableGlobalId = UINT32_MAX;
+	U32 mutableGlobalIndex = UINT32_MAX;
 	if(type.isMutable)
 	{
-		mutableGlobalId = compartment->globalDataAllocationMask.getSmallestNonMember();
-		compartment->globalDataAllocationMask.add(mutableGlobalId);
+		mutableGlobalIndex = compartment->globalDataAllocationMask.getSmallestNonMember();
+		if(mutableGlobalIndex == maxMutableGlobals) { return nullptr; }
+		compartment->globalDataAllocationMask.add(mutableGlobalIndex);
 
 		// Initialize the global value for each context, and the data used to initialize new
 		// contexts.
-		compartment->initialContextMutableGlobals[mutableGlobalId] = initialValue;
+		compartment->initialContextMutableGlobals[mutableGlobalIndex] = initialValue;
 		for(Context* context : compartment->contexts)
-		{ context->runtimeData->mutableGlobals[mutableGlobalId] = initialValue; }
+		{ context->runtimeData->mutableGlobals[mutableGlobalIndex] = initialValue; }
 	}
 
 	// Create the global and add it to the compartment's list of globals.
-	GlobalInstance* globalInstance
-		= new GlobalInstance(compartment, type, mutableGlobalId, initialValue);
+	Global* global = new Global(compartment, type, mutableGlobalIndex, initialValue);
 	{
 		Lock<Platform::Mutex> compartmentLock(compartment->mutex);
-		compartment->globals.addOrFail(globalInstance);
+		global->id = compartment->globals.add(UINTPTR_MAX, global);
+		if(global->id == UINTPTR_MAX)
+		{
+			delete global;
+			return nullptr;
+		}
 	}
 
-	return globalInstance;
+	return global;
 }
 
-GlobalInstance* Runtime::cloneGlobal(GlobalInstance* global, Compartment* newCompartment)
+Global* Runtime::cloneGlobal(Global* global, Compartment* newCompartment)
 {
-	GlobalInstance* newGlobal = new GlobalInstance(
-		newCompartment, global->type, global->mutableGlobalId, global->initialValue);
-	newCompartment->globals.addOrFail(newGlobal);
+	IR::UntaggedValue initialValue = global->initialValue;
+	if(isReferenceType(global->type.valueType))
+	{
+		initialValue.object = remapToClonedCompartment(initialValue.object, newCompartment);
+		if(global->type.isMutable)
+		{
+			Object*& initialMutableRef
+				= newCompartment->initialContextMutableGlobals[global->mutableGlobalIndex].object;
+			initialMutableRef = remapToClonedCompartment(initialMutableRef, newCompartment);
+		}
+	}
+
+	Global* newGlobal
+		= new Global(newCompartment, global->type, global->mutableGlobalIndex, initialValue);
+	newGlobal->id = global->id;
+
+	Lock<Platform::Mutex> compartmentLock(newCompartment->mutex);
+	newCompartment->globals.insertOrFail(global->id, newGlobal);
 	return newGlobal;
 }
 
-void Runtime::GlobalInstance::finalize()
+Runtime::Global::~Global()
 {
-	Lock<Platform::Mutex> compartmentLock(compartment->mutex);
-	compartment->globals.removeOrFail(this);
+	if(id != UINTPTR_MAX)
+	{
+		wavmAssertMutexIsLockedByCurrentThread(compartment->mutex);
+		compartment->globals.removeOrFail(id);
+	}
+
 	if(type.isMutable)
 	{
-		wavmAssert(mutableGlobalId < maxMutableGlobals);
-		wavmAssert(compartment->globalDataAllocationMask.contains(mutableGlobalId));
-		compartment->globalDataAllocationMask.remove(mutableGlobalId);
+		wavmAssert(mutableGlobalIndex < maxMutableGlobals);
+		wavmAssert(compartment->globalDataAllocationMask.contains(mutableGlobalIndex));
+		compartment->globalDataAllocationMask.remove(mutableGlobalIndex);
 	}
 }
 
-Value Runtime::getGlobalValue(Context* context, GlobalInstance* global)
+Value Runtime::getGlobalValue(const Context* context, Global* global)
 {
 	wavmAssert(context || !global->type.isMutable);
 	return Value(global->type.valueType,
 				 global->type.isMutable
-					 ? context->runtimeData->mutableGlobals[global->mutableGlobalId]
+					 ? context->runtimeData->mutableGlobals[global->mutableGlobalIndex]
 					 : global->initialValue);
 }
 
-Value Runtime::setGlobalValue(Context* context, GlobalInstance* global, Value newValue)
+Value Runtime::setGlobalValue(Context* context, Global* global, Value newValue)
 {
 	wavmAssert(context);
 	wavmAssert(newValue.type == global->type.valueType);
 	wavmAssert(global->type.isMutable);
-	UntaggedValue& value = context->runtimeData->mutableGlobals[global->mutableGlobalId];
+	errorUnless(context->compartment == global->compartment);
+	errorUnless(!isReferenceType(global->type.valueType) || !newValue.object
+				|| isInCompartment(newValue.object, context->compartment));
+	UntaggedValue& value = context->runtimeData->mutableGlobals[global->mutableGlobalIndex];
 	const Value previousValue = Value(global->type.valueType, value);
 	value = newValue;
 	return previousValue;

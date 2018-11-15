@@ -1,7 +1,7 @@
 #include <vector>
 
-#include "LLVMEmitFunctionContext.h"
-#include "LLVMEmitModuleContext.h"
+#include "EmitFunctionContext.h"
+#include "EmitModuleContext.h"
 #include "LLVMJITPrivate.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/Operators.h"
@@ -63,7 +63,8 @@ void EmitFunctionContext::get_global(GetOrSetVariableImm<true> imm)
 			moduleContext.globals[imm.variableIndex], llvmContext.iptrType);
 		llvm::Value* globalPointer = irBuilder.CreateInBoundsGEP(
 			irBuilder.CreateLoad(contextPointerVariable), {globalDataOffset});
-		value = loadFromUntypedPointer(globalPointer, llvmValueType);
+		value = loadFromUntypedPointer(
+			globalPointer, llvmValueType, getTypeByteWidth(globalType.valueType));
 	}
 	else
 	{
@@ -90,7 +91,7 @@ void EmitFunctionContext::get_global(GetOrSetVariableImm<true> imm)
 				value = emitLiteral(llvmContext, globalDef.initializer.v128);
 				break;
 			case InitializerExpression::Type::ref_null:
-				value = emitLiteralPointer(nullptr, llvmContext.anyrefType);
+				value = llvm::Constant::getNullValue(llvmContext.anyrefType);
 				break;
 			default: break;
 			};
@@ -99,7 +100,9 @@ void EmitFunctionContext::get_global(GetOrSetVariableImm<true> imm)
 		if(!value)
 		{
 			// Otherwise, the symbol's value will point to the global's immutable value.
-			value = loadFromUntypedPointer(moduleContext.globals[imm.variableIndex], llvmValueType);
+			value = loadFromUntypedPointer(moduleContext.globals[imm.variableIndex],
+										   llvmValueType,
+										   getTypeByteWidth(globalType.valueType));
 		}
 	}
 

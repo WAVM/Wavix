@@ -4,17 +4,53 @@
 // Data structures that are used to share data between WAVM C++ code and the compiled WASM code.
 //
 
+#include <atomic>
+#include <map>
+
 #include "WAVM/IR/Value.h"
 #include "WAVM/Inline/BasicTypes.h"
+
+namespace WAVM { namespace LLVMJIT {
+	struct Module;
+}}
 
 namespace WAVM { namespace Runtime {
 	// Forward declarations
 	struct Compartment;
 	struct Context;
-	struct ExceptionTypeInstance;
+	struct ExceptionType;
 	struct Object;
-	struct TableInstance;
-	struct MemoryInstance;
+	struct Table;
+	struct Memory;
+
+	// Runtime object types. This must be a superset of IR::ExternKind, with IR::ExternKind
+	// values having the same representation in Runtime::ObjectKind.
+	enum class ObjectKind : U8
+	{
+		// Standard object kinds that may be imported/exported from WebAssembly modules.
+		function = 0,
+		table = 1,
+		memory = 2,
+		global = 3,
+		exceptionType = 4,
+
+		// Runtime-specific object kinds that are only used by transient runtime objects.
+		moduleInstance = 5,
+		context = 6,
+		compartment = 7,
+
+		invalid = 0xff,
+	};
+	static_assert(Uptr(IR::ExternKind::function) == Uptr(ObjectKind::function),
+				  "IR::ExternKind::function != ObjectKind::function");
+	static_assert(Uptr(IR::ExternKind::table) == Uptr(ObjectKind::table),
+				  "IR::ExternKind::table != ObjectKind::table");
+	static_assert(Uptr(IR::ExternKind::memory) == Uptr(ObjectKind::memory),
+				  "IR::ExternKind::memory != ObjectKind::memory");
+	static_assert(Uptr(IR::ExternKind::global) == Uptr(ObjectKind::global),
+				  "IR::ExternKind::global != ObjectKind::global");
+	static_assert(Uptr(IR::ExternKind::exceptionType) == Uptr(ObjectKind::exceptionType),
+				  "IR::ExternKind::exceptionType != ObjectKind::exceptionType");
 
 #define compartmentReservedBytes (4ull * 1024 * 1024 * 1024)
 
@@ -65,7 +101,8 @@ namespace WAVM { namespace Runtime {
 
 	struct ExceptionData
 	{
-		ExceptionTypeInstance* typeInstance;
+		Uptr typeId;
+		ExceptionType* type;
 		U8 isUserException;
 		IR::UntaggedValue arguments[1];
 
@@ -75,16 +112,43 @@ namespace WAVM { namespace Runtime {
 		}
 	};
 
-	struct AnyReferee
+	struct Object
 	{
-		Object* object;
+		const ObjectKind kind;
 	};
 
-	struct AnyFunc
+	// Metadata about a function, used to hold data that can't be emitted directly in an object
+	// file, or must be mutable.
+	struct FunctionMutableData
 	{
-		AnyReferee anyRef;
-		IR::FunctionType::Encoding functionTypeEncoding;
-		U8 code[1];
+		LLVMJIT::Module* jitModule = nullptr;
+		Runtime::Function* function = nullptr;
+		Uptr numCodeBytes = 0;
+		std::atomic<Uptr> numRootReferences{0};
+		std::map<U32, U32> offsetToOpIndexMap;
+		std::string debugName;
+
+		FunctionMutableData(std::string&& inDebugName) : debugName(inDebugName) {}
+	};
+
+	struct Function
+	{
+		Object object;
+		FunctionMutableData* mutableData;
+		const Uptr moduleInstanceId;
+		const IR::FunctionType::Encoding encodedType;
+		const U8 code[1];
+
+		Function(FunctionMutableData* inMutableData,
+				 Uptr inModuleInstanceId,
+				 IR::FunctionType::Encoding inEncodedType)
+		: object{ObjectKind::function}
+		, mutableData(inMutableData)
+		, moduleInstanceId(inModuleInstanceId)
+		, encodedType(inEncodedType)
+		, code{0xcc} // int3
+		{
+		}
 	};
 
 	inline CompartmentRuntimeData* getCompartmentRuntimeData(ContextRuntimeData* contextRuntimeData)

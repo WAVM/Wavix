@@ -211,7 +211,7 @@ static void validateInitializer(const Module& module,
 	{
 		const ValueType globalValueType
 			= validateGlobalIndex(module,
-								  expression.globalIndex,
+								  expression.globalRef,
 								  false,
 								  true,
 								  true,
@@ -578,14 +578,14 @@ struct FunctionValidationContext
 
 	template<Uptr numLanes> void validateImm(LaneIndexImm<numLanes> imm)
 	{
-		VALIDATE_UNLESS("swizzle invalid lane index", imm.laneIndex >= numLanes);
+		VALIDATE_UNLESS("swizzle invalid lane index: ", imm.laneIndex >= numLanes);
 	}
 
 	template<Uptr numLanes> void validateImm(ShuffleImm<numLanes> imm)
 	{
 		for(Uptr laneIndex = 0; laneIndex < numLanes; ++laneIndex)
 		{
-			VALIDATE_UNLESS("shuffle invalid lane index",
+			VALIDATE_UNLESS("shuffle invalid lane index: ",
 							imm.laneIndices[laneIndex] >= numLanes * 2);
 		}
 	}
@@ -623,16 +623,12 @@ struct FunctionValidationContext
 	void validateImm(ElemSegmentAndTableImm imm)
 	{
 		VALIDATE_INDEX(imm.elemSegmentIndex, module.elemSegments.size());
-		VALIDATE_UNLESS("active elem segment can't be used as source for table.init",
-						module.elemSegments[imm.elemSegmentIndex].isActive)
 		VALIDATE_INDEX(imm.tableIndex, module.tables.size());
 	}
 
 	void validateImm(ElemSegmentImm imm)
 	{
 		VALIDATE_INDEX(imm.elemSegmentIndex, module.elemSegments.size());
-		VALIDATE_UNLESS("active elem segment can't be used as source for table.init",
-						module.elemSegments[imm.elemSegmentIndex].isActive)
 	}
 
 #define VALIDATE_OP(opcode, name, nameString, Imm, signatureInitializer, requiredFeature)          \
@@ -919,10 +915,10 @@ void IR::validateExports(const Module& module)
 	{
 		switch(exportIt.kind)
 		{
-		case ObjectKind::function: VALIDATE_INDEX(exportIt.index, module.functions.size()); break;
-		case ObjectKind::table: VALIDATE_INDEX(exportIt.index, module.tables.size()); break;
-		case ObjectKind::memory: VALIDATE_INDEX(exportIt.index, module.memories.size()); break;
-		case ObjectKind::global:
+		case ExternKind::function: VALIDATE_INDEX(exportIt.index, module.functions.size()); break;
+		case ExternKind::table: VALIDATE_INDEX(exportIt.index, module.tables.size()); break;
+		case ExternKind::memory: VALIDATE_INDEX(exportIt.index, module.memories.size()); break;
+		case ExternKind::global:
 			validateGlobalIndex(module,
 								exportIt.index,
 								false,
@@ -930,7 +926,7 @@ void IR::validateExports(const Module& module)
 								false,
 								"exported global index");
 			break;
-		case ObjectKind::exceptionType:
+		case ExternKind::exceptionType:
 			VALIDATE_INDEX(exportIt.index, module.exceptionTypes.size());
 			break;
 		default: throw ValidationException("unknown export kind");
@@ -961,7 +957,7 @@ void IR::validateElemSegments(const Module& module)
 		{
 			VALIDATE_INDEX(elemSegment.tableIndex, module.tables.size());
 			const TableType& tableType = module.tables.getType(elemSegment.tableIndex);
-			VALIDATE_UNLESS("active elem segments must be in anyfunc tables",
+			VALIDATE_UNLESS("active elem segments must be in anyfunc tables: ",
 							tableType.elementType != ReferenceType::anyfunc);
 			validateInitializer(
 				module, elemSegment.baseOffset, ValueType::i32, "elem segment base initializer");
@@ -974,9 +970,8 @@ void IR::validateElemSegments(const Module& module)
 void IR::validateDataSegments(const Module& module,
 							  const DeferredCodeValidationState& deferredCodeValidationState)
 {
-	VALIDATE_UNLESS(
-		"invalid data segment index",
-		module.dataSegments.size() < deferredCodeValidationState.requiredNumDataSegments);
+	if(deferredCodeValidationState.requiredNumDataSegments > module.dataSegments.size())
+	{ throw ValidationException("invalid data segment index in operator immediate"); }
 
 	for(auto& dataSegment : module.dataSegments)
 	{

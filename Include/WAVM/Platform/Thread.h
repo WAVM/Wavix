@@ -13,4 +13,6 @@ namespace WAVM { namespace Platform {
 	[[noreturn]] PLATFORM_API void exitThread(I64 code);
 
 	RETURNS_TWICE PLATFORM_API Thread* forkCurrentThread();
+
+	PLATFORM_API Uptr getNumberOfHardwareThreads();
 }}

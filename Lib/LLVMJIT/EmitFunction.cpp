@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 
-#include "LLVMEmitFunctionContext.h"
-#include "LLVMEmitModuleContext.h"
+#include "EmitFunctionContext.h"
+#include "EmitModuleContext.h"
 #include "LLVMJITPrivate.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/OperatorPrinter.h"
@@ -385,11 +385,12 @@ void EmitFunctionContext::emit()
 
 	if(EMIT_ENTER_EXIT_HOOKS)
 	{
-		emitRuntimeIntrinsic("debugEnterFunction",
-							 FunctionType({}, {ValueType::anyfunc}),
-							 {llvm::ConstantExpr::getSub(
-								 llvm::ConstantExpr::getPtrToInt(function, llvmContext.iptrType),
-								 emitLiteral(llvmContext, Uptr(offsetof(AnyFunc, code))))});
+		emitRuntimeIntrinsic(
+			"debugEnterFunction",
+			FunctionType({}, {ValueType::anyfunc}),
+			{llvm::ConstantExpr::getSub(
+				llvm::ConstantExpr::getPtrToInt(function, llvmContext.iptrType),
+				emitLiteral(llvmContext, Uptr(offsetof(Runtime::Function, code))))});
 	}
 
 	// Decode the WebAssembly opcodes and emit LLVM IR for them.
@@ -413,11 +414,12 @@ void EmitFunctionContext::emit()
 
 	if(EMIT_ENTER_EXIT_HOOKS)
 	{
-		emitRuntimeIntrinsic("debugExitFunction",
-							 FunctionType({}, {ValueType::anyfunc}),
-							 {llvm::ConstantExpr::getSub(
-								 llvm::ConstantExpr::getPtrToInt(function, llvmContext.iptrType),
-								 emitLiteral(llvmContext, Uptr(offsetof(AnyFunc, code))))});
+		emitRuntimeIntrinsic(
+			"debugExitFunction",
+			FunctionType({}, {ValueType::anyfunc}),
+			{llvm::ConstantExpr::getSub(
+				llvm::ConstantExpr::getPtrToInt(function, llvmContext.iptrType),
+				emitLiteral(llvmContext, Uptr(offsetof(Runtime::Function, code))))});
 	}
 
 	// Emit the function return.

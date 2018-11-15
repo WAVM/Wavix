@@ -9,6 +9,7 @@
 #include "WAVM/Inline/Assert.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/IndexMap.h"
 #include "WAVM/Inline/IntrusiveSharedPtr.h"
 #include "WAVM/Inline/Lock.h"
 #include "WAVM/Platform/Mutex.h"
@@ -27,7 +28,7 @@ enum
 	numStackBytes = 1 * 1024 * 1024
 };
 
-// Keeps track of the entry and error functions used by a running WebAssembly-spawned thread.
+// Keeps track of the entry function used by a running WebAssembly-spawned thread.
 // Used to find garbage collection roots.
 struct Thread
 {
@@ -36,12 +37,12 @@ struct Thread
 
 	Platform::Thread* platformThread = nullptr;
 	Runtime::GCPointer<Runtime::Context> context;
-	Runtime::GCPointer<Runtime::FunctionInstance> entryFunction;
+	Runtime::GCPointer<Runtime::Function> entryFunction;
 
 	IR::Value argument;
 
 	FORCENOINLINE Thread(Runtime::Context* inContext,
-						 Runtime::FunctionInstance* inEntryFunction,
+						 Runtime::Function* inEntryFunction,
 						 const IR::Value& inArgument)
 	: context(inContext), entryFunction(inEntryFunction), argument(inArgument)
 	{
@@ -54,11 +55,9 @@ struct Thread
 	}
 };
 
-// A global list of running threads created by WebAssembly code. Will always contain a null pointer
-// in the first element so that 0 won't be allocated as a thread ID.
+// A global list of running threads created by WebAssembly code.
 static Platform::Mutex threadsMutex;
-static std::vector<IntrusiveSharedPtr<Thread>> threads = {{nullptr}};
-static std::vector<Uptr> freeThreadIds;
+static IndexMap<Uptr, IntrusiveSharedPtr<Thread>> threads(1, UINTPTR_MAX);
 
 // A shared pointer to the current thread. This is used to decrement the thread's reference count
 // when the thread exits.
@@ -69,24 +68,9 @@ thread_local IntrusiveSharedPtr<Thread> currentThread = nullptr;
 FORCENOINLINE static Uptr allocateThreadId(Thread* thread)
 {
 	Lock<Platform::Mutex> threadsLock(threadsMutex);
-	wavmAssert(threads.size() > 0);
-	if(freeThreadIds.size())
-	{
-		thread->id = freeThreadIds.back();
-		freeThreadIds.pop_back();
-
-		wavmAssert(threads[thread->id] == nullptr);
-		threads[thread->id] = thread;
-
-		return thread->id;
-	}
-	else
-	{
-		thread->id = threads.size();
-		threads.push_back(thread);
-
-		return thread->id;
-	}
+	thread->id = threads.add(0, thread);
+	errorUnless(thread->id != 0);
+	return thread->id;
 }
 
 // This function is just to provide a way to write to the currentThread thread-local variable in a
@@ -98,7 +82,7 @@ FORCENOINLINE static void setCurrentThread(Thread* thread) { currentThread = thr
 // already locked threadsMutex before calling validateThreadId.
 static void validateThreadId(Uptr threadId)
 {
-	if(threadId == 0 || threadId >= threads.size() || !threads[threadId])
+	if(threadId == 0 || !threads.contains(threadId))
 	{ throwException(Exception::invalidArgumentType); }
 }
 
@@ -117,15 +101,14 @@ DEFINE_INTRINSIC_FUNCTION(threadTest,
 						  "createThread",
 						  U64,
 						  createThread,
-						  const AnyFunc* entryAnyFunc,
+						  Function* entryFunction,
 						  I32 entryArgument)
 {
 	// Validate that the entry function is non-null and has the correct type (i32)->i64
-	if(!entryAnyFunc
-	   || IR::FunctionType{entryAnyFunc->functionTypeEncoding}
+	if(!entryFunction
+	   || IR::FunctionType{entryFunction->encodedType}
 			  != FunctionType(TypeTuple{ValueType::i64}, TypeTuple{ValueType::i32}))
 	{ throwException(Runtime::Exception::indirectCallSignatureMismatchType); }
-	FunctionInstance* entryFunction = asFunction(entryAnyFunc->anyRef.object);
 
 	// Create a thread object that will expose its entry and error functions to the garbage
 	// collector as roots.
@@ -201,8 +184,7 @@ static IntrusiveSharedPtr<Thread> removeThreadById(Uptr threadId)
 	Lock<Platform::Mutex> threadsLock(threadsMutex);
 	validateThreadId(threadId);
 	thread = std::move(threads[threadId]);
-	threads[threadId] = nullptr;
-	freeThreadIds.push_back(threadId);
+	threads.removeOrFail(threadId);
 
 	wavmAssert(thread->id == Uptr(threadId));
 	thread->id = UINTPTR_MAX;

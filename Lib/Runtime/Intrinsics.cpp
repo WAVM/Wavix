@@ -15,13 +15,14 @@ namespace WAVM { namespace Intrinsics {
 	struct ModuleImpl
 	{
 		HashMap<std::string, Intrinsics::Function*> functionMap;
-		HashMap<std::string, Intrinsics::Global*> globalMap;
-		HashMap<std::string, Intrinsics::Memory*> memoryMap;
 		HashMap<std::string, Intrinsics::Table*> tableMap;
+		HashMap<std::string, Intrinsics::Memory*> memoryMap;
+		HashMap<std::string, Intrinsics::Global*> globalMap;
 	};
 }}
 
 using namespace WAVM;
+using namespace WAVM::Runtime;
 
 Intrinsics::Module::~Module()
 {
@@ -50,9 +51,9 @@ Intrinsics::Function::Function(Intrinsics::Module& moduleRef,
 	moduleRef.impl->functionMap.set(name, this);
 }
 
-Runtime::FunctionInstance* Intrinsics::Function::instantiate(Runtime::Compartment* compartment)
+Function* Intrinsics::Function::instantiate(Compartment* compartment)
 {
-	return new Runtime::FunctionInstance(nullptr, type, nativeFunction, callingConvention, name);
+	return LLVMJIT::getIntrinsicThunk(nativeFunction, type, callingConvention, name);
 }
 
 Intrinsics::Global::Global(Intrinsics::Module& moduleRef,
@@ -68,9 +69,9 @@ Intrinsics::Global::Global(Intrinsics::Module& moduleRef,
 	moduleRef.impl->globalMap.set(name, this);
 }
 
-Runtime::GlobalInstance* Intrinsics::Global::instantiate(Runtime::Compartment* compartment)
+Global* Intrinsics::Global::instantiate(Compartment* compartment)
 {
-	return Runtime::createGlobal(compartment, IR::GlobalType(type, false), value);
+	return createGlobal(compartment, IR::GlobalType(type, false), value);
 }
 
 Intrinsics::Table::Table(Intrinsics::Module& moduleRef,
@@ -85,9 +86,9 @@ Intrinsics::Table::Table(Intrinsics::Module& moduleRef,
 	moduleRef.impl->tableMap.set(name, this);
 }
 
-Runtime::TableInstance* Intrinsics::Table::instantiate(Runtime::Compartment* compartment)
+Table* Intrinsics::Table::instantiate(Compartment* compartment)
 {
-	return Runtime::createTable(compartment, type, name);
+	return createTable(compartment, type, name);
 }
 
 Intrinsics::Memory::Memory(Intrinsics::Module& moduleRef,
@@ -102,80 +103,95 @@ Intrinsics::Memory::Memory(Intrinsics::Module& moduleRef,
 	moduleRef.impl->memoryMap.set(name, this);
 }
 
-Runtime::MemoryInstance* Intrinsics::Memory::instantiate(Runtime::Compartment* compartment)
+Memory* Intrinsics::Memory::instantiate(Compartment* compartment)
 {
-	return Runtime::createMemory(compartment, type, name);
+	return createMemory(compartment, type, name);
 }
 
-Runtime::ModuleInstance* Intrinsics::instantiateModule(
-	Runtime::Compartment* compartment,
-	const Intrinsics::Module& moduleRef,
-	std::string&& debugName,
-	const HashMap<std::string, Runtime::Object*>& extraExports)
+ModuleInstance* Intrinsics::instantiateModule(Compartment* compartment,
+											  const Intrinsics::Module& moduleRef,
+											  std::string&& debugName,
+											  const HashMap<std::string, Object*>& extraExports)
 {
-	auto moduleInstance
-		= new Runtime::ModuleInstance(compartment, {}, {}, {}, {}, {}, std::move(debugName));
-	{
-		Lock<Platform::Mutex> compartmentLock(compartment->mutex);
-		compartment->modules.addOrFail(moduleInstance);
-	}
-
+	HashMap<std::string, Object*> exportMap = extraExports;
+	std::vector<Runtime::Function*> functions;
+	std::vector<Runtime::Table*> tables;
+	std::vector<Runtime::Memory*> memories;
+	std::vector<Runtime::Global*> globals;
+	std::vector<Runtime::ExceptionType*> exceptionTypes;
 	if(moduleRef.impl)
 	{
 		for(const auto& pair : moduleRef.impl->functionMap)
 		{
-			auto functionInstance = pair.value->instantiate(compartment);
-			moduleInstance->functions.push_back(functionInstance);
-			moduleInstance->exportMap.addOrFail(pair.key, functionInstance);
+			auto function = pair.value->instantiate(compartment);
+			functions.push_back(function);
+			exportMap.addOrFail(pair.key, asObject(function));
 		}
 
 		for(const auto& pair : moduleRef.impl->tableMap)
 		{
-			auto tableInstance = pair.value->instantiate(compartment);
-			moduleInstance->tables.push_back(tableInstance);
-			moduleInstance->exportMap.addOrFail(pair.key, tableInstance);
+			auto table = pair.value->instantiate(compartment);
+			tables.push_back(table);
+			exportMap.addOrFail(pair.key, asObject(table));
 		}
 
 		for(const auto& pair : moduleRef.impl->memoryMap)
 		{
-			auto memoryInstance = pair.value->instantiate(compartment);
-			moduleInstance->memories.push_back(memoryInstance);
-			moduleInstance->exportMap.addOrFail(pair.key, memoryInstance);
+			auto memory = pair.value->instantiate(compartment);
+			memories.push_back(memory);
+			exportMap.addOrFail(pair.key, asObject(memory));
 		}
 
 		for(const auto& pair : moduleRef.impl->globalMap)
 		{
-			auto globalInstance = pair.value->instantiate(compartment);
-			moduleInstance->globals.push_back(globalInstance);
-			moduleInstance->exportMap.addOrFail(pair.key, globalInstance);
+			auto global = pair.value->instantiate(compartment);
+			globals.push_back(global);
+			exportMap.addOrFail(pair.key, asObject(global));
 		}
 
 		for(const auto& pair : extraExports)
 		{
-			Runtime::Object* object = pair.value;
-			moduleInstance->exportMap.set(pair.key, object);
-
+			Object* object = pair.value;
 			switch(object->kind)
 			{
-			case Runtime::ObjectKind::function:
-				moduleInstance->functions.push_back(asFunction(object));
-				break;
-			case Runtime::ObjectKind::table:
-				moduleInstance->tables.push_back(asTable(object));
-				break;
-			case Runtime::ObjectKind::memory:
-				moduleInstance->memories.push_back(asMemory(object));
-				break;
-			case Runtime::ObjectKind::global:
-				moduleInstance->globals.push_back(asGlobal(object));
-				break;
-			case Runtime::ObjectKind::exceptionTypeInstance:
-				moduleInstance->exceptionTypes.push_back(asExceptionTypeInstance(object));
+			case ObjectKind::function: functions.push_back(asFunction(object)); break;
+			case ObjectKind::table: tables.push_back(asTable(object)); break;
+			case ObjectKind::memory: memories.push_back(asMemory(object)); break;
+			case ObjectKind::global: globals.push_back(asGlobal(object)); break;
+			case ObjectKind::exceptionType:
+				exceptionTypes.push_back(asExceptionType(object));
 				break;
 			default: Errors::unreachable();
 			};
 		}
 	}
 
+	Lock<Platform::Mutex> compartmentLock(compartment->mutex);
+	const Uptr id = compartment->moduleInstances.add(UINTPTR_MAX, nullptr);
+	if(id == UINTPTR_MAX) { throwException(Exception::outOfMemoryType, {}); }
+	auto moduleInstance = new ModuleInstance(compartment,
+											 id,
+											 std::move(exportMap),
+											 std::move(functions),
+											 std::move(tables),
+											 std::move(memories),
+											 std::move(globals),
+											 std::move(exceptionTypes),
+											 nullptr,
+											 {},
+											 {},
+											 nullptr,
+											 std::move(debugName));
+	compartment->moduleInstances[id] = moduleInstance;
 	return moduleInstance;
+}
+
+HashMap<std::string, Intrinsics::Function*> Intrinsics::getUninstantiatedFunctions(
+	const Intrinsics::Module& moduleRef)
+{
+	if(moduleRef.impl) { return moduleRef.impl->functionMap; }
+	else
+	{
+		return {};
+	}
 }

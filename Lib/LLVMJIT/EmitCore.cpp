@@ -1,8 +1,8 @@
 #include <memory>
 #include <vector>
 
-#include "LLVMEmitFunctionContext.h"
-#include "LLVMEmitModuleContext.h"
+#include "EmitFunctionContext.h"
+#include "EmitModuleContext.h"
 #include "LLVMJITPrivate.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/Operators.h"
@@ -373,21 +373,23 @@ void EmitFunctionContext::call_indirect(CallIndirectImm imm)
 	auto tableBasePointer = loadFromUntypedPointer(
 		irBuilder.CreateInBoundsGEP(getCompartmentAddress(),
 									{moduleContext.tableOffsets[imm.tableIndex]}),
-		llvmContext.iptrType->getPointerTo());
+		llvmContext.iptrType->getPointerTo(),
+		sizeof(Uptr));
 
 	// Load the anyfunc referenced by the table.
 	auto elementPointer = irBuilder.CreateInBoundsGEP(tableBasePointer, {functionIndexZExt});
 	llvm::LoadInst* biasedValueLoad = irBuilder.CreateLoad(elementPointer);
 	biasedValueLoad->setAtomic(llvm::AtomicOrdering::Acquire);
 	biasedValueLoad->setAlignment(sizeof(Uptr));
-	auto anyfuncPointer = irBuilder.CreateIntToPtr(
+	auto runtimeFunction = irBuilder.CreateIntToPtr(
 		irBuilder.CreateAdd(biasedValueLoad, moduleContext.tableReferenceBias),
 		llvmContext.i8PtrType);
 	auto elementTypeId = loadFromUntypedPointer(
 		irBuilder.CreateInBoundsGEP(
-			anyfuncPointer,
-			emitLiteral(llvmContext, Uptr(offsetof(AnyFunc, functionTypeEncoding)))),
-		llvmContext.iptrType);
+			runtimeFunction,
+			emitLiteral(llvmContext, Uptr(offsetof(Runtime::Function, encodedType)))),
+		llvmContext.iptrType,
+		sizeof(Uptr));
 	auto calleeTypeId = moduleContext.typeIds[imm.type.index];
 
 	// If the function type doesn't match, trap.
@@ -397,17 +399,17 @@ void EmitFunctionContext::call_indirect(CallIndirectImm imm)
 		FunctionType(TypeTuple(),
 					 TypeTuple({ValueType::i32,
 								inferValueType<Uptr>(),
-								inferValueType<Uptr>(),
+								ValueType::anyfunc,
 								inferValueType<Uptr>()})),
 		{tableElementIndex,
 		 getTableIdFromOffset(llvmContext, moduleContext.tableOffsets[imm.tableIndex]),
-		 irBuilder.CreatePtrToInt(anyfuncPointer, llvmContext.iptrType),
+		 irBuilder.CreatePointerCast(runtimeFunction, llvmContext.anyrefType),
 		 calleeTypeId});
 
 	// Call the function loaded from the table.
 	auto functionPointer = irBuilder.CreatePointerCast(
-		irBuilder.CreateInBoundsGEP(anyfuncPointer,
-									emitLiteral(llvmContext, Uptr(offsetof(AnyFunc, code)))),
+		irBuilder.CreateInBoundsGEP(
+			runtimeFunction, emitLiteral(llvmContext, Uptr(offsetof(Runtime::Function, code)))),
 		asLLVMType(llvmContext, calleeType, CallingConvention::wasm)->getPointerTo());
 	ValueVector results = emitCallOrInvoke(functionPointer,
 										   llvm::ArrayRef<llvm::Value*>(llvmArgs, numArguments),

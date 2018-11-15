@@ -38,7 +38,7 @@ struct RootResolver : Resolver
 
 	bool resolve(const std::string& moduleName,
 				 const std::string& exportName,
-				 ObjectType type,
+				 ExternType type,
 				 Object*& outObject) override
 	{
 		auto namedInstance = moduleNameToInstanceMap.get(moduleName);
@@ -70,12 +70,12 @@ struct RootResolver : Resolver
 		return true;
 	}
 
-	Object* getStubObject(const std::string& exportName, ObjectType type) const
+	Object* getStubObject(const std::string& exportName, ExternType type) const
 	{
 		// If the import couldn't be resolved, stub it in.
 		switch(type.kind)
 		{
-		case IR::ObjectKind::function:
+		case IR::ExternKind::function:
 		{
 			// Generate a function body that just uses the unreachable op to fault if called.
 			Serialization::ArrayOutputStream codeStream;
@@ -84,43 +84,43 @@ struct RootResolver : Resolver
 			encoder.end();
 
 			// Generate a module for the stub function.
-			IR::Module stubModule;
+			IR::Module stubIRModule;
 			DisassemblyNames stubModuleNames;
-			stubModule.types.push_back(asFunctionType(type));
-			stubModule.functions.defs.push_back({{0}, {}, std::move(codeStream.getBytes()), {}});
-			stubModule.exports.push_back({"importStub", IR::ObjectKind::function, 0});
+			stubIRModule.types.push_back(asFunctionType(type));
+			stubIRModule.functions.defs.push_back({{0}, {}, std::move(codeStream.getBytes()), {}});
+			stubIRModule.exports.push_back({"importStub", IR::ExternKind::function, 0});
 			stubModuleNames.functions.push_back({"importStub: " + exportName, {}, {}});
-			IR::setDisassemblyNames(stubModule, stubModuleNames);
-			IR::validatePreCodeSections(stubModule);
+			IR::setDisassemblyNames(stubIRModule, stubModuleNames);
+			IR::validatePreCodeSections(stubIRModule);
 			DeferredCodeValidationState deferredCodeValidationState;
-			IR::validatePostCodeSections(stubModule, deferredCodeValidationState);
+			IR::validatePostCodeSections(stubIRModule, deferredCodeValidationState);
 
 			// Instantiate the module and return the stub function instance.
-			auto stubModuleInstance
-				= instantiateModule(compartment, compileModule(stubModule), {}, "importStub");
+			auto stubModule = compileModule(stubIRModule);
+			auto stubModuleInstance = instantiateModule(compartment, stubModule, {}, "importStub");
 			return getInstanceExport(stubModuleInstance, "importStub");
 		}
-		case IR::ObjectKind::memory:
+		case IR::ExternKind::memory:
 		{
 			return asObject(
 				Runtime::createMemory(compartment, asMemoryType(type), std::string(exportName)));
 		}
-		case IR::ObjectKind::table:
+		case IR::ExternKind::table:
 		{
 			return asObject(
 				Runtime::createTable(compartment, asTableType(type), std::string(exportName)));
 		}
-		case IR::ObjectKind::global:
+		case IR::ExternKind::global:
 		{
 			return asObject(Runtime::createGlobal(
 				compartment,
 				asGlobalType(type),
 				IR::Value(asGlobalType(type).valueType, IR::UntaggedValue())));
 		}
-		case IR::ObjectKind::exceptionType:
+		case IR::ExternKind::exceptionType:
 		{
 			return asObject(
-				Runtime::createExceptionTypeInstance(asExceptionType(type), "importStub"));
+				Runtime::createExceptionType(compartment, asExceptionType(type), "importStub"));
 		}
 		default: Errors::unreachable();
 		};
@@ -176,7 +176,7 @@ static int run(const CommandLineOptions& options)
 	if(options.onlyCheck) { return EXIT_SUCCESS; }
 
 	// Compile the module.
-	Runtime::Module* module = nullptr;
+	Runtime::ModuleRef module = nullptr;
 	if(!options.precompiled) { module = Runtime::compileModule(irModule); }
 	else
 	{
@@ -245,7 +245,7 @@ static int run(const CommandLineOptions& options)
 	if(!moduleInstance) { return EXIT_FAILURE; }
 
 	// Call the module start function, if it has one.
-	FunctionInstance* startFunction = getStartFunction(moduleInstance);
+	Function* startFunction = getStartFunction(moduleInstance);
 	if(startFunction) { invokeFunctionChecked(context, startFunction, {}); }
 
 	if(options.enableEmscripten)
@@ -255,13 +255,12 @@ static int run(const CommandLineOptions& options)
 	}
 
 	// Look up the function export to call.
-	FunctionInstance* functionInstance;
+	Function* function;
 	if(!options.functionName)
 	{
-		functionInstance = asFunctionNullable(getInstanceExport(moduleInstance, "main"));
-		if(!functionInstance)
-		{ functionInstance = asFunctionNullable(getInstanceExport(moduleInstance, "_main")); }
-		if(!functionInstance)
+		function = asFunctionNullable(getInstanceExport(moduleInstance, "main"));
+		if(!function) { function = asFunctionNullable(getInstanceExport(moduleInstance, "_main")); }
+		if(!function)
 		{
 			Log::printf(Log::error, "Module does not export main function\n");
 			return EXIT_FAILURE;
@@ -269,15 +268,14 @@ static int run(const CommandLineOptions& options)
 	}
 	else
 	{
-		functionInstance
-			= asFunctionNullable(getInstanceExport(moduleInstance, options.functionName));
-		if(!functionInstance)
+		function = asFunctionNullable(getInstanceExport(moduleInstance, options.functionName));
+		if(!function)
 		{
 			Log::printf(Log::error, "Module does not export '%s'\n", options.functionName);
 			return EXIT_FAILURE;
 		}
 	}
-	FunctionType functionType = getFunctionType(functionInstance);
+	FunctionType functionType = getFunctionType(function);
 
 	// Set up the arguments for the invoke.
 	std::vector<Value> invokeArgs;
@@ -336,7 +334,7 @@ static int run(const CommandLineOptions& options)
 
 	// Invoke the function.
 	Timing::Timer executionTimer;
-	IR::ValueTuple functionResults = invokeFunctionChecked(context, functionInstance, invokeArgs);
+	IR::ValueTuple functionResults = invokeFunctionChecked(context, function, invokeArgs);
 	Timing::logTimer("Invoked function", executionTimer);
 
 	if(options.functionName)
@@ -435,7 +433,7 @@ int main(int argc, char** argv)
 
 	// Treat any unhandled exception (e.g. in a thread) as a fatal error.
 	Runtime::setUnhandledExceptionHandler([](Runtime::Exception&& exception) {
-		Errors::fatalf("Runtime exception: %s\n", describeException(exception).c_str());
+		Errors::fatalf("Runtime exception: %s", describeException(exception).c_str());
 	});
 
 	return run(options);

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "LLVMEmitContext.h"
-#include "LLVMEmitModuleContext.h"
+#include "EmitContext.h"
+#include "EmitModuleContext.h"
 #include "LLVMJITPrivate.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/Types.h"
@@ -257,7 +257,7 @@ namespace WAVM { namespace LLVMJIT {
 			// Only used for non-Windows exceptions.
 			llvm::LandingPadInst* landingPadInst;
 			llvm::BasicBlock* nextHandlerBlock;
-			llvm::Value* exceptionTypeInstance;
+			llvm::Value* exceptionTypeId;
 
 			// Used for all platforms.
 			llvm::Value* exceptionPointer;

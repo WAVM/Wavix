@@ -1,6 +1,6 @@
-#include "LLVMEmitContext.h"
-#include "LLVMEmitFunctionContext.h"
-#include "LLVMEmitModuleContext.h"
+#include "EmitContext.h"
+#include "EmitFunctionContext.h"
+#include "EmitModuleContext.h"
 #include "LLVMJITPrivate.h"
 #include "WAVM/IR/Operators.h"
 #include "WAVM/IR/Types.h"
@@ -39,10 +39,10 @@ void EmitFunctionContext::ref_func(FunctionImm imm)
 {
 	llvm::Value* referencedFunction = moduleContext.functions[imm.functionIndex];
 	llvm::Value* codeAddress = irBuilder.CreatePtrToInt(referencedFunction, llvmContext.iptrType);
-	llvm::Value* anyFuncAddress = irBuilder.CreateSub(
-		codeAddress, emitLiteral(llvmContext, Uptr(offsetof(Runtime::AnyFunc, code))));
-	llvm::Value* anyFunc = irBuilder.CreateIntToPtr(anyFuncAddress, llvmContext.anyrefType);
-	push(anyFunc);
+	llvm::Value* functionAddress = irBuilder.CreateSub(
+		codeAddress, emitLiteral(llvmContext, Uptr(offsetof(Runtime::Function, code))));
+	llvm::Value* anyref = irBuilder.CreateIntToPtr(functionAddress, llvmContext.anyrefType);
+	push(anyref);
 }
 
 void EmitFunctionContext::table_get(TableImm imm)
@@ -84,7 +84,7 @@ void EmitFunctionContext::table_init(ElemSegmentAndTableImm imm)
 		{destOffset,
 		 sourceOffset,
 		 numElements,
-		 irBuilder.CreatePointerCast(moduleContext.moduleInstancePointer, llvmContext.iptrType),
+		 moduleContext.moduleInstanceId,
 		 getTableIdFromOffset(llvmContext, moduleContext.tableOffsets[imm.tableIndex]),
 		 emitLiteral(llvmContext, imm.elemSegmentIndex)});
 }
@@ -94,8 +94,7 @@ void EmitFunctionContext::table_drop(ElemSegmentImm imm)
 	emitRuntimeIntrinsic(
 		"table.drop",
 		FunctionType({}, TypeTuple({inferValueType<Uptr>(), inferValueType<Uptr>()})),
-		{irBuilder.CreatePointerCast(moduleContext.moduleInstancePointer, llvmContext.iptrType),
-		 emitLiteral(llvmContext, imm.elemSegmentIndex)});
+		{moduleContext.moduleInstanceId, emitLiteral(llvmContext, imm.elemSegmentIndex)});
 }
 
 void EmitFunctionContext::table_copy(TableImm imm)

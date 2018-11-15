@@ -35,23 +35,17 @@ DEFINE_INTRINSIC_MODULE(env)
 DEFINE_INTRINSIC_MODULE(asm2wasm)
 DEFINE_INTRINSIC_MODULE(global)
 
-static U32 coerce32bitAddress(MemoryInstance* memory, Uptr address)
+static U32 coerce32bitAddress(Memory* memory, Uptr address)
 {
 	if(address >= UINT32_MAX)
-	{
-		throwException(Exception::outOfBoundsMemoryAccessType,
-					   {asAnyRef(asObject(memory)), U64(address)});
-	}
+	{ throwException(Exception::outOfBoundsMemoryAccessType, {asObject(memory), U64(address)}); }
 	return (U32)address;
 }
 
-static I32 coerce32bitAddressSigned(MemoryInstance* memory, Uptr address)
+static I32 coerce32bitAddressSigned(Memory* memory, Uptr address)
 {
 	if(address >= INT32_MAX)
-	{
-		throwException(Exception::outOfBoundsMemoryAccessType,
-					   {asAnyRef(asObject(memory)), U64(address)});
-	}
+	{ throwException(Exception::outOfBoundsMemoryAccessType, {asObject(memory), U64(address)}); }
 	return (I32)address;
 }
 
@@ -109,7 +103,10 @@ DEFINE_INTRINSIC_GLOBAL(env,
 						_stdout,
 						MutableGlobals::address + offsetof(MutableGlobals, _stdout));
 
+DEFINE_INTRINSIC_GLOBAL(env, "__memory_base", U32, memory_base, 1024);
 DEFINE_INTRINSIC_GLOBAL(env, "memoryBase", U32, emscriptenMemoryBase, 1024);
+
+DEFINE_INTRINSIC_GLOBAL(env, "__table_base", U32, table_base, 0);
 DEFINE_INTRINSIC_GLOBAL(env, "tableBase", U32, emscriptenTableBase, 0);
 
 DEFINE_INTRINSIC_GLOBAL(env,
@@ -122,9 +119,9 @@ DEFINE_INTRINSIC_GLOBAL(env, "EMTSTACKTOP", U32, EMTSTACKTOP, 0)
 DEFINE_INTRINSIC_GLOBAL(env, "EMT_STACK_MAX", U32, EMT_STACK_MAX, 0)
 DEFINE_INTRINSIC_GLOBAL(env, "eb", I32, eb, 0)
 
-static thread_local MemoryInstance* emscriptenMemory = nullptr;
+static thread_local Memory* emscriptenMemory = nullptr;
 
-static U32 dynamicAlloc(MemoryInstance* memory, U32 numBytes)
+static U32 dynamicAlloc(Memory* memory, U32 numBytes)
 {
 	MutableGlobals& mutableGlobals = memoryRef<MutableGlobals>(memory, MutableGlobals::address);
 
@@ -687,8 +684,8 @@ Emscripten::Instance* Emscripten::instantiate(Compartment* compartment, const IR
 	   && module.tables.imports[0].exportName == "table")
 	{ tableType = module.tables.imports[0].type; }
 
-	MemoryInstance* memory = Runtime::createMemory(compartment, memoryType, "env.memory");
-	TableInstance* table = Runtime::createTable(compartment, tableType, "env.table");
+	Memory* memory = Runtime::createMemory(compartment, memoryType, "env.memory");
+	Table* table = Runtime::createTable(compartment, tableType, "env.table");
 
 	HashMap<std::string, Runtime::Object*> extraEnvExports = {
 		{"memory", Runtime::asObject(memory)},
@@ -722,7 +719,7 @@ void Emscripten::initializeGlobals(Context* context,
 {
 	// Call the establishStackSpace function to set the Emscripten module's internal stack
 	// pointers.
-	FunctionInstance* establishStackSpace
+	Function* establishStackSpace
 		= asFunctionNullable(getInstanceExport(moduleInstance, "establishStackSpace"));
 	if(establishStackSpace
 	   && getFunctionType(establishStackSpace)
@@ -737,12 +734,12 @@ void Emscripten::initializeGlobals(Context* context,
 	for(Uptr exportIndex = 0; exportIndex < module.exports.size(); ++exportIndex)
 	{
 		const Export& functionExport = module.exports[exportIndex];
-		if(functionExport.kind == IR::ObjectKind::function
+		if(functionExport.kind == IR::ExternKind::function
 		   && !strncmp(functionExport.name.c_str(), "__GLOBAL__", 10))
 		{
-			FunctionInstance* functionInstance
+			Function* function
 				= asFunctionNullable(getInstanceExport(moduleInstance, functionExport.name));
-			if(functionInstance) { Runtime::invokeFunctionChecked(context, functionInstance, {}); }
+			if(function) { Runtime::invokeFunctionChecked(context, function, {}); }
 		}
 	}
 }
@@ -751,7 +748,7 @@ void Emscripten::injectCommandArgs(Emscripten::Instance* instance,
 								   const std::vector<const char*>& argStrings,
 								   std::vector<IR::Value>& outInvokeArgs)
 {
-	MemoryInstance* memory = instance->emscriptenMemory;
+	Memory* memory = instance->emscriptenMemory;
 	U8* emscriptenMemoryBaseAdress = getMemoryBaseAddress(memory);
 
 	U32* argvOffsets = (U32*)(emscriptenMemoryBaseAdress

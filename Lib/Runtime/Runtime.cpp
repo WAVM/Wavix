@@ -10,41 +10,67 @@ using namespace WAVM;
 using namespace WAVM::IR;
 using namespace WAVM::Runtime;
 
-const AnyReferee* Runtime::asAnyRef(const Object* object)
-{
-	return ((ObjectImpl*)object)->getAnyRef();
-}
+#define DEFINE_OBJECT_TYPE(kindId, kindName, Type)                                                 \
+	Runtime::Type* Runtime::as##kindName(Object* object)                                           \
+	{                                                                                              \
+		wavmAssert(!object || object->kind == kindId);                                             \
+		return (Runtime::Type*)object;                                                             \
+	}                                                                                              \
+	Runtime::Type* Runtime::as##kindName##Nullable(Object* object)                                 \
+	{                                                                                              \
+		return object && object->kind == kindId ? (Runtime::Type*)object : nullptr;                \
+	}                                                                                              \
+	const Runtime::Type* Runtime::as##kindName(const Object* object)                               \
+	{                                                                                              \
+		wavmAssert(!object || object->kind == kindId);                                             \
+		return (const Runtime::Type*)object;                                                       \
+	}                                                                                              \
+	const Runtime::Type* Runtime::as##kindName##Nullable(const Object* object)                     \
+	{                                                                                              \
+		return object && object->kind == kindId ? (const Runtime::Type*)object : nullptr;          \
+	}                                                                                              \
+	Object* Runtime::asObject(Runtime::Type* object) { return (Object*)object; }                   \
+	const Object* Runtime::asObject(const Runtime::Type* object) { return (const Object*)object; }
 
-bool Runtime::isA(Object* object, const ObjectType& type)
+DEFINE_OBJECT_TYPE(ObjectKind::function, Function, Function);
+DEFINE_OBJECT_TYPE(ObjectKind::table, Table, Table);
+DEFINE_OBJECT_TYPE(ObjectKind::memory, Memory, Memory);
+DEFINE_OBJECT_TYPE(ObjectKind::global, Global, Global);
+DEFINE_OBJECT_TYPE(ObjectKind::exceptionType, ExceptionType, ExceptionType);
+DEFINE_OBJECT_TYPE(ObjectKind::moduleInstance, ModuleInstance, ModuleInstance);
+DEFINE_OBJECT_TYPE(ObjectKind::context, Context, Context);
+DEFINE_OBJECT_TYPE(ObjectKind::compartment, Compartment, Compartment);
+
+bool Runtime::isA(Object* object, const ExternType& type)
 {
-	if(Runtime::ObjectKind(type.kind) != object->kind) { return false; }
+	if(ObjectKind(type.kind) != object->kind) { return false; }
 
 	switch(type.kind)
 	{
-	case IR::ObjectKind::function: return asFunctionType(type) == asFunction(object)->type;
-	case IR::ObjectKind::global: return isSubtype(asGlobal(object)->type, asGlobalType(type));
-	case IR::ObjectKind::table: return isSubtype(asTable(object)->type, asTableType(type));
-	case IR::ObjectKind::memory: return isSubtype(asMemory(object)->type, asMemoryType(type));
-	case IR::ObjectKind::exceptionType:
-		return asExceptionType(type) == asExceptionTypeInstance(object)->type;
+	case ExternKind::function: return asFunction(object)->encodedType == asFunctionType(type);
+	case ExternKind::global: return isSubtype(asGlobal(object)->type, asGlobalType(type));
+	case ExternKind::table: return isSubtype(asTable(object)->type, asTableType(type));
+	case ExternKind::memory: return isSubtype(asMemory(object)->type, asMemoryType(type));
+	case ExternKind::exceptionType:
+		return isSubtype(asExceptionType(type).params, asExceptionType(object)->sig.params);
 	default: Errors::unreachable();
 	}
 }
 
-IR::ObjectType Runtime::getObjectType(Object* object)
+ExternType Runtime::getObjectType(Object* object)
 {
 	switch(object->kind)
 	{
-	case Runtime::ObjectKind::function: return asFunction(object)->type;
-	case Runtime::ObjectKind::global: return asGlobal(object)->type;
-	case Runtime::ObjectKind::table: return asTable(object)->type;
-	case Runtime::ObjectKind::memory: return asMemory(object)->type;
-	case Runtime::ObjectKind::exceptionTypeInstance: return asExceptionTypeInstance(object)->type;
+	case ObjectKind::function: return FunctionType(asFunction(object)->encodedType);
+	case ObjectKind::global: return asGlobal(object)->type;
+	case ObjectKind::table: return asTable(object)->type;
+	case ObjectKind::memory: return asMemory(object)->type;
+	case ObjectKind::exceptionType: return asExceptionType(object)->sig;
 	default: Errors::unreachable();
 	};
 }
 
-FunctionType Runtime::getFunctionType(FunctionInstance* function) { return function->type; }
+FunctionType Runtime::getFunctionType(Function* function) { return function->encodedType; }
 
 Context* Runtime::getContextFromRuntimeData(ContextRuntimeData* contextRuntimeData)
 {
@@ -55,13 +81,21 @@ Context* Runtime::getContextFromRuntimeData(ContextRuntimeData* contextRuntimeDa
 	return compartmentRuntimeData->compartment->contexts[contextId];
 }
 
-ContextRuntimeData* Runtime::getContextRuntimeData(Context* context)
+ContextRuntimeData* Runtime::getContextRuntimeData(const Context* context)
 {
 	return context->runtimeData;
 }
 
-TableInstance* Runtime::getTableFromRuntimeData(ContextRuntimeData* contextRuntimeData,
-												Uptr tableId)
+ModuleInstance* Runtime::getModuleInstanceFromRuntimeData(ContextRuntimeData* contextRuntimeData,
+														  Uptr moduleInstanceId)
+{
+	Compartment* compartment = getCompartmentRuntimeData(contextRuntimeData)->compartment;
+	Lock<Platform::Mutex> compartmentLock(compartment->mutex);
+	wavmAssert(compartment->moduleInstances.contains(moduleInstanceId));
+	return compartment->moduleInstances[moduleInstanceId];
+}
+
+Table* Runtime::getTableFromRuntimeData(ContextRuntimeData* contextRuntimeData, Uptr tableId)
 {
 	Compartment* compartment = getCompartmentRuntimeData(contextRuntimeData)->compartment;
 	Lock<Platform::Mutex> compartmentLock(compartment->mutex);
@@ -69,8 +103,7 @@ TableInstance* Runtime::getTableFromRuntimeData(ContextRuntimeData* contextRunti
 	return compartment->tables[tableId];
 }
 
-MemoryInstance* Runtime::getMemoryFromRuntimeData(ContextRuntimeData* contextRuntimeData,
-												  Uptr memoryId)
+Memory* Runtime::getMemoryFromRuntimeData(ContextRuntimeData* contextRuntimeData, Uptr memoryId)
 {
 	Compartment* compartment = getCompartmentRuntimeData(contextRuntimeData)->compartment;
 	Lock<Platform::Mutex> compartmentLock(compartment->mutex);
