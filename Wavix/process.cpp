@@ -126,21 +126,21 @@ inline bool loadBinaryModuleFromFile(const char* wasmFilename, IR::Module& outMo
 
 		return true;
 	}
-	catch(Serialization::FatalSerializationException exception)
+	catch(Serialization::FatalSerializationException const& exception)
 	{
 		Log::printf(Log::debug,
 					"Error deserializing WebAssembly binary file:\n%s\n",
 					exception.message.c_str());
 		return false;
 	}
-	catch(IR::ValidationException exception)
+	catch(IR::ValidationException const& exception)
 	{
 		Log::printf(Log::debug,
 					"Error validating WebAssembly binary file:\n%s\n",
 					exception.message.c_str());
 		return false;
 	}
-	catch(std::bad_alloc)
+	catch(std::bad_alloc const&)
 	{
 		Log::printf(
 			Log::debug,
