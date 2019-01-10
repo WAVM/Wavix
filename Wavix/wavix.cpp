@@ -366,13 +366,14 @@ static void unhandledExceptionHandler(Exception&& exception)
 void showHelp()
 {
 	Log::printf(Log::error,
-				"Usage: wavix [options] <executable module path> [--] [arguments]\n"
-				"  in.wast|in.wasm\t\tSpecify program file (.wast/.wasm)\n"
+				"Usage: wavix [options] <executable path> [--] [arguments]\n"
+				"  Runs a Wavix executable.\n"
+				"  <executable path> Host path to the Wavix executable\n"
 				"  --trace-syscalls  Trace Wavix syscalls to stdout\n"
 				"  --sysroot <path>  Sets the system root directory to the given path.\n"
-				"                      Defaults to the CWD. All Wavix file accesses will be\n"
-				"                      relative to sysroot, including the executable module path.\n"
-				"  --                Stop parsing arguments\n");
+				"                      Defaults to the CWD. All Wavix file paths will be relative\n"
+				"                      to sysroot, with the exception of <executable path>\n"
+				"  --                Pass all subsequent arguments to the Wavix executable\n");
 	//          "--------------------------------------------------------------------------------"
 	//          <- 80 chars wide
 }
