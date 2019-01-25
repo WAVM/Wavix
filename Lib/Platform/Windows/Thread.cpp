@@ -24,7 +24,7 @@ struct Platform::Thread
 {
 	HANDLE handle = INVALID_HANDLE_VALUE;
 	DWORD id = 0xffffffff;
-	std::atomic<I32> numRefs {2};
+	std::atomic<I32> numRefs{2};
 	I64 result = -1;
 
 	void releaseRef()
@@ -99,7 +99,7 @@ static DWORD createThreadEntry2(void* argsVoid)
 
 		args->thread->result = (*args->entry)(args->entryArgument);
 	}
-	catch(ExitThreadException exception)
+	catch(ExitThreadException const& exception)
 	{
 		args->thread->result = exception.exitCode;
 	}
@@ -209,7 +209,7 @@ static DWORD forkThreadEntry2(void* argsVoid)
 		args->thread->result
 			= switchToForkedStackContext(&args->forkContext, args->threadEntryFramePointer);
 	}
-	catch(ExitThreadException exception)
+	catch(ExitThreadException const& exception)
 	{
 		args->thread->result = exception.exitCode;
 	}

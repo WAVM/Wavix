@@ -20,13 +20,13 @@ struct PlatformException
 thread_local SignalContext* Platform::innermostSignalContext = nullptr;
 static std::atomic<SignalHandler> portableSignalHandler;
 
-static void deliverSignal(Signal signal, const CallStack& callStack)
+static void deliverSignal(Signal signal, CallStack&& callStack)
 {
 	// Call the signal handlers, from innermost to outermost, until one returns true.
 	for(SignalContext* signalContext = innermostSignalContext; signalContext;
 		signalContext = signalContext->outerContext)
 	{
-		if(signalContext->filter(signal, callStack))
+		if(signalContext->filter(signal, std::move(callStack)))
 		{
 			// Jump back to the execution context that was saved in catchSignals.
 			siglongjmp(signalContext->catchJump, 1);
@@ -35,7 +35,8 @@ static void deliverSignal(Signal signal, const CallStack& callStack)
 
 	// If the signal wasn't handled by a catchSignals call, call the portable signal handler.
 	SignalHandler portableSignalHandlerSnapshot = portableSignalHandler.load();
-	if(portableSignalHandlerSnapshot) { portableSignalHandlerSnapshot(signal, callStack); }
+	if(portableSignalHandlerSnapshot)
+	{ portableSignalHandlerSnapshot(signal, std::move(callStack)); }
 }
 
 [[noreturn]] static void signalHandler(int signalNumber, siginfo_t* signalInfo, void*)
@@ -47,37 +48,37 @@ static void deliverSignal(Signal signal, const CallStack& callStack)
 	{
 	case SIGFPE:
 		if(signalInfo->si_code != FPE_INTDIV && signalInfo->si_code != FPE_INTOVF)
-		{ Errors::fatal("unknown SIGFPE code"); }
+		{ Errors::fatalfWithCallStack("unknown SIGFPE code"); }
 		signal.type = Signal::Type::intDivideByZeroOrOverflow;
 		break;
 	case SIGSEGV:
 	case SIGBUS:
 	{
 		// Determine whether the faulting address was an address reserved by the stack.
+		U8* stackMinGuardAddr;
 		U8* stackMinAddr;
 		U8* stackMaxAddr;
-		getCurrentThreadStack(stackMinAddr, stackMaxAddr);
-		stackMinAddr -= sysconf(_SC_PAGESIZE);
-		signal.type = signalInfo->si_addr >= stackMinAddr && signalInfo->si_addr < stackMaxAddr
+		getCurrentThreadStack(stackMinGuardAddr, stackMinAddr, stackMaxAddr);
+		signal.type = signalInfo->si_addr >= stackMinGuardAddr && signalInfo->si_addr < stackMaxAddr
 						  ? Signal::Type::stackOverflow
 						  : Signal::Type::accessViolation;
 		signal.accessViolation.address = reinterpret_cast<Uptr>(signalInfo->si_addr);
 		break;
 	}
-	default: Errors::fatalf("unknown signal number: %i", signalNumber); break;
+	default: Errors::fatalfWithCallStack("unknown signal number: %i", signalNumber); break;
 	};
 
 	// Capture the execution context, omitting this function and the function that called it, so the
 	// top of the callstack is the function that triggered the signal.
 	CallStack callStack = captureCallStack(2);
 
-	deliverSignal(signal, callStack);
+	deliverSignal(signal, std::move(callStack));
 
 	switch(signalNumber)
 	{
-	case SIGFPE: Errors::fatalf("unhandled SIGFPE");
-	case SIGSEGV: Errors::fatalf("unhandled SIGSEGV");
-	case SIGBUS: Errors::fatalf("unhandled SIGBUS");
+	case SIGFPE: Errors::fatalfWithCallStack("unhandled SIGFPE");
+	case SIGSEGV: Errors::fatalfWithCallStack("unhandled SIGSEGV");
+	case SIGBUS: Errors::fatalfWithCallStack("unhandled SIGBUS");
 	default: Errors::unreachable();
 	};
 }
@@ -106,7 +107,7 @@ static void initSignals()
 }
 
 bool Platform::catchSignals(const std::function<void()>& thunk,
-							const std::function<bool(Signal, const CallStack&)>& filter)
+							const std::function<bool(Signal, CallStack&&)>& filter)
 {
 	initSignals();
 	sigAltStack.init();
@@ -140,12 +141,12 @@ static void terminateHandler()
 	{
 		std::rethrow_exception(std::current_exception());
 	}
-	catch(PlatformException exception)
+	catch(PlatformException& exception)
 	{
 		Signal signal;
 		signal.type = Signal::Type::unhandledException;
 		signal.unhandledException.data = exception.data;
-		deliverSignal(signal, exception.callStack);
+		deliverSignal(signal, std::move(exception.callStack));
 		Errors::fatal("Unhandled runtime exception");
 	}
 	catch(...)
@@ -200,16 +201,16 @@ void Platform::deregisterEHFrames(const U8* imageBase, const U8* ehFrames, Uptr 
 }
 
 bool Platform::catchPlatformExceptions(const std::function<void()>& thunk,
-									   const std::function<void(void*, const CallStack&)>& handler)
+									   const std::function<void(void*, CallStack&&)>& handler)
 {
 	try
 	{
 		thunk();
 		return false;
 	}
-	catch(PlatformException exception)
+	catch(PlatformException& exception)
 	{
-		handler(exception.data, exception.callStack);
+		handler(exception.data, std::move(exception.callStack));
 		if(exception.data) { free(exception.data); }
 		return true;
 	}
@@ -224,7 +225,7 @@ std::type_info* Platform::getUserExceptionTypeInfo()
 		{
 			throw PlatformException{nullptr};
 		}
-		catch(PlatformException)
+		catch(PlatformException const&)
 		{
 			typeInfo = __cxxabiv1::__cxa_current_exception_type();
 		}

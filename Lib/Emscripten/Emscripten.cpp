@@ -144,6 +144,10 @@ DEFINE_INTRINSIC_FUNCTION(env, "getTotalMemory", U32, getTotalMemory)
 	return coerce32bitAddress(emscriptenMemory,
 							  Runtime::getMemoryMaxPages(emscriptenMemory) * IR::numBytesPerPage);
 }
+DEFINE_INTRINSIC_FUNCTION(env, "_emscripten_get_heap_size", U32, _emscripten_get_heap_size)
+{
+	return getTotalMemory(contextRuntimeData);
+}
 
 DEFINE_INTRINSIC_FUNCTION(env, "abortStackOverflow", void, abortStackOverflow, I32 size)
 {
@@ -158,6 +162,10 @@ DEFINE_INTRINSIC_FUNCTION(env, "enlargeMemory", I32, enlargeMemory)
 {
 	return abortOnCannotGrowMemory(contextRuntimeData);
 }
+DEFINE_INTRINSIC_FUNCTION(env, "_emscripten_resize_heap", I32, _emscripten_resize_heap, U32 size)
+{
+	return enlargeMemory(contextRuntimeData);
+}
 
 DEFINE_INTRINSIC_FUNCTION(env, "_time", I32, _time, U32 address)
 {
@@ -169,8 +177,10 @@ DEFINE_INTRINSIC_FUNCTION(env, "_time", I32, _time, U32 address)
 
 DEFINE_INTRINSIC_FUNCTION(env, "___errno_location", I32, ___errno_location) { return 0; }
 
-DEFINE_INTRINSIC_FUNCTION(env, "___setErrNo", void, ___seterrno, I32 value) {
-	if(emscriptenErrNoLocation) { memoryRef<I32>(emscriptenMemory, emscriptenErrNoLocation) = (I32)value; }
+DEFINE_INTRINSIC_FUNCTION(env, "___setErrNo", void, ___seterrno, I32 value)
+{
+	if(emscriptenErrNoLocation)
+	{ memoryRef<I32>(emscriptenMemory, emscriptenErrNoLocation) = (I32)value; }
 }
 
 DEFINE_INTRINSIC_FUNCTION(env, "_sysconf", I32, _sysconf, I32 a)
@@ -815,14 +825,11 @@ void Emscripten::initializeGlobals(Context* context,
 	Function* errNoLocation
 		= asFunctionNullable(getInstanceExport(moduleInstance, "___errno_location"));
 	if(errNoLocation
-	   && getFunctionType(errNoLocation)
-			  == FunctionType(TypeTuple{ValueType::i32}, TypeTuple{}))
+	   && getFunctionType(errNoLocation) == FunctionType(TypeTuple{ValueType::i32}, TypeTuple{}))
 	{
 		IR::ValueTuple errNoResult = Runtime::invokeFunctionChecked(context, errNoLocation, {});
 		if(errNoResult.size() == 1 && errNoResult[0].type == ValueType::i32)
-		{
-			emscriptenErrNoLocation = errNoResult[0].i32;
-		}
+		{ emscriptenErrNoLocation = errNoResult[0].i32; }
 	}
 }
 
