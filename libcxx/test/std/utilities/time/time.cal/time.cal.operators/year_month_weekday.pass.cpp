@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class year_month_weekday;
@@ -14,19 +13,19 @@
 // constexpr year_month_weekday
 //   operator/(const year_month& ym, const weekday_indexed& wdi) noexcept;
 // Returns: {ym.year(), ym.month(), wdi}.
-// 
+//
 // constexpr year_month_weekday
 //   operator/(const year& y, const month_weekday& mwd) noexcept;
 // Returns: {y, mwd.month(), mwd.weekday_indexed()}.
-// 
+//
 // constexpr year_month_weekday
 //   operator/(int y, const month_weekday& mwd) noexcept;
 // Returns: year(y) / mwd.
-// 
+//
 // constexpr year_month_weekday
 //   operator/(const month_weekday& mwd, const year& y) noexcept;
 // Returns: y / mwd.
-// 
+//
 // constexpr year_month_weekday
 //   operator/(const month_weekday& mwd, int y) noexcept;
 // Returns: year(y) / mwd.
@@ -52,10 +51,10 @@ int main()
     constexpr weekday Tuesday = std::chrono::Tuesday;
     constexpr month February = std::chrono::February;
 
-    
+
     { // operator/(const year_month& ym, const weekday_indexed& wdi)
         constexpr year_month Feb2018{year{2018}, February};
-        
+
         ASSERT_NOEXCEPT (                             Feb2018/weekday_indexed{Tuesday, 2});
         ASSERT_SAME_TYPE(year_month_weekday, decltype(Feb2018/weekday_indexed{Tuesday, 2}));
 
@@ -141,5 +140,5 @@ int main()
                         assert(ymd2.weekday() == wd);
                         assert(ymd1 == ymd2);
                     }
-     } 
+     }
 }

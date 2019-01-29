@@ -1,10 +1,9 @@
 // -*- C++ -*-
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -24,7 +23,8 @@ struct make_variant_imp;
 
 template <size_t ...Indices>
 struct make_variant_imp<std::integer_sequence<size_t, Indices...>> {
-  using type = std::variant<decltype((Indices, char(0)))...>;
+  template <size_t> using AlwaysChar = char;
+  using type = std::variant<AlwaysChar<Indices>...>;
 };
 
 template <size_t N>

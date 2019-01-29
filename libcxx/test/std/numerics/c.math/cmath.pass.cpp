@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,6 +15,7 @@
 
 #include "test_macros.h"
 #include "hexfloat.h"
+#include "truncate_fp.h"
 
 // convertible to int/float/double/etc
 template <class T, int N=0>
@@ -860,7 +860,7 @@ void test_cbrt()
     static_assert((std::is_same<decltype(std::cbrtf(0)), float>::value), "");
     static_assert((std::is_same<decltype(std::cbrtl(0)), long double>::value), "");
     static_assert((std::is_same<decltype(cbrt(Ambiguous())), Ambiguous>::value), "");
-    assert(std::cbrt(1) == 1);
+    assert(truncate_fp(std::cbrt(1)) == 1);
 }
 
 void test_copysign()

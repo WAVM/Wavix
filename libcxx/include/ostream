@@ -1,10 +1,9 @@
 // -*- C++ -*-
 //===-------------------------- ostream -----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -140,6 +139,7 @@ template <class charT, class traits, class T>
 #include <locale>
 #include <iterator>
 #include <bitset>
+#include <version>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #pragma GCC system_header
@@ -1092,7 +1092,7 @@ operator<<(basic_ostream<_CharT, _Traits>& __os, const bitset<_Size>& __x)
                          use_facet<ctype<_CharT> >(__os.getloc()).widen('1'));
 }
 
-#ifndef _LIBCPP_AVAILABILITY_NO_STREAMS_EXTERN_TEMPLATE
+#ifndef _LIBCPP_DO_NOT_ASSUME_STREAMS_EXPLICIT_INSTANTIATION_IN_DYLIB
 _LIBCPP_EXTERN_TEMPLATE(class _LIBCPP_EXTERN_TEMPLATE_TYPE_VIS basic_ostream<char>)
 _LIBCPP_EXTERN_TEMPLATE(class _LIBCPP_EXTERN_TEMPLATE_TYPE_VIS basic_ostream<wchar_t>)
 #endif

@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -59,6 +58,9 @@ test()
 int main()
 {
     test<std::string_view>();
+#if defined(__cpp_lib_char8_t) && __cpp_lib_char8_t >= 201811L
+    test<std::u8string_view>();
+#endif
 #ifndef _LIBCPP_HAS_NO_UNICODE_CHARS
     test<std::u16string_view>();
     test<std::u32string_view>();

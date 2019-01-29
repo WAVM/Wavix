@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 // XFAIL: *
 
 // <chrono>
@@ -15,7 +14,7 @@
 // template<class charT, class traits>
 //     basic_ostream<charT, traits>&
 //     operator<<(basic_ostream<charT, traits>& os, const month_weekday& mwd);
-// 
+//
 //     Returns: os << mwd.month() << '/' << mwd.weekday_indexed().
 
 #include <chrono>
@@ -31,6 +30,6 @@ int main()
     using month           = std::chrono::month;
     using weekday_indexed = std::chrono::weekday_indexed;
     using weekday         = std::chrono::weekday;
-    
+
     std::cout << month_weekday{month{1}, weekday_indexed{weekday{3}, 3}};
 }

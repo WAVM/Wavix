@@ -1,13 +1,12 @@
 // -*- C++ -*-
 //===------------------------------ span ---------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===---------------------------------------------------------------------===//
-// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17 
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <span>
 
@@ -46,7 +45,7 @@ void testCV ()
 int main ()
 {
     constexpr int carr[] = {1,2,3};
-    
+
     static_assert(doCopy(std::span<      int>  ()),            "");
     static_assert(doCopy(std::span<      int,0>()),            "");
     static_assert(doCopy(std::span<const int>  (&carr[0], 1)), "");

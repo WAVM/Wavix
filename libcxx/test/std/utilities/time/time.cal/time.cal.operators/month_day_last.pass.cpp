@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class month_day_last;
@@ -14,15 +13,15 @@
 // constexpr month_day_last
 //   operator/(const month& m, last_spec) noexcept;
 // Returns: month_day_last{m}.
-// 
+//
 // constexpr month_day_last
 //   operator/(int m, last_spec) noexcept;
 // Returns: month(m) / last.
-// 
+//
 // constexpr month_day_last
 //   operator/(last_spec, const month& m) noexcept;
-// Returns: m / last. 
-// 
+// Returns: m / last.
+//
 // constexpr month_day_last
 //   operator/(last_spec, int m) noexcept;
 // Returns: month(m) / last.
@@ -51,7 +50,7 @@ int main()
 {
     using month          = std::chrono::month;
     using month_day_last = std::chrono::month_day_last;
-    
+
     constexpr month February = std::chrono::February;
     constexpr std::chrono::last_spec last = std::chrono::last;
 
@@ -63,7 +62,7 @@ int main()
     constexpr auto mdl = February/std::chrono::last;
     static_assert(mdl.month() == February, "");
     }
-    
+
     { // operator/(const month& m, last_spec) and switched
         ASSERT_NOEXCEPT (                         last/February);
         ASSERT_SAME_TYPE(month_day_last, decltype(last/February));

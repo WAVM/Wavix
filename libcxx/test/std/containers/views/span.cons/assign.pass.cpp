@@ -1,13 +1,12 @@
 // -*- C++ -*-
 //===------------------------------ span ---------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===---------------------------------------------------------------------===//
-// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17 
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <span>
 
@@ -71,7 +70,7 @@ int main ()
             };
 
         static_assert(std::size(spans) == 13, "" );
-        
+
 //  No for loops in constexpr land :-(
         static_assert(doAssign(spans[0], spans[0]), "");
         static_assert(doAssign(spans[0], spans[1]), "");
@@ -194,7 +193,7 @@ int main ()
             {carr2 + 1, 2},
             {carr3, 2}
             };
-        
+
         static_assert(std::size(spans) == 6, "" );
 
 //  No for loops in constexpr land :-(
@@ -240,7 +239,7 @@ int main ()
             {arr,     arr + 3},
             {arr + 1, arr + 3} // same size as s2
             };
-        
+
         for (size_t i = 0; i < std::size(spans); ++i)
             for (size_t j = i; j < std::size(spans); ++j)
                 assert((doAssign(spans[i], spans[j])));
@@ -253,7 +252,7 @@ int main ()
             {arr + 1, arr + 3},
             {arr + 2, arr + 4}
             };
-        
+
         for (size_t i = 0; i < std::size(spans); ++i)
             for (size_t j = i; j < std::size(spans); ++j)
                 assert((doAssign(spans[i], spans[j])));
@@ -273,7 +272,7 @@ int main ()
             {strs + 2, strs + 3},
             {strs + 3, strs + 3}
             };
-        
+
         for (size_t i = 0; i < std::size(spans); ++i)
             for (size_t j = i; j < std::size(spans); ++j)
                 assert((doAssign(spans[i], spans[j])));
@@ -285,7 +284,7 @@ int main ()
             {strs + 1, strs + 2},
             {strs + 2, strs + 3}
             };
-        
+
         for (size_t i = 0; i < std::size(spans); ++i)
             for (size_t j = i; j < std::size(spans); ++j)
                 assert((doAssign(spans[i], spans[j])));

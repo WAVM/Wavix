@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class month_weekday_last;
@@ -14,15 +13,15 @@
 // constexpr month_weekday_last
 //   operator/(const month& m, const weekday_last& wdl) noexcept;
 // Returns: {m, wdl}.
-// 
+//
 // constexpr month_weekday_last
 //   operator/(int m, const weekday_last& wdl) noexcept;
 // Returns: month(m) / wdl.
-// 
+//
 // constexpr month_weekday_last
 //   operator/(const weekday_last& wdl, const month& m) noexcept;
 // Returns: m / wdl.
-// 
+//
 // constexpr month_weekday_last
 //   operator/(const weekday_last& wdl, int m) noexcept;
 // Returns: month(m) / wdl.
@@ -48,7 +47,7 @@ int main()
     constexpr weekday Tuesday = std::chrono::Tuesday;
     constexpr month February = std::chrono::February;
     constexpr std::chrono::last_spec last = std::chrono::last;
-    
+
     { // operator/(const month& m, const weekday_last& wdi) (and switched)
         ASSERT_NOEXCEPT (February/Tuesday[last]);
         ASSERT_SAME_TYPE(month_weekday_last, decltype(February/Tuesday[last]));
@@ -61,7 +60,7 @@ int main()
         static_assert(wdi.month()        == February,      "");
         static_assert(wdi.weekday_last() == Tuesday[last], "");
         }
-    
+
         for (int i = 1; i <= 12; ++i)
             for (unsigned j = 0; j <= 6; ++j)
             {
@@ -90,7 +89,7 @@ int main()
         static_assert(wdi.month()           == February,   "");
         static_assert(wdi.weekday_indexed() == Tuesday[3], "");
         }
-    
+
         for (int i = 1; i <= 12; ++i)
             for (unsigned j = 0; j <= 6; ++j)
             {
@@ -103,5 +102,5 @@ int main()
                 assert(mwd2.weekday_last() == wdi);
                 assert(mwd1 == mwd2);
             }
-    } 
+    }
 }

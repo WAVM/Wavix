@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class month;
@@ -17,9 +16,9 @@
 // constexpr month operator+(const months& x, const month& y) noexcept;
 //   Returns:
 //     month{modulo(static_cast<long long>(int{x}) + (y.count() - 1), 12) + 1}
-//   where modulo(n, 12) computes the remainder of n divided by 12 using Euclidean division. 
+//   where modulo(n, 12) computes the remainder of n divided by 12 using Euclidean division.
 //   [Note: Given a divisor of 12, Euclidean division truncates towards negative infinity
-//   and always produces a remainder in the range of [0, 11]. 
+//   and always produces a remainder in the range of [0, 11].
 //   Assuming no overflow in the signed summation, this operation results in a month
 //   holding a value in the range [1, 12] even if !x.ok(). —end note]
 //   [Example: February + months{11} == January. —end example]
@@ -54,7 +53,7 @@ int main()
 
     ASSERT_SAME_TYPE(month, decltype(std::declval<month>()  + std::declval<months>()));
     ASSERT_SAME_TYPE(month, decltype(std::declval<months>() + std::declval<month>() ));
-    
+
     static_assert(testConstexpr<month, months>(), "");
 
     month my{2};

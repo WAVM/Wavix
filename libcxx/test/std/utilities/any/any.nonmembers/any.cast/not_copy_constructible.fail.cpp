@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -39,6 +38,10 @@ struct no_move {
   no_move(no_move&&) = delete;
   no_move(no_move const&) {}
 };
+
+// On platforms that do not support any_cast, an additional availability error
+// is triggered by these tests.
+// expected-error@not_copy_constructible.fail.cpp:* 0+ {{call to unavailable function 'any_cast': introduced in macOS 10.14}}
 
 int main() {
     any a;

@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,7 +10,7 @@
 // REQUIRES: diagnose-if-support, verify-support
 
 // Test that libc++ generates a warning diagnostic when the container is
-// provided a non-const callable comparator.
+// provided a non-const callable comparator or a non-const hasher.
 
 #include <unordered_set>
 #include <unordered_map>
@@ -34,8 +33,10 @@ int main() {
   static_assert(!std::__invokable<BadEqual const&, int const&, int const&>::value, "");
   static_assert(std::__invokable<BadEqual&, int const&, int const&>::value, "");
 
-  // expected-warning@__hash_table:* 4 {{the specified comparator type does not provide a const call operator}}
-  // expected-warning@__hash_table:* 4 {{the specified hash functor does not provide a const call operator}}
+  // expected-warning@unordered_set:* 2 {{the specified comparator type does not provide a const call operator}}
+  // expected-warning@unordered_map:* 2 {{the specified comparator type does not provide a const call operator}}
+  // expected-warning@unordered_set:* 2 {{the specified hash functor does not provide a const call operator}}
+  // expected-warning@unordered_map:* 2 {{the specified hash functor does not provide a const call operator}}
 
   {
     using C = std::unordered_set<int, BadHash, BadEqual>;

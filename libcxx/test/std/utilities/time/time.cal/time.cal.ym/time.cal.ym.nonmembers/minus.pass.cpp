@@ -1,22 +1,21 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class year_month;
 
 // constexpr year_month operator-(const year_month& ym, const years& dy) noexcept;
-// Returns: ym + -dy.                
-// 
+// Returns: ym + -dy.
+//
 // constexpr year_month operator-(const year_month& ym, const months& dm) noexcept;
 // Returns: ym + -dm.
-// 
+//
 // constexpr months operator-(const year_month& x, const year_month& y) noexcept;
 // Returns: x.year() - y.year() + months{static_cast<int>(unsigned{x.month()}) -
 //                                       static_cast<int>(unsigned{y.month()})}
@@ -41,7 +40,7 @@ int main()
     {   // year_month - years
     ASSERT_NOEXCEPT(                      std::declval<year_month>() - std::declval<years>());
     ASSERT_SAME_TYPE(year_month, decltype(std::declval<year_month>() - std::declval<years>()));
-    
+
 //  static_assert(testConstexprYears (year_month{year{1}, month{1}}), "");
 
     year_month ym{year{1234}, std::chrono::January};
@@ -56,7 +55,7 @@ int main()
     {   // year_month - months
     ASSERT_NOEXCEPT(                      std::declval<year_month>() - std::declval<months>());
     ASSERT_SAME_TYPE(year_month, decltype(std::declval<year_month>() - std::declval<months>()));
-    
+
 //  static_assert(testConstexprMonths(year_month{year{1}, month{1}}), "");
 
     year_month ym{year{1234}, std::chrono::November};
@@ -71,7 +70,7 @@ int main()
     {   // year_month - year_month
     ASSERT_NOEXCEPT(                  std::declval<year_month>() - std::declval<year_month>());
     ASSERT_SAME_TYPE(months, decltype(std::declval<year_month>() - std::declval<year_month>()));
-    
+
 //  static_assert(testConstexprMonths(year_month{year{1}, month{1}}), "");
 
 //  Same year

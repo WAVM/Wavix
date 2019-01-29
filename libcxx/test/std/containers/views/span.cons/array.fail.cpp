@@ -1,13 +1,12 @@
 // -*- C++ -*-
 //===------------------------------ span ---------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===---------------------------------------------------------------------===//
-// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17 
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <span>
 
@@ -16,7 +15,7 @@
 // template<size_t N>
 //     constexpr span(array<value_type, N>& arr) noexcept;
 // template<size_t N>
-//     constexpr span(const array<value_type, N>& arr) noexcept;  
+//     constexpr span(const array<value_type, N>& arr) noexcept;
 //
 // Remarks: These constructors shall not participate in overload resolution unless:
 //   — extent == dynamic_extent || N == extent is true, and
@@ -41,13 +40,13 @@ int main ()
     {
     std::span<int, 2>   s1(arr); // expected-error {{no matching constructor for initialization of 'std::span<int, 2>'}}
     }
-    
+
 //  Type wrong
     {
     std::span<float>    s1(arr);   // expected-error {{no matching constructor for initialization of 'std::span<float>'}}
     std::span<float, 3> s2(arr);   // expected-error {{no matching constructor for initialization of 'std::span<float, 3>'}}
     }
-    
+
 //  CV wrong (dynamically sized)
     {
     std::span<               int> s1{ carr};    // expected-error {{no matching constructor for initialization of 'std::span<int>'}}

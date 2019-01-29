@@ -1,21 +1,21 @@
 // -*- C++ -*-
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++98, c++03, c++11, c++14
 
-// XFAIL: with_system_cxx_lib=macosx10.12
-// XFAIL: with_system_cxx_lib=macosx10.11
-// XFAIL: with_system_cxx_lib=macosx10.10
-// XFAIL: with_system_cxx_lib=macosx10.9
-// XFAIL: with_system_cxx_lib=macosx10.7
-// XFAIL: with_system_cxx_lib=macosx10.8
+// XFAIL: availability=macosx10.13
+// XFAIL: availability=macosx10.12
+// XFAIL: availability=macosx10.11
+// XFAIL: availability=macosx10.10
+// XFAIL: availability=macosx10.9
+// XFAIL: availability=macosx10.8
+// XFAIL: availability=macosx10.7
 
 // <variant>
 
@@ -31,7 +31,7 @@
 #include "variant_test_helpers.hpp"
 
 struct NonDefaultConstructible {
-  NonDefaultConstructible(int) {}
+  constexpr NonDefaultConstructible(int) {}
 };
 
 struct NotNoexcept {
@@ -98,6 +98,11 @@ void test_default_ctor_basic() {
     assert(std::get<0>(v) == 0);
   }
   {
+    std::variant<int, NonDefaultConstructible> v;
+    assert(v.index() == 0);
+    assert(std::get<0>(v) == 0);
+  }
+  {
     using V = std::variant<int, long>;
     constexpr V v;
     static_assert(v.index() == 0, "");
@@ -105,6 +110,12 @@ void test_default_ctor_basic() {
   }
   {
     using V = std::variant<int, long>;
+    constexpr V v;
+    static_assert(v.index() == 0, "");
+    static_assert(std::get<0>(v) == 0, "");
+  }
+  {
+    using V = std::variant<int, NonDefaultConstructible>;
     constexpr V v;
     static_assert(v.index() == 0, "");
     static_assert(std::get<0>(v) == 0, "");

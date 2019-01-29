@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class month_day;
@@ -14,19 +13,19 @@
 // constexpr month_day
 //   operator/(const month& m, const day& d) noexcept;
 // Returns: {m, d}.
-// 
+//
 // constexpr month_day
 //   operator/(const day& d, const month& m) noexcept;
 // Returns: m / d.
 
 // constexpr month_day
 //   operator/(const month& m, int d) noexcept;
-// Returns: m / day(d). 
-// 
+// Returns: m / day(d).
+//
 // constexpr month_day
 //   operator/(int m, const day& d) noexcept;
 // Returns: month(m) / d.
-// 
+//
 // constexpr month_day
 //   operator/(const day& d, int m) noexcept;
 // Returns: month(m) / d.
@@ -46,7 +45,7 @@ int main()
     using day       = std::chrono::day;
 
     constexpr month February = std::chrono::February;
-    
+
     { // operator/(const month& m, const day& d) (and switched)
         ASSERT_NOEXCEPT (                    February/day{1});
         ASSERT_SAME_TYPE(month_day, decltype(February/day{1}));

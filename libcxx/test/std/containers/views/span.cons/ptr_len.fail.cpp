@@ -1,18 +1,17 @@
 // -*- C++ -*-
 //===------------------------------ span ---------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===---------------------------------------------------------------------===//
-// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17 
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <span>
 
 // constexpr span(pointer ptr, index_type count);
-// Requires: [ptr, ptr + count) shall be a valid range. 
+// Requires: [ptr, ptr + count) shall be a valid range.
 //  If extent is not equal to dynamic_extent, then count shall be equal to extent.
 //
 
@@ -38,7 +37,7 @@ int main ()
     std::span<float>    s1(arr, 3);   // expected-error {{no matching constructor for initialization of 'std::span<float>'}}
     std::span<float, 3> s2(arr, 3);   // expected-error {{no matching constructor for initialization of 'std::span<float, 3>'}}
     }
-    
+
 //  CV wrong (dynamically sized)
     {
     std::span<               int> s1{ carr, 3}; // expected-error {{no matching constructor for initialization of 'std::span<int>'}}

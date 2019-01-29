@@ -1,13 +1,12 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
-// test libc++'s implementation of align_val_t, and the relevent new/delete
+// test libc++'s implementation of align_val_t, and the relevant new/delete
 // overloads in all dialects when -faligned-allocation is present.
 
 // Libc++ defers to the underlying MSVC library to provide the new/delete
@@ -16,12 +15,16 @@
 
 // REQUIRES: -faligned-allocation
 
+// The dylibs shipped before macosx10.14 do not contain the aligned allocation
+// functions, so trying to force using those with -faligned-allocation results
+// in a link error.
+// XFAIL: with_system_cxx_lib=macosx10.13
 // XFAIL: with_system_cxx_lib=macosx10.12
 // XFAIL: with_system_cxx_lib=macosx10.11
 // XFAIL: with_system_cxx_lib=macosx10.10
 // XFAIL: with_system_cxx_lib=macosx10.9
-// XFAIL: with_system_cxx_lib=macosx10.7
 // XFAIL: with_system_cxx_lib=macosx10.8
+// XFAIL: with_system_cxx_lib=macosx10.7
 
 // RUN: %build -faligned-allocation
 // RUN: %run

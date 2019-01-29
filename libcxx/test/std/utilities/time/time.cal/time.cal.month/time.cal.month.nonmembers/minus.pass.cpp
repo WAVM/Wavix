@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class month;
@@ -15,9 +14,9 @@
 //   Returns: x + -y.
 //
 // constexpr months operator-(const month& x, const month& y) noexcept;
-//   Returns: If x.ok() == true and y.ok() == true, returns a value m in the range 
-//   [months{0}, months{11}] satisfying y + m == x. 
-//   Otherwise the value returned is unspecified. 
+//   Returns: If x.ok() == true and y.ok() == true, returns a value m in the range
+//   [months{0}, months{11}] satisfying y + m == x.
+//   Otherwise the value returned is unspecified.
 //   [Example: January - February == months{11}. —end example]
 
 extern "C" int printf(const char *, ...);
@@ -55,7 +54,7 @@ int main()
 
     ASSERT_SAME_TYPE(month , decltype(std::declval<month>() - std::declval<months>()));
     ASSERT_SAME_TYPE(months, decltype(std::declval<month>() - std::declval<month> ()));
-    
+
 static_assert(testConstexpr<month, months>(), "");
 
     month m{6};

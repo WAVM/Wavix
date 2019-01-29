@@ -1,14 +1,16 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 // This test is passing in an uncontrolled manner in some Apple environment.
 // UNSUPPORTED: apple-darwin
+//
+// NetBSD does not support LC_MONETARY at the moment
+// XFAIL: netbsd
 
 // Failure related to GLIBC's use of U00A0 as mon_thousands_sep
 // and U002E as mon_decimal_point.
