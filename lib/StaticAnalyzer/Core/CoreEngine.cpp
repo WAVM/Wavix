@@ -1,9 +1,8 @@
 //===- CoreEngine.cpp - Path-Sensitive Dataflow Engine --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -56,17 +55,17 @@ STATISTIC(NumPathsExplored,
 static std::unique_ptr<WorkList> generateWorkList(AnalyzerOptions &Opts,
                                                   SubEngine &subengine) {
   switch (Opts.getExplorationStrategy()) {
-    case AnalyzerOptions::ExplorationStrategyKind::DFS:
+    case ExplorationStrategyKind::DFS:
       return WorkList::makeDFS();
-    case AnalyzerOptions::ExplorationStrategyKind::BFS:
+    case ExplorationStrategyKind::BFS:
       return WorkList::makeBFS();
-    case AnalyzerOptions::ExplorationStrategyKind::BFSBlockDFSContents:
+    case ExplorationStrategyKind::BFSBlockDFSContents:
       return WorkList::makeBFSBlockDFSContents();
-    case AnalyzerOptions::ExplorationStrategyKind::UnexploredFirst:
+    case ExplorationStrategyKind::UnexploredFirst:
       return WorkList::makeUnexploredFirst();
-    case AnalyzerOptions::ExplorationStrategyKind::UnexploredFirstQueue:
+    case ExplorationStrategyKind::UnexploredFirstQueue:
       return WorkList::makeUnexploredFirstPriorityQueue();
-    case AnalyzerOptions::ExplorationStrategyKind::UnexploredFirstLocationQueue:
+    case ExplorationStrategyKind::UnexploredFirstLocationQueue:
       return WorkList::makeUnexploredFirstPriorityLocationQueue();
   }
   llvm_unreachable("Unknown AnalyzerOptions::ExplorationStrategyKind");

@@ -1,9 +1,8 @@
 //===--- ParseTentative.cpp - Ambiguity Resolution Parsing ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -159,7 +158,7 @@ Parser::TPResult Parser::TryConsumeDeclarationSpecifier() {
       ConsumeToken();
       break;
     }
-    // Fall through.
+    LLVM_FALLTHROUGH;
   case tok::kw_typeof:
   case tok::kw___attribute:
   case tok::kw___underlying_type: {
@@ -219,11 +218,11 @@ Parser::TPResult Parser::TryConsumeDeclarationSpecifier() {
 
   case tok::annot_cxxscope:
     ConsumeAnnotationToken();
-    // Fall through.
+    LLVM_FALLTHROUGH;
   default:
     ConsumeAnyToken();
 
-    if (getLangOpts().ObjC1 && Tok.is(tok::less))
+    if (getLangOpts().ObjC && Tok.is(tok::less))
       return TryParseProtocolQualifiers();
     break;
   }
@@ -649,7 +648,7 @@ Parser::isCXX11AttributeSpecifier(bool Disambiguate,
     return CAK_NotAttributeSpecifier;
 
   // No tentative parsing if we don't need to look for ']]' or a lambda.
-  if (!Disambiguate && !getLangOpts().ObjC1)
+  if (!Disambiguate && !getLangOpts().ObjC)
     return CAK_AttributeSpecifier;
 
   RevertingTentativeParsingAction PA(*this);
@@ -658,7 +657,7 @@ Parser::isCXX11AttributeSpecifier(bool Disambiguate,
   ConsumeBracket();
 
   // Outside Obj-C++11, treat anything with a matching ']]' as an attribute.
-  if (!getLangOpts().ObjC1) {
+  if (!getLangOpts().ObjC) {
     ConsumeBracket();
 
     bool IsAttribute = SkipUntil(tok::r_square);
@@ -1286,7 +1285,7 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
 
     const Token &Next = NextToken();
     // In 'foo bar', 'foo' is always a type name outside of Objective-C.
-    if (!getLangOpts().ObjC1 && Next.is(tok::identifier))
+    if (!getLangOpts().ObjC && Next.is(tok::identifier))
       return TPResult::True;
 
     if (Next.isNot(tok::coloncolon) && Next.isNot(tok::less)) {
@@ -1352,8 +1351,8 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
     if (Next.isOneOf(tok::kw_new,       // ::new
                      tok::kw_delete))   // ::delete
       return TPResult::False;
+    LLVM_FALLTHROUGH;
   }
-    // Fall through.
   case tok::kw___super:
   case tok::kw_decltype:
     // Annotate typenames and C++ scope specifiers.  If we get one, just
@@ -1559,7 +1558,7 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
   case tok::annot_typename:
   case_typename:
     // In Objective-C, we might have a protocol-qualified type.
-    if (getLangOpts().ObjC1 && NextToken().is(tok::less)) {
+    if (getLangOpts().ObjC && NextToken().is(tok::less)) {
       // Tentatively parse the protocol qualifiers.
       RevertingTentativeParsingAction PA(*this);
       ConsumeAnyToken(); // The type token

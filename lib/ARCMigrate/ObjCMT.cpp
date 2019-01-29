@@ -1,13 +1,13 @@
 //===--- ObjCMT.cpp - ObjC Migrate Tool -----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "Transforms.h"
+#include "clang/Analysis/RetainSummaryManager.h"
 #include "clang/ARCMigrate/ARCMT.h"
 #include "clang/ARCMigrate/ARCMTActions.h"
 #include "clang/AST/ASTConsumer.h"
@@ -27,7 +27,6 @@
 #include "clang/Lex/PPConditionalDirectiveRecord.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Rewrite/Core/Rewriter.h"
-#include "clang/StaticAnalyzer/Core/RetainSummaryManager.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Path.h"
@@ -1460,14 +1459,14 @@ void ObjCMigrateASTConsumer::AddCFAnnotations(ASTContext &Ctx,
   if (!ResultAnnotated) {
     RetEffect Ret = CE.getReturnValue();
     const char *AnnotationString = nullptr;
-    if (Ret.getObjKind() == RetEffect::CF) {
+    if (Ret.getObjKind() == ObjKind::CF) {
       if (Ret.isOwned() && NSAPIObj->isMacroDefined("CF_RETURNS_RETAINED"))
         AnnotationString = " CF_RETURNS_RETAINED";
       else if (Ret.notOwned() &&
                NSAPIObj->isMacroDefined("CF_RETURNS_NOT_RETAINED"))
         AnnotationString = " CF_RETURNS_NOT_RETAINED";
     }
-    else if (Ret.getObjKind() == RetEffect::ObjC) {
+    else if (Ret.getObjKind() == ObjKind::ObjC) {
       if (Ret.isOwned() && NSAPIObj->isMacroDefined("NS_RETURNS_RETAINED"))
         AnnotationString = " NS_RETURNS_RETAINED";
     }
@@ -1484,14 +1483,15 @@ void ObjCMigrateASTConsumer::AddCFAnnotations(ASTContext &Ctx,
        pe = FuncDecl->param_end(); pi != pe; ++pi, ++i) {
     const ParmVarDecl *pd = *pi;
     ArgEffect AE = AEArgs[i];
-    if (AE == DecRef && !pd->hasAttr<CFConsumedAttr>() &&
+    if (AE.getKind() == DecRef && AE.getObjKind() == ObjKind::CF &&
+        !pd->hasAttr<CFConsumedAttr>() &&
         NSAPIObj->isMacroDefined("CF_CONSUMED")) {
       edit::Commit commit(*Editor);
       commit.insertBefore(pd->getLocation(), "CF_CONSUMED ");
       Editor->commit(commit);
-    }
-    else if (AE == DecRefMsg && !pd->hasAttr<NSConsumedAttr>() &&
-             NSAPIObj->isMacroDefined("NS_CONSUMED")) {
+    } else if (AE.getKind() == DecRef && AE.getObjKind() == ObjKind::ObjC &&
+               !pd->hasAttr<NSConsumedAttr>() &&
+               NSAPIObj->isMacroDefined("NS_CONSUMED")) {
       edit::Commit commit(*Editor);
       commit.insertBefore(pd->getLocation(), "NS_CONSUMED ");
       Editor->commit(commit);
@@ -1520,7 +1520,7 @@ ObjCMigrateASTConsumer::CF_BRIDGING_KIND
   bool ReturnCFAudited = false;
   if (!FuncIsReturnAnnotated) {
     RetEffect Ret = CE.getReturnValue();
-    if (Ret.getObjKind() == RetEffect::CF &&
+    if (Ret.getObjKind() == ObjKind::CF &&
         (Ret.isOwned() || Ret.notOwned()))
       ReturnCFAudited = true;
     else if (!AuditedType(FuncDecl->getReturnType()))
@@ -1536,13 +1536,13 @@ ObjCMigrateASTConsumer::CF_BRIDGING_KIND
        pe = FuncDecl->param_end(); pi != pe; ++pi, ++i) {
     const ParmVarDecl *pd = *pi;
     ArgEffect AE = AEArgs[i];
-    if (AE == DecRef /*CFConsumed annotated*/ || AE == IncRef) {
-      if (AE == DecRef && !pd->hasAttr<CFConsumedAttr>())
+    if ((AE.getKind() == DecRef /*CFConsumed annotated*/ ||
+         AE.getKind() == IncRef) && AE.getObjKind() == ObjKind::CF) {
+      if (AE.getKind() == DecRef && !pd->hasAttr<CFConsumedAttr>())
         ArgCFAudited = true;
-      else if (AE == IncRef)
+      else if (AE.getKind() == IncRef)
         ArgCFAudited = true;
-    }
-    else {
+    } else {
       QualType AT = pd->getType();
       if (!AuditedType(AT)) {
         AddCFAnnotations(Ctx, CE, FuncDecl, FuncIsReturnAnnotated);
@@ -1574,14 +1574,14 @@ void ObjCMigrateASTConsumer::AddCFAnnotations(ASTContext &Ctx,
   if (!ResultAnnotated) {
     RetEffect Ret = CE.getReturnValue();
     const char *AnnotationString = nullptr;
-    if (Ret.getObjKind() == RetEffect::CF) {
+    if (Ret.getObjKind() == ObjKind::CF) {
       if (Ret.isOwned() && NSAPIObj->isMacroDefined("CF_RETURNS_RETAINED"))
         AnnotationString = " CF_RETURNS_RETAINED";
       else if (Ret.notOwned() &&
                NSAPIObj->isMacroDefined("CF_RETURNS_NOT_RETAINED"))
         AnnotationString = " CF_RETURNS_NOT_RETAINED";
     }
-    else if (Ret.getObjKind() == RetEffect::ObjC) {
+    else if (Ret.getObjKind() == ObjKind::ObjC) {
       ObjCMethodFamily OMF = MethodDecl->getMethodFamily();
       switch (OMF) {
         case clang::OMF_alloc:
@@ -1610,7 +1610,9 @@ void ObjCMigrateASTConsumer::AddCFAnnotations(ASTContext &Ctx,
        pe = MethodDecl->param_end(); pi != pe; ++pi, ++i) {
     const ParmVarDecl *pd = *pi;
     ArgEffect AE = AEArgs[i];
-    if (AE == DecRef && !pd->hasAttr<CFConsumedAttr>() &&
+    if (AE.getKind() == DecRef
+        && AE.getObjKind() == ObjKind::CF
+        && !pd->hasAttr<CFConsumedAttr>() &&
         NSAPIObj->isMacroDefined("CF_CONSUMED")) {
       edit::Commit commit(*Editor);
       commit.insertBefore(pd->getLocation(), "CF_CONSUMED ");
@@ -1626,13 +1628,14 @@ void ObjCMigrateASTConsumer::migrateAddMethodAnnotation(
     return;
 
   CallEffects CE  = CallEffects::getEffect(MethodDecl);
-  bool MethodIsReturnAnnotated = (MethodDecl->hasAttr<CFReturnsRetainedAttr>() ||
-                                  MethodDecl->hasAttr<CFReturnsNotRetainedAttr>() ||
-                                  MethodDecl->hasAttr<NSReturnsRetainedAttr>() ||
-                                  MethodDecl->hasAttr<NSReturnsNotRetainedAttr>() ||
-                                  MethodDecl->hasAttr<NSReturnsAutoreleasedAttr>());
+  bool MethodIsReturnAnnotated =
+      (MethodDecl->hasAttr<CFReturnsRetainedAttr>() ||
+       MethodDecl->hasAttr<CFReturnsNotRetainedAttr>() ||
+       MethodDecl->hasAttr<NSReturnsRetainedAttr>() ||
+       MethodDecl->hasAttr<NSReturnsNotRetainedAttr>() ||
+       MethodDecl->hasAttr<NSReturnsAutoreleasedAttr>());
 
-  if (CE.getReceiver() == DecRefMsg &&
+  if (CE.getReceiver().getKind() == DecRef &&
       !MethodDecl->hasAttr<NSConsumesSelfAttr>() &&
       MethodDecl->getMethodFamily() != OMF_init &&
       MethodDecl->getMethodFamily() != OMF_release &&
@@ -1649,8 +1652,8 @@ void ObjCMigrateASTConsumer::migrateAddMethodAnnotation(
 
   if (!MethodIsReturnAnnotated) {
     RetEffect Ret = CE.getReturnValue();
-    if ((Ret.getObjKind() == RetEffect::CF ||
-         Ret.getObjKind() == RetEffect::ObjC) &&
+    if ((Ret.getObjKind() == ObjKind::CF ||
+         Ret.getObjKind() == ObjKind::ObjC) &&
         (Ret.isOwned() || Ret.notOwned())) {
       AddCFAnnotations(Ctx, CE, MethodDecl, false);
       return;
@@ -1666,8 +1669,8 @@ void ObjCMigrateASTConsumer::migrateAddMethodAnnotation(
        pe = MethodDecl->param_end(); pi != pe; ++pi, ++i) {
     const ParmVarDecl *pd = *pi;
     ArgEffect AE = AEArgs[i];
-    if ((AE == DecRef && !pd->hasAttr<CFConsumedAttr>()) || AE == IncRef ||
-        !AuditedType(pd->getType())) {
+    if ((AE.getKind() == DecRef && !pd->hasAttr<CFConsumedAttr>()) ||
+        AE.getKind() == IncRef || !AuditedType(pd->getType())) {
       AddCFAnnotations(Ctx, CE, MethodDecl, MethodIsReturnAnnotated);
       return;
     }

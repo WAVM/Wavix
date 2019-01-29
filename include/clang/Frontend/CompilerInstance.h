@@ -1,9 +1,8 @@
 //===-- CompilerInstance.h - Clang Compiler Instance ------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -22,6 +21,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/BuryPointer.h"
 #include <cassert>
 #include <list>
 #include <memory>
@@ -411,7 +411,7 @@ public:
   }
 
   void resetAndLeakFileManager() {
-    BuryPointer(FileMgr.get());
+    llvm::BuryPointer(FileMgr.get());
     FileMgr.resetWithoutRelease();
   }
 
@@ -431,7 +431,7 @@ public:
   }
 
   void resetAndLeakSourceManager() {
-    BuryPointer(SourceMgr.get());
+    llvm::BuryPointer(SourceMgr.get());
     SourceMgr.resetWithoutRelease();
   }
 
@@ -453,7 +453,7 @@ public:
   std::shared_ptr<Preprocessor> getPreprocessorPtr() { return PP; }
 
   void resetAndLeakPreprocessor() {
-    BuryPointer(new std::shared_ptr<Preprocessor>(PP));
+    llvm::BuryPointer(new std::shared_ptr<Preprocessor>(PP));
   }
 
   /// Replace the current preprocessor.
@@ -471,7 +471,7 @@ public:
   }
 
   void resetAndLeakASTContext() {
-    BuryPointer(Context.get());
+    llvm::BuryPointer(Context.get());
     Context.resetWithoutRelease();
   }
 

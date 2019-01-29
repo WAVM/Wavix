@@ -1,9 +1,8 @@
 //===--- DeclPrinter.cpp - Printing implementation for Decl ASTs ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1549,11 +1548,9 @@ void DeclPrinter::VisitOMPThreadPrivateDecl(OMPThreadPrivateDecl *D) {
 void DeclPrinter::VisitOMPRequiresDecl(OMPRequiresDecl *D) {
   Out << "#pragma omp requires ";
   if (!D->clauselist_empty()) {
-    for (auto I = D->clauselist_begin(), E = D->clauselist_end(); I != E; ++I) {
-      if (I != D->clauselist_begin())
-        Out << ',';
-      Out << getOpenMPClauseName((*I)->getClauseKind());
-    }
+    OMPClausePrinter Printer(Out, Policy);
+    for (auto I = D->clauselist_begin(), E = D->clauselist_end(); I != E; ++I)
+      Printer.Visit(*I);
   }
 }
 

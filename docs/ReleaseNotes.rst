@@ -1,5 +1,5 @@
 =======================================
-Clang 8.0.0 (In-Progress) Release Notes
+Clang 9.0.0 (In-Progress) Release Notes
 =======================================
 
 .. contents::
@@ -10,7 +10,7 @@ Written by the `LLVM Team <https://llvm.org/>`_
 
 .. warning::
 
-   These are in-progress notes for the upcoming Clang 8 release.
+   These are in-progress notes for the upcoming Clang 9 release.
    Release notes for previous releases can be found on
    `the Download Page <https://releases.llvm.org/download.html>`_.
 
@@ -18,7 +18,7 @@ Introduction
 ============
 
 This document contains the release notes for the Clang C/C++/Objective-C
-frontend, part of the LLVM Compiler Infrastructure, release 8.0.0. Here we
+frontend, part of the LLVM Compiler Infrastructure, release 9.0.0. Here we
 describe the status of Clang in some detail, including major
 improvements from the previous release and new feature work. For the
 general LLVM release notes, see `the LLVM
@@ -35,7 +35,7 @@ main Clang web page, this document applies to the *next* release, not
 the current one. To see the release notes for a specific release, please
 see the `releases page <https://llvm.org/releases/>`_.
 
-What's New in Clang 8.0.0?
+What's New in Clang 9.0.0?
 ==========================
 
 Some of the major new features and improvements to Clang are listed
@@ -46,20 +46,18 @@ sections with improvements to Clang's support for those languages.
 Major New Features
 ------------------
 
-- Clang supports use of a profile remapping file, which permits
-  profile data captured for one version of a program to be applied
-  when building another version where symbols have changed (for
-  example, due to renaming a class or namespace).
-  See the :doc:`UsersManual` for details.
+- ...
 
 Improvements to Clang's diagnostics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+- ...
 
 Non-comprehensive list of changes in this release
 -------------------------------------------------
 
 - ...
+
 
 New Compiler Flags
 ------------------
@@ -77,12 +75,12 @@ future versions of Clang.
 Modified Compiler Flags
 -----------------------
 
+- ...
 
 New Pragmas in Clang
 --------------------
 
-Clang now supports the ...
-
+- ...
 
 Attribute Changes in Clang
 --------------------------
@@ -91,11 +89,6 @@ Attribute Changes in Clang
 
 Windows Support
 ---------------
-
-- clang-cl now supports the use of the precompiled header options /Yc and /Yu
-  without the filename argument. When these options are used without the
-  filename, a `#pragma hdrstop` inside the source marks the end of the
-  precompiled code.
 
 - ...
 
@@ -132,9 +125,15 @@ OpenCL C Language Changes in Clang
 
 ...
 
+ABI Changes in Clang
+--------------------
+
+- ...
+
 OpenMP Support in Clang
 ----------------------------------
 
+- ...
 
 CUDA Support in Clang
 ---------------------
@@ -143,7 +142,7 @@ CUDA Support in Clang
 Internal API Changes
 --------------------
 
-These are major API changes that have happened since the 7.0.0 release of
+These are major API changes that have happened since the 8.0.0 release of
 Clang. If upgrading an external codebase that uses Clang as a library,
 this section should help get you past the largest hurdles of upgrading.
 
@@ -163,7 +162,11 @@ clang-format
 libclang
 --------
 
-...
+- When `CINDEXTEST_INCLUDE_ATTRIBUTED_TYPES` is not provided when making a
+  CXType, the equivalent type of the AttributedType is returned instead of the
+  modified type if the user does not want attribute sugar. The equivalent type
+  represents the minimally-desugared type which the AttributedType is
+  canonically equivalent to.
 
 
 Static Analyzer
@@ -178,6 +181,7 @@ Static Analyzer
 Undefined Behavior Sanitizer (UBSan)
 ------------------------------------
 
+- ...
 
 Core Analysis Improvements
 ==========================

@@ -1,9 +1,8 @@
 //===--- PPDirectives.cpp - Directive Handling for Preprocessor -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -31,7 +30,6 @@
 #include "clang/Lex/Pragma.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/PreprocessorOptions.h"
-#include "clang/Lex/PTHLexer.h"
 #include "clang/Lex/Token.h"
 #include "clang/Lex/VariadicMacroSupport.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -80,12 +78,18 @@ Preprocessor::AllocateVisibilityMacroDirective(SourceLocation Loc,
 
 /// Read and discard all tokens remaining on the current line until
 /// the tok::eod token is found.
-void Preprocessor::DiscardUntilEndOfDirective() {
+SourceRange Preprocessor::DiscardUntilEndOfDirective() {
   Token Tmp;
-  do {
-    LexUnexpandedToken(Tmp);
+  SourceRange Res;
+
+  LexUnexpandedToken(Tmp);
+  Res.setBegin(Tmp.getLocation());
+  while (Tmp.isNot(tok::eod)) {
     assert(Tmp.isNot(tok::eof) && "EOF seen while discarding directive tokens");
-  } while (Tmp.isNot(tok::eod));
+    LexUnexpandedToken(Tmp);
+  }
+  Res.setEnd(Tmp.getLocation());
+  return Res;
 }
 
 /// Enumerates possible cases of #define/#undef a reserved identifier.
@@ -119,7 +123,7 @@ static bool isReservedId(StringRef Text, const LangOptions &Lang) {
 // the specified module, meaning clang won't build the specified module. This is
 // useful in a number of situations, for instance, when building a library that
 // vends a module map, one might want to avoid hitting intermediate build
-// products containig the the module map or avoid finding the system installed
+// products containimg the the module map or avoid finding the system installed
 // modulemap for that library.
 static bool isForModuleBuilding(Module *M, StringRef CurrentModule,
                                 StringRef ModuleName) {
@@ -383,11 +387,6 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation HashTokenLoc,
     CurPPLexer->pushConditionalLevel(IfTokenLoc, /*isSkipping*/ false,
                                      FoundNonSkipPortion, FoundElse);
 
-  if (CurPTHLexer) {
-    PTHSkipExcludedConditionalBlock();
-    return;
-  }
-
   // Enter raw mode to disable identifier lookup (and thus macro expansion),
   // disabling warnings, etc.
   CurPPLexer->LexingRawMode = true;
@@ -405,7 +404,7 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation HashTokenLoc,
     // If this is the end of the buffer, we have an error.
     if (Tok.is(tok::eof)) {
       // We don't emit errors for unterminated conditionals here,
-      // Lexer::LexEndOfFile can do that propertly.
+      // Lexer::LexEndOfFile can do that properly.
       // Just return and let the caller lex after this #include.
       if (PreambleConditionalStack.isRecording())
         PreambleConditionalStack.SkipInfo.emplace(
@@ -544,19 +543,19 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation HashTokenLoc,
         if (CondInfo.WasSkipping || CondInfo.FoundNonSkip) {
           DiscardUntilEndOfDirective();
         } else {
-          const SourceLocation CondBegin = CurPPLexer->getSourceLocation();
           // Restore the value of LexingRawMode so that identifiers are
           // looked up, etc, inside the #elif expression.
           assert(CurPPLexer->LexingRawMode && "We have to be skipping here!");
           CurPPLexer->LexingRawMode = false;
           IdentifierInfo *IfNDefMacro = nullptr;
-          const bool CondValue = EvaluateDirectiveExpression(IfNDefMacro).Conditional;
+          DirectiveEvalResult DER = EvaluateDirectiveExpression(IfNDefMacro);
+          const bool CondValue = DER.Conditional;
           CurPPLexer->LexingRawMode = true;
           if (Callbacks) {
-            const SourceLocation CondEnd = CurPPLexer->getSourceLocation();
-            Callbacks->Elif(Tok.getLocation(),
-                            SourceRange(CondBegin, CondEnd),
-                            (CondValue ? PPCallbacks::CVK_True : PPCallbacks::CVK_False), CondInfo.IfLoc);
+            Callbacks->Elif(
+                Tok.getLocation(), DER.ExprRange,
+                (CondValue ? PPCallbacks::CVK_True : PPCallbacks::CVK_False),
+                CondInfo.IfLoc);
           }
           // If this condition is true, enter it!
           if (CondValue) {
@@ -583,83 +582,6 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation HashTokenLoc,
     Callbacks->SourceRangeSkipped(
         SourceRange(HashTokenLoc, CurPPLexer->getSourceLocation()),
         Tok.getLocation());
-}
-
-void Preprocessor::PTHSkipExcludedConditionalBlock() {
-  while (true) {
-    assert(CurPTHLexer);
-    assert(CurPTHLexer->LexingRawMode == false);
-
-    // Skip to the next '#else', '#elif', or #endif.
-    if (CurPTHLexer->SkipBlock()) {
-      // We have reached an #endif.  Both the '#' and 'endif' tokens
-      // have been consumed by the PTHLexer.  Just pop off the condition level.
-      PPConditionalInfo CondInfo;
-      bool InCond = CurPTHLexer->popConditionalLevel(CondInfo);
-      (void)InCond;  // Silence warning in no-asserts mode.
-      assert(!InCond && "Can't be skipping if not in a conditional!");
-      break;
-    }
-
-    // We have reached a '#else' or '#elif'.  Lex the next token to get
-    // the directive flavor.
-    Token Tok;
-    LexUnexpandedToken(Tok);
-
-    // We can actually look up the IdentifierInfo here since we aren't in
-    // raw mode.
-    tok::PPKeywordKind K = Tok.getIdentifierInfo()->getPPKeywordID();
-
-    if (K == tok::pp_else) {
-      // #else: Enter the else condition.  We aren't in a nested condition
-      //  since we skip those. We're always in the one matching the last
-      //  blocked we skipped.
-      PPConditionalInfo &CondInfo = CurPTHLexer->peekConditionalLevel();
-      // Note that we've seen a #else in this conditional.
-      CondInfo.FoundElse = true;
-
-      // If the #if block wasn't entered then enter the #else block now.
-      if (!CondInfo.FoundNonSkip) {
-        CondInfo.FoundNonSkip = true;
-
-        // Scan until the eod token.
-        CurPTHLexer->ParsingPreprocessorDirective = true;
-        DiscardUntilEndOfDirective();
-        CurPTHLexer->ParsingPreprocessorDirective = false;
-
-        break;
-      }
-
-      // Otherwise skip this block.
-      continue;
-    }
-
-    assert(K == tok::pp_elif);
-    PPConditionalInfo &CondInfo = CurPTHLexer->peekConditionalLevel();
-
-    // If this is a #elif with a #else before it, report the error.
-    if (CondInfo.FoundElse)
-      Diag(Tok, diag::pp_err_elif_after_else);
-
-    // If this is in a skipping block or if we're already handled this #if
-    // block, don't bother parsing the condition.  We just skip this block.
-    if (CondInfo.FoundNonSkip)
-      continue;
-
-    // Evaluate the condition of the #elif.
-    IdentifierInfo *IfNDefMacro = nullptr;
-    CurPTHLexer->ParsingPreprocessorDirective = true;
-    bool ShouldEnter = EvaluateDirectiveExpression(IfNDefMacro).Conditional;
-    CurPTHLexer->ParsingPreprocessorDirective = false;
-
-    // If this condition is true, enter it!
-    if (ShouldEnter) {
-      CondInfo.FoundNonSkip = true;
-      break;
-    }
-
-    // Otherwise, skip this block and go to the next one.
-  }
 }
 
 Module *Preprocessor::getModuleForLocation(SourceLocation Loc) {
@@ -690,7 +612,7 @@ Preprocessor::getModuleHeaderToIncludeForDiagnostics(SourceLocation IncLoc,
 
   // If we have a module import syntax, we shouldn't include a header to
   // make a particular module visible.
-  if (getLangOpts().ObjC2)
+  if (getLangOpts().ObjC)
     return nullptr;
 
   Module *TopM = M->getTopLevelModule();
@@ -1199,19 +1121,24 @@ void Preprocessor::HandleLineDirective() {
     ; // ok
   else if (StrTok.isNot(tok::string_literal)) {
     Diag(StrTok, diag::err_pp_line_invalid_filename);
-    return DiscardUntilEndOfDirective();
+    DiscardUntilEndOfDirective();
+    return;
   } else if (StrTok.hasUDSuffix()) {
     Diag(StrTok, diag::err_invalid_string_udl);
-    return DiscardUntilEndOfDirective();
+    DiscardUntilEndOfDirective();
+    return;
   } else {
     // Parse and validate the string, converting it into a unique ID.
     StringLiteralParser Literal(StrTok, *this);
     assert(Literal.isAscii() && "Didn't allow wide strings in");
-    if (Literal.hadError)
-      return DiscardUntilEndOfDirective();
+    if (Literal.hadError) {
+      DiscardUntilEndOfDirective();
+      return;
+    }
     if (Literal.Pascal) {
       Diag(StrTok, diag::err_pp_linemarker_invalid_filename);
-      return DiscardUntilEndOfDirective();
+      DiscardUntilEndOfDirective();
+      return;
     }
     FilenameID = SourceMgr.getLineTableFilenameID(Literal.GetString());
 
@@ -1344,19 +1271,24 @@ void Preprocessor::HandleDigitDirective(Token &DigitTok) {
     FileKind = SourceMgr.getFileCharacteristic(DigitTok.getLocation());
   } else if (StrTok.isNot(tok::string_literal)) {
     Diag(StrTok, diag::err_pp_linemarker_invalid_filename);
-    return DiscardUntilEndOfDirective();
+    DiscardUntilEndOfDirective();
+    return;
   } else if (StrTok.hasUDSuffix()) {
     Diag(StrTok, diag::err_invalid_string_udl);
-    return DiscardUntilEndOfDirective();
+    DiscardUntilEndOfDirective();
+    return;
   } else {
     // Parse and validate the string, converting it into a unique ID.
     StringLiteralParser Literal(StrTok, *this);
     assert(Literal.isAscii() && "Didn't allow wide strings in");
-    if (Literal.hadError)
-      return DiscardUntilEndOfDirective();
+    if (Literal.hadError) {
+      DiscardUntilEndOfDirective();
+      return;
+    }
     if (Literal.Pascal) {
       Diag(StrTok, diag::err_pp_linemarker_invalid_filename);
-      return DiscardUntilEndOfDirective();
+      DiscardUntilEndOfDirective();
+      return;
     }
     FilenameID = SourceMgr.getLineTableFilenameID(Literal.GetString());
 
@@ -1387,10 +1319,6 @@ void Preprocessor::HandleDigitDirective(Token &DigitTok) {
 ///
 void Preprocessor::HandleUserDiagnosticDirective(Token &Tok,
                                                  bool isWarning) {
-  // PTH doesn't emit #warning or #error directives.
-  if (CurPTHLexer)
-    return CurPTHLexer->DiscardToEndOfLine();
-
   // Read the rest of the line raw.  We do this because we don't want macros
   // to be expanded and we don't require that the tokens be valid preprocessing
   // tokens.  For example, this is allowed: "#warning `   'foo".  GCC does
@@ -1430,7 +1358,8 @@ void Preprocessor::HandleIdentSCCSDirective(Token &Tok) {
 
   if (StrTok.hasUDSuffix()) {
     Diag(StrTok, diag::err_invalid_string_udl);
-    return DiscardUntilEndOfDirective();
+    DiscardUntilEndOfDirective();
+    return;
   }
 
   // Verify that there is nothing after the string, other than EOD.
@@ -1629,7 +1558,7 @@ static void diagnoseAutoModuleImport(
     Preprocessor &PP, SourceLocation HashLoc, Token &IncludeTok,
     ArrayRef<std::pair<IdentifierInfo *, SourceLocation>> Path,
     SourceLocation PathEnd) {
-  assert(PP.getLangOpts().ObjC2 && "no import syntax available");
+  assert(PP.getLangOpts().ObjC && "no import syntax available");
 
   SmallString<128> PathString;
   for (size_t I = 0, N = Path.size(); I != N; ++I) {
@@ -1794,6 +1723,7 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
   // Check that we don't have infinite #include recursion.
   if (IncludeMacroStack.size() == MaxAllowedIncludeStackDepth-1) {
     Diag(FilenameTok, diag::err_pp_include_too_deep);
+    HasReachedMaxIncludeDepth = true;
     return;
   }
 
@@ -1899,9 +1829,17 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
           return Filename;
         };
         StringRef TypoCorrectionName = CorrectTypoFilename(Filename);
+        SmallString<128> NormalizedTypoCorrectionPath;
+        if (LangOpts.MSVCCompat) {
+          NormalizedTypoCorrectionPath = TypoCorrectionName.str();
+#ifndef _WIN32
+          llvm::sys::path::native(NormalizedTypoCorrectionPath);
+#endif
+        }
         File = LookupFile(
             FilenameLoc,
-            LangOpts.MSVCCompat ? NormalizedPath.c_str() : TypoCorrectionName,
+            LangOpts.MSVCCompat ? NormalizedTypoCorrectionPath.c_str()
+                                : TypoCorrectionName,
             isAngled, LookupFrom, LookupFromFile, CurDir,
             Callbacks ? &SearchPath : nullptr,
             Callbacks ? &RelativePath : nullptr, &SuggestedModule, &IsMapped);
@@ -1942,10 +1880,11 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
   if (PPOpts->SingleFileParseMode)
     ShouldEnter = false;
 
-  // Any diagnostics after the fatal error will not be visible. As the
-  // compilation failed already and errors in subsequently included files won't
-  // be visible, avoid preprocessing those files.
-  if (ShouldEnter && Diags->hasFatalErrorOccurred())
+  // If we've reached the max allowed include depth, it is usually due to an
+  // include cycle. Don't enter already processed files again as it can lead to
+  // reaching the max allowed include depth again.
+  if (ShouldEnter && HasReachedMaxIncludeDepth && File &&
+      HeaderInfo.getFileInfo(File).NumIncludes)
     ShouldEnter = false;
 
   // Determine whether we should try to import the module for this #include, if
@@ -1978,7 +1917,7 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
 
     // Warn that we're replacing the include/import with a module import.
     // We only do this in Objective-C, where we have a module-import syntax.
-    if (getLangOpts().ObjC2)
+    if (getLangOpts().ObjC)
       diagnoseAutoModuleImport(*this, HashLoc, IncludeTok, Path, CharEnd);
 
     // Load the module to import its macros. We'll make the declarations
@@ -2007,14 +1946,10 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
       if (hadModuleLoaderFatalFailure()) {
         // With a fatal failure in the module loader, we abort parsing.
         Token &Result = IncludeTok;
-        if (CurLexer) {
-          Result.startToken();
-          CurLexer->FormTokenWithChars(Result, CurLexer->BufferEnd, tok::eof);
-          CurLexer->cutOffLexing();
-        } else {
-          assert(CurPTHLexer && "#include but no current lexer set!");
-          CurPTHLexer->getEOF(Result);
-        }
+        assert(CurLexer && "#include but no current lexer set!");
+        Result.startToken();
+        CurLexer->FormTokenWithChars(Result, CurLexer->BufferEnd, tok::eof);
+        CurLexer->cutOffLexing();
       }
       return;
     }
@@ -2215,7 +2150,7 @@ void Preprocessor::HandleMicrosoftImportDirective(Token &Tok) {
 ///
 void Preprocessor::HandleImportDirective(SourceLocation HashLoc,
                                          Token &ImportTok) {
-  if (!LangOpts.ObjC1) {  // #import is standard for ObjC.
+  if (!LangOpts.ObjC) {  // #import is standard for ObjC.
     if (LangOpts.MSVCCompat)
       return HandleMicrosoftImportDirective(ImportTok);
     Diag(ImportTok, diag::ext_pp_import_directive);
@@ -2686,7 +2621,7 @@ void Preprocessor::HandleDefineDirective(
              II->isStr("__unsafe_unretained") ||
              II->isStr("__autoreleasing");
     };
-   if (getLangOpts().ObjC1 &&
+   if (getLangOpts().ObjC &&
         SourceMgr.getFileID(OtherMI->getDefinitionLoc())
           == getPredefinesFileID() &&
         isObjCProtectedMacro(MacroNameTok.getIdentifierInfo())) {
@@ -2872,10 +2807,8 @@ void Preprocessor::HandleIfDirective(Token &IfToken,
 
   // Parse and evaluate the conditional expression.
   IdentifierInfo *IfNDefMacro = nullptr;
-  const SourceLocation ConditionalBegin = CurPPLexer->getSourceLocation();
   const DirectiveEvalResult DER = EvaluateDirectiveExpression(IfNDefMacro);
   const bool ConditionalTrue = DER.Conditional;
-  const SourceLocation ConditionalEnd = CurPPLexer->getSourceLocation();
 
   // If this condition is equivalent to #ifndef X, and if this is the first
   // directive seen, handle it for the multiple-include optimization.
@@ -2888,9 +2821,9 @@ void Preprocessor::HandleIfDirective(Token &IfToken,
   }
 
   if (Callbacks)
-    Callbacks->If(IfToken.getLocation(),
-                  SourceRange(ConditionalBegin, ConditionalEnd),
-                  (ConditionalTrue ? PPCallbacks::CVK_True : PPCallbacks::CVK_False));
+    Callbacks->If(
+        IfToken.getLocation(), DER.ExprRange,
+        (ConditionalTrue ? PPCallbacks::CVK_True : PPCallbacks::CVK_False));
 
   // Should we include the stuff contained by this directive?
   if (PPOpts->SingleFileParseMode && DER.IncludedUndefinedIds) {
@@ -2983,9 +2916,7 @@ void Preprocessor::HandleElifDirective(Token &ElifToken,
   // #elif directive in a non-skipping conditional... start skipping.
   // We don't care what the condition is, because we will always skip it (since
   // the block immediately before it was included).
-  const SourceLocation ConditionalBegin = CurPPLexer->getSourceLocation();
-  DiscardUntilEndOfDirective();
-  const SourceLocation ConditionalEnd = CurPPLexer->getSourceLocation();
+  SourceRange ConditionRange = DiscardUntilEndOfDirective();
 
   PPConditionalInfo CI;
   if (CurPPLexer->popConditionalLevel(CI)) {
@@ -3001,8 +2932,7 @@ void Preprocessor::HandleElifDirective(Token &ElifToken,
   if (CI.FoundElse) Diag(ElifToken, diag::pp_err_elif_after_else);
 
   if (Callbacks)
-    Callbacks->Elif(ElifToken.getLocation(),
-                    SourceRange(ConditionalBegin, ConditionalEnd),
+    Callbacks->Elif(ElifToken.getLocation(), ConditionRange,
                     PPCallbacks::CVK_NotEvaluated, CI.IfLoc);
 
   if (PPOpts->SingleFileParseMode && !CI.FoundNonSkip) {

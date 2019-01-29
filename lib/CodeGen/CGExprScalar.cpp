@@ -1,9 +1,8 @@
 //===--- CGExprScalar.cpp - Emit LLVM Code for Scalar Exprs ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,9 +22,9 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/RecordLayout.h"
 #include "clang/AST/StmtVisitor.h"
+#include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/FixedPoint.h"
 #include "clang/Basic/TargetInfo.h"
-#include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
@@ -124,6 +123,13 @@ struct BinOpInfo {
       if (auto *CFP = dyn_cast<llvm::ConstantFP>(RHS))
         return CFP->isZero();
     return true;
+  }
+
+  /// Check if either operand is a fixed point type, in which case, this
+  /// operation did not follow usual arithmetic conversion and both operands may
+  /// not be the same.
+  bool isFixedPointBinOp() const {
+    return isa<BinaryOperator>(E) && Ty->isFixedPointType();
   }
 };
 
@@ -258,8 +264,11 @@ public:
           AVAttr = TTy->getDecl()->getAttr<AlignValueAttr>();
       } else {
         // Assumptions for function parameters are emitted at the start of the
-        // function, so there is no need to repeat that here.
-        if (isa<ParmVarDecl>(VD))
+        // function, so there is no need to repeat that here,
+        // unless the alignment-assumption sanitizer is enabled,
+        // then we prefer the assumption over alignment attribute
+        // on IR function param.
+        if (isa<ParmVarDecl>(VD) && !CGF.SanOpts.has(SanitizerKind::Alignment))
           return;
 
         AVAttr = VD->getAttr<AlignValueAttr>();
@@ -276,7 +285,8 @@ public:
 
     Value *AlignmentValue = CGF.EmitScalarExpr(AVAttr->getAlignment());
     llvm::ConstantInt *AlignmentCI = cast<llvm::ConstantInt>(AlignmentValue);
-    CGF.EmitAlignmentAssumption(V, AlignmentCI->getZExtValue());
+    CGF.EmitAlignmentAssumption(V, E, AVAttr->getLocation(),
+                                AlignmentCI->getZExtValue());
   }
 
   /// EmitLoadOfLValue - Given an expression with complex type that represents a
@@ -306,6 +316,8 @@ public:
     ICCK_IntegerTruncation = 0, // Legacy, was only used by clang 7.
     ICCK_UnsignedIntegerTruncation = 1,
     ICCK_SignedIntegerTruncation = 2,
+    ICCK_IntegerSignChange = 3,
+    ICCK_SignedIntegerTruncationOrSignChange = 4,
   };
 
   /// Emit a check that an [implicit] truncation of an integer  does not
@@ -313,15 +325,30 @@ public:
   void EmitIntegerTruncationCheck(Value *Src, QualType SrcType, Value *Dst,
                                   QualType DstType, SourceLocation Loc);
 
+  /// Emit a check that an [implicit] conversion of an integer does not change
+  /// the sign of the value. It is not UB, so we use the value after conversion.
+  /// NOTE: Src and Dst may be the exact same value! (point to the same thing)
+  void EmitIntegerSignChangeCheck(Value *Src, QualType SrcType, Value *Dst,
+                                  QualType DstType, SourceLocation Loc);
+
   /// Emit a conversion from the specified type to the specified destination
   /// type, both of which are LLVM scalar types.
   struct ScalarConversionOpts {
     bool TreatBooleanAsSigned;
     bool EmitImplicitIntegerTruncationChecks;
+    bool EmitImplicitIntegerSignChangeChecks;
 
     ScalarConversionOpts()
         : TreatBooleanAsSigned(false),
-          EmitImplicitIntegerTruncationChecks(false) {}
+          EmitImplicitIntegerTruncationChecks(false),
+          EmitImplicitIntegerSignChangeChecks(false) {}
+
+    ScalarConversionOpts(clang::SanitizerSet SanOpts)
+        : TreatBooleanAsSigned(false),
+          EmitImplicitIntegerTruncationChecks(
+              SanOpts.hasOneOf(SanitizerKind::ImplicitIntegerTruncation)),
+          EmitImplicitIntegerSignChangeChecks(
+              SanOpts.has(SanitizerKind::ImplicitIntegerSignChange)) {}
   };
   Value *
   EmitScalarConversion(Value *Src, QualType SrcTy, QualType DstTy,
@@ -329,6 +356,9 @@ public:
                        ScalarConversionOpts Opts = ScalarConversionOpts());
 
   Value *EmitFixedPointConversion(Value *Src, QualType SrcTy, QualType DstTy,
+                                  SourceLocation Loc);
+  Value *EmitFixedPointConversion(Value *Src, FixedPointSemantics &SrcFixedSema,
+                                  FixedPointSemantics &DstFixedSema,
                                   SourceLocation Loc);
 
   /// Emit a conversion from the specified complex type to the specified
@@ -388,6 +418,9 @@ public:
   }
   Value *VisitExpr(Expr *S);
 
+  Value *VisitConstantExpr(ConstantExpr *E) {
+    return Visit(E->getSubExpr());
+  }
   Value *VisitParenExpr(ParenExpr *PE) {
     return Visit(PE->getSubExpr());
   }
@@ -456,19 +489,10 @@ public:
     return CGF.getOrCreateOpaqueRValueMapping(E).getScalarVal();
   }
 
-  Value *emitConstant(const CodeGenFunction::ConstantEmission &Constant,
-                      Expr *E) {
-    assert(Constant && "not a constant");
-    if (Constant.isReference())
-      return EmitLoadOfLValue(Constant.getReferenceLValue(CGF, E),
-                              E->getExprLoc());
-    return Constant.getValue();
-  }
-
   // l-values.
   Value *VisitDeclRefExpr(DeclRefExpr *E) {
     if (CodeGenFunction::ConstantEmission Constant = CGF.tryEmitAsConstant(E))
-      return emitConstant(Constant, E);
+      return CGF.emitScalarConstant(Constant, E);
     return EmitLoadOfLValue(E);
   }
 
@@ -670,7 +694,7 @@ public:
       case LangOptions::SOB_Undefined:
         if (!CGF.SanOpts.has(SanitizerKind::SignedIntegerOverflow))
           return Builder.CreateNSWMul(Ops.LHS, Ops.RHS, "mul");
-        // Fall through.
+        LLVM_FALLTHROUGH;
       case LangOptions::SOB_Trapping:
         if (CanElideOverflowCheck(CGF.getContext(), Ops))
           return Builder.CreateNSWMul(Ops.LHS, Ops.RHS, "mul");
@@ -713,6 +737,9 @@ public:
   Value *EmitOr (const BinOpInfo &Ops) {
     return Builder.CreateOr(Ops.LHS, Ops.RHS, "or");
   }
+
+  // Helper functions for fixed point binary operations.
+  Value *EmitFixedPointBinOp(const BinOpInfo &Ops);
 
   BinOpInfo EmitBinOps(const BinaryOperator *E);
   LValue EmitCompoundAssignLValue(const CompoundAssignOperator *E,
@@ -947,10 +974,158 @@ void ScalarExprEmitter::EmitFloatConversionCheck(
                 SanitizerHandler::FloatCastOverflow, StaticArgs, OrigSrc);
 }
 
+// Should be called within CodeGenFunction::SanitizerScope RAII scope.
+// Returns 'i1 false' when the truncation Src -> Dst was lossy.
+static std::pair<ScalarExprEmitter::ImplicitConversionCheckKind,
+                 std::pair<llvm::Value *, SanitizerMask>>
+EmitIntegerTruncationCheckHelper(Value *Src, QualType SrcType, Value *Dst,
+                                 QualType DstType, CGBuilderTy &Builder) {
+  llvm::Type *SrcTy = Src->getType();
+  llvm::Type *DstTy = Dst->getType();
+  (void)DstTy; // Only used in assert()
+
+  // This should be truncation of integral types.
+  assert(Src != Dst);
+  assert(SrcTy->getScalarSizeInBits() > Dst->getType()->getScalarSizeInBits());
+  assert(isa<llvm::IntegerType>(SrcTy) && isa<llvm::IntegerType>(DstTy) &&
+         "non-integer llvm type");
+
+  bool SrcSigned = SrcType->isSignedIntegerOrEnumerationType();
+  bool DstSigned = DstType->isSignedIntegerOrEnumerationType();
+
+  // If both (src and dst) types are unsigned, then it's an unsigned truncation.
+  // Else, it is a signed truncation.
+  ScalarExprEmitter::ImplicitConversionCheckKind Kind;
+  SanitizerMask Mask;
+  if (!SrcSigned && !DstSigned) {
+    Kind = ScalarExprEmitter::ICCK_UnsignedIntegerTruncation;
+    Mask = SanitizerKind::ImplicitUnsignedIntegerTruncation;
+  } else {
+    Kind = ScalarExprEmitter::ICCK_SignedIntegerTruncation;
+    Mask = SanitizerKind::ImplicitSignedIntegerTruncation;
+  }
+
+  llvm::Value *Check = nullptr;
+  // 1. Extend the truncated value back to the same width as the Src.
+  Check = Builder.CreateIntCast(Dst, SrcTy, DstSigned, "anyext");
+  // 2. Equality-compare with the original source value
+  Check = Builder.CreateICmpEQ(Check, Src, "truncheck");
+  // If the comparison result is 'i1 false', then the truncation was lossy.
+  return std::make_pair(Kind, std::make_pair(Check, Mask));
+}
+
 void ScalarExprEmitter::EmitIntegerTruncationCheck(Value *Src, QualType SrcType,
                                                    Value *Dst, QualType DstType,
                                                    SourceLocation Loc) {
   if (!CGF.SanOpts.hasOneOf(SanitizerKind::ImplicitIntegerTruncation))
+    return;
+
+  // We only care about int->int conversions here.
+  // We ignore conversions to/from pointer and/or bool.
+  if (!(SrcType->isIntegerType() && DstType->isIntegerType()))
+    return;
+
+  unsigned SrcBits = Src->getType()->getScalarSizeInBits();
+  unsigned DstBits = Dst->getType()->getScalarSizeInBits();
+  // This must be truncation. Else we do not care.
+  if (SrcBits <= DstBits)
+    return;
+
+  assert(!DstType->isBooleanType() && "we should not get here with booleans.");
+
+  // If the integer sign change sanitizer is enabled,
+  // and we are truncating from larger unsigned type to smaller signed type,
+  // let that next sanitizer deal with it.
+  bool SrcSigned = SrcType->isSignedIntegerOrEnumerationType();
+  bool DstSigned = DstType->isSignedIntegerOrEnumerationType();
+  if (CGF.SanOpts.has(SanitizerKind::ImplicitIntegerSignChange) &&
+      (!SrcSigned && DstSigned))
+    return;
+
+  CodeGenFunction::SanitizerScope SanScope(&CGF);
+
+  std::pair<ScalarExprEmitter::ImplicitConversionCheckKind,
+            std::pair<llvm::Value *, SanitizerMask>>
+      Check =
+          EmitIntegerTruncationCheckHelper(Src, SrcType, Dst, DstType, Builder);
+  // If the comparison result is 'i1 false', then the truncation was lossy.
+
+  // Do we care about this type of truncation?
+  if (!CGF.SanOpts.has(Check.second.second))
+    return;
+
+  llvm::Constant *StaticArgs[] = {
+      CGF.EmitCheckSourceLocation(Loc), CGF.EmitCheckTypeDescriptor(SrcType),
+      CGF.EmitCheckTypeDescriptor(DstType),
+      llvm::ConstantInt::get(Builder.getInt8Ty(), Check.first)};
+  CGF.EmitCheck(Check.second, SanitizerHandler::ImplicitConversion, StaticArgs,
+                {Src, Dst});
+}
+
+// Should be called within CodeGenFunction::SanitizerScope RAII scope.
+// Returns 'i1 false' when the conversion Src -> Dst changed the sign.
+static std::pair<ScalarExprEmitter::ImplicitConversionCheckKind,
+                 std::pair<llvm::Value *, SanitizerMask>>
+EmitIntegerSignChangeCheckHelper(Value *Src, QualType SrcType, Value *Dst,
+                                 QualType DstType, CGBuilderTy &Builder) {
+  llvm::Type *SrcTy = Src->getType();
+  llvm::Type *DstTy = Dst->getType();
+
+  assert(isa<llvm::IntegerType>(SrcTy) && isa<llvm::IntegerType>(DstTy) &&
+         "non-integer llvm type");
+
+  bool SrcSigned = SrcType->isSignedIntegerOrEnumerationType();
+  bool DstSigned = DstType->isSignedIntegerOrEnumerationType();
+  (void)SrcSigned; // Only used in assert()
+  (void)DstSigned; // Only used in assert()
+  unsigned SrcBits = SrcTy->getScalarSizeInBits();
+  unsigned DstBits = DstTy->getScalarSizeInBits();
+  (void)SrcBits; // Only used in assert()
+  (void)DstBits; // Only used in assert()
+
+  assert(((SrcBits != DstBits) || (SrcSigned != DstSigned)) &&
+         "either the widths should be different, or the signednesses.");
+
+  // NOTE: zero value is considered to be non-negative.
+  auto EmitIsNegativeTest = [&Builder](Value *V, QualType VType,
+                                       const char *Name) -> Value * {
+    // Is this value a signed type?
+    bool VSigned = VType->isSignedIntegerOrEnumerationType();
+    llvm::Type *VTy = V->getType();
+    if (!VSigned) {
+      // If the value is unsigned, then it is never negative.
+      // FIXME: can we encounter non-scalar VTy here?
+      return llvm::ConstantInt::getFalse(VTy->getContext());
+    }
+    // Get the zero of the same type with which we will be comparing.
+    llvm::Constant *Zero = llvm::ConstantInt::get(VTy, 0);
+    // %V.isnegative = icmp slt %V, 0
+    // I.e is %V *strictly* less than zero, does it have negative value?
+    return Builder.CreateICmp(llvm::ICmpInst::ICMP_SLT, V, Zero,
+                              llvm::Twine(Name) + "." + V->getName() +
+                                  ".negativitycheck");
+  };
+
+  // 1. Was the old Value negative?
+  llvm::Value *SrcIsNegative = EmitIsNegativeTest(Src, SrcType, "src");
+  // 2. Is the new Value negative?
+  llvm::Value *DstIsNegative = EmitIsNegativeTest(Dst, DstType, "dst");
+  // 3. Now, was the 'negativity status' preserved during the conversion?
+  //    NOTE: conversion from negative to zero is considered to change the sign.
+  //    (We want to get 'false' when the conversion changed the sign)
+  //    So we should just equality-compare the negativity statuses.
+  llvm::Value *Check = nullptr;
+  Check = Builder.CreateICmpEQ(SrcIsNegative, DstIsNegative, "signchangecheck");
+  // If the comparison result is 'false', then the conversion changed the sign.
+  return std::make_pair(
+      ScalarExprEmitter::ICCK_IntegerSignChange,
+      std::make_pair(Check, SanitizerKind::ImplicitIntegerSignChange));
+}
+
+void ScalarExprEmitter::EmitIntegerSignChangeCheck(Value *Src, QualType SrcType,
+                                                   Value *Dst, QualType DstType,
+                                                   SourceLocation Loc) {
+  if (!CGF.SanOpts.has(SanitizerKind::ImplicitIntegerSignChange))
     return;
 
   llvm::Type *SrcTy = Src->getType();
@@ -961,52 +1136,71 @@ void ScalarExprEmitter::EmitIntegerTruncationCheck(Value *Src, QualType SrcType,
   if (!(SrcType->isIntegerType() && DstType->isIntegerType()))
     return;
 
-  assert(isa<llvm::IntegerType>(SrcTy) && isa<llvm::IntegerType>(DstTy) &&
-         "clang integer type lowered to non-integer llvm type");
-
-  unsigned SrcBits = SrcTy->getScalarSizeInBits();
-  unsigned DstBits = DstTy->getScalarSizeInBits();
-  // This must be truncation. Else we do not care.
-  if (SrcBits <= DstBits)
-    return;
-
-  assert(!DstType->isBooleanType() && "we should not get here with booleans.");
-
   bool SrcSigned = SrcType->isSignedIntegerOrEnumerationType();
   bool DstSigned = DstType->isSignedIntegerOrEnumerationType();
+  unsigned SrcBits = SrcTy->getScalarSizeInBits();
+  unsigned DstBits = DstTy->getScalarSizeInBits();
 
-  // If both (src and dst) types are unsigned, then it's an unsigned truncation.
-  // Else, it is a signed truncation.
-  ImplicitConversionCheckKind Kind;
-  SanitizerMask Mask;
-  if (!SrcSigned && !DstSigned) {
-    Kind = ICCK_UnsignedIntegerTruncation;
-    Mask = SanitizerKind::ImplicitUnsignedIntegerTruncation;
-  } else {
-    Kind = ICCK_SignedIntegerTruncation;
-    Mask = SanitizerKind::ImplicitSignedIntegerTruncation;
-  }
-
-  // Do we care about this type of truncation?
-  if (!CGF.SanOpts.has(Mask))
+  // Now, we do not need to emit the check in *all* of the cases.
+  // We can avoid emitting it in some obvious cases where it would have been
+  // dropped by the opt passes (instcombine) always anyways.
+  // If it's a cast between effectively the same type, no check.
+  // NOTE: this is *not* equivalent to checking the canonical types.
+  if (SrcSigned == DstSigned && SrcBits == DstBits)
     return;
+  // At least one of the values needs to have signed type.
+  // If both are unsigned, then obviously, neither of them can be negative.
+  if (!SrcSigned && !DstSigned)
+    return;
+  // If the conversion is to *larger* *signed* type, then no check is needed.
+  // Because either sign-extension happens (so the sign will remain),
+  // or zero-extension will happen (the sign bit will be zero.)
+  if ((DstBits > SrcBits) && DstSigned)
+    return;
+  if (CGF.SanOpts.has(SanitizerKind::ImplicitSignedIntegerTruncation) &&
+      (SrcBits > DstBits) && SrcSigned) {
+    // If the signed integer truncation sanitizer is enabled,
+    // and this is a truncation from signed type, then no check is needed.
+    // Because here sign change check is interchangeable with truncation check.
+    return;
+  }
+  // That's it. We can't rule out any more cases with the data we have.
 
   CodeGenFunction::SanitizerScope SanScope(&CGF);
 
-  llvm::Value *Check = nullptr;
+  std::pair<ScalarExprEmitter::ImplicitConversionCheckKind,
+            std::pair<llvm::Value *, SanitizerMask>>
+      Check;
 
-  // 1. Extend the truncated value back to the same width as the Src.
-  Check = Builder.CreateIntCast(Dst, SrcTy, DstSigned, "anyext");
-  // 2. Equality-compare with the original source value
-  Check = Builder.CreateICmpEQ(Check, Src, "truncheck");
-  // If the comparison result is 'i1 false', then the truncation was lossy.
+  // Each of these checks needs to return 'false' when an issue was detected.
+  ImplicitConversionCheckKind CheckKind;
+  llvm::SmallVector<std::pair<llvm::Value *, SanitizerMask>, 2> Checks;
+  // So we can 'and' all the checks together, and still get 'false',
+  // if at least one of the checks detected an issue.
+
+  Check = EmitIntegerSignChangeCheckHelper(Src, SrcType, Dst, DstType, Builder);
+  CheckKind = Check.first;
+  Checks.emplace_back(Check.second);
+
+  if (CGF.SanOpts.has(SanitizerKind::ImplicitSignedIntegerTruncation) &&
+      (SrcBits > DstBits) && !SrcSigned && DstSigned) {
+    // If the signed integer truncation sanitizer was enabled,
+    // and we are truncating from larger unsigned type to smaller signed type,
+    // let's handle the case we skipped in that check.
+    Check =
+        EmitIntegerTruncationCheckHelper(Src, SrcType, Dst, DstType, Builder);
+    CheckKind = ICCK_SignedIntegerTruncationOrSignChange;
+    Checks.emplace_back(Check.second);
+    // If the comparison result is 'i1 false', then the truncation was lossy.
+  }
 
   llvm::Constant *StaticArgs[] = {
       CGF.EmitCheckSourceLocation(Loc), CGF.EmitCheckTypeDescriptor(SrcType),
       CGF.EmitCheckTypeDescriptor(DstType),
-      llvm::ConstantInt::get(Builder.getInt8Ty(), Kind)};
-  CGF.EmitCheck(std::make_pair(Check, Mask),
-                SanitizerHandler::ImplicitConversion, StaticArgs, {Src, Dst});
+      llvm::ConstantInt::get(Builder.getInt8Ty(), CheckKind)};
+  // EmitCheck() will 'and' all the checks together.
+  CGF.EmitCheck(Checks, SanitizerHandler::ImplicitConversion, StaticArgs,
+                {Src, Dst});
 }
 
 /// Emit a conversion from the specified type to the specified destination type,
@@ -1029,7 +1223,7 @@ Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
       // We do not need to check the padding bit on unsigned types if unsigned
       // padding is enabled because overflow into this bit is undefined
       // behavior.
-      return Builder.CreateIsNotNull(Src);
+      return Builder.CreateIsNotNull(Src, "tobool");
     }
 
     llvm_unreachable(
@@ -1081,8 +1275,13 @@ Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
   }
 
   // Ignore conversions like int -> uint.
-  if (SrcTy == DstTy)
+  if (SrcTy == DstTy) {
+    if (Opts.EmitImplicitIntegerSignChangeChecks)
+      EmitIntegerSignChangeCheck(Src, NoncanonicalSrcType, Src,
+                                 NoncanonicalDstType, Loc);
+
     return Src;
+  }
 
   // Handle pointer conversions next: pointers can only be converted to/from
   // other pointers and integers. Check for pointer types in terms of LLVM, as
@@ -1226,16 +1425,16 @@ Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
     EmitIntegerTruncationCheck(Src, NoncanonicalSrcType, Res,
                                NoncanonicalDstType, Loc);
 
+  if (Opts.EmitImplicitIntegerSignChangeChecks)
+    EmitIntegerSignChangeCheck(Src, NoncanonicalSrcType, Res,
+                               NoncanonicalDstType, Loc);
+
   return Res;
 }
 
 Value *ScalarExprEmitter::EmitFixedPointConversion(Value *Src, QualType SrcTy,
                                                    QualType DstTy,
                                                    SourceLocation Loc) {
-  using llvm::APInt;
-  using llvm::ConstantInt;
-  using llvm::Value;
-
   assert(SrcTy->isFixedPointType());
   assert(DstTy->isFixedPointType());
 
@@ -1243,83 +1442,78 @@ Value *ScalarExprEmitter::EmitFixedPointConversion(Value *Src, QualType SrcTy,
       CGF.getContext().getFixedPointSemantics(SrcTy);
   FixedPointSemantics DstFPSema =
       CGF.getContext().getFixedPointSemantics(DstTy);
+  return EmitFixedPointConversion(Src, SrcFPSema, DstFPSema, Loc);
+}
+
+Value *ScalarExprEmitter::EmitFixedPointConversion(
+    Value *Src, FixedPointSemantics &SrcFPSema, FixedPointSemantics &DstFPSema,
+    SourceLocation Loc) {
+  using llvm::APInt;
+  using llvm::ConstantInt;
+  using llvm::Value;
+
   unsigned SrcWidth = SrcFPSema.getWidth();
   unsigned DstWidth = DstFPSema.getWidth();
   unsigned SrcScale = SrcFPSema.getScale();
   unsigned DstScale = DstFPSema.getScale();
-  bool IsSigned = SrcFPSema.isSigned();
+  bool SrcIsSigned = SrcFPSema.isSigned();
+  bool DstIsSigned = DstFPSema.isSigned();
+
+  llvm::Type *DstIntTy = Builder.getIntNTy(DstWidth);
 
   Value *Result = Src;
   unsigned ResultWidth = SrcWidth;
 
   if (!DstFPSema.isSaturated()) {
-    // Downscale
-    if (DstScale < SrcScale) {
-      if (IsSigned)
-        Result = Builder.CreateAShr(Result, SrcScale - DstScale);
-      else
-        Result = Builder.CreateLShr(Result, SrcScale - DstScale);
-    }
+    // Downscale.
+    if (DstScale < SrcScale)
+      Result = SrcIsSigned ?
+          Builder.CreateAShr(Result, SrcScale - DstScale, "downscale") :
+          Builder.CreateLShr(Result, SrcScale - DstScale, "downscale");
 
-    // Resize
-    llvm::Type *DstIntTy = Builder.getIntNTy(DstWidth);
-    if (IsSigned)
-      Result = Builder.CreateSExtOrTrunc(Result, DstIntTy);
-    else
-      Result = Builder.CreateZExtOrTrunc(Result, DstIntTy);
+    // Resize.
+    Result = Builder.CreateIntCast(Result, DstIntTy, SrcIsSigned, "resize");
 
-    // Upscale
+    // Upscale.
     if (DstScale > SrcScale)
-      Result = Builder.CreateShl(Result, DstScale - SrcScale);
+      Result = Builder.CreateShl(Result, DstScale - SrcScale, "upscale");
   } else {
+    // Adjust the number of fractional bits.
     if (DstScale > SrcScale) {
-      // Need to extend first before scaling up
-      ResultWidth = SrcWidth + DstScale - SrcScale;
+      // Compare to DstWidth to prevent resizing twice.
+      ResultWidth = std::max(SrcWidth + DstScale - SrcScale, DstWidth);
       llvm::Type *UpscaledTy = Builder.getIntNTy(ResultWidth);
-
-      if (IsSigned)
-        Result = Builder.CreateSExt(Result, UpscaledTy);
-      else
-        Result = Builder.CreateZExt(Result, UpscaledTy);
-
-      Result = Builder.CreateShl(Result, DstScale - SrcScale);
+      Result = Builder.CreateIntCast(Result, UpscaledTy, SrcIsSigned, "resize");
+      Result = Builder.CreateShl(Result, DstScale - SrcScale, "upscale");
     } else if (DstScale < SrcScale) {
-      if (IsSigned)
-        Result = Builder.CreateAShr(Result, SrcScale - DstScale);
-      else
-        Result = Builder.CreateLShr(Result, SrcScale - DstScale);
+      Result = SrcIsSigned ?
+          Builder.CreateAShr(Result, SrcScale - DstScale, "downscale") :
+          Builder.CreateLShr(Result, SrcScale - DstScale, "downscale");
     }
 
-    if (DstFPSema.getIntegralBits() < SrcFPSema.getIntegralBits()) {
-      auto Max = ConstantInt::get(
+    // Handle saturation.
+    bool LessIntBits = DstFPSema.getIntegralBits() < SrcFPSema.getIntegralBits();
+    if (LessIntBits) {
+      Value *Max = ConstantInt::get(
           CGF.getLLVMContext(),
           APFixedPoint::getMax(DstFPSema).getValue().extOrTrunc(ResultWidth));
-      Value *TooHigh = IsSigned ? Builder.CreateICmpSGT(Result, Max)
-                                : Builder.CreateICmpUGT(Result, Max);
-      Result = Builder.CreateSelect(TooHigh, Max, Result);
-
-      if (IsSigned) {
-        // Cannot overflow min to dest type is src is unsigned since all fixed
-        // point types can cover the unsigned min of 0.
-        auto Min = ConstantInt::get(
-            CGF.getLLVMContext(),
-            APFixedPoint::getMin(DstFPSema).getValue().extOrTrunc(ResultWidth));
-        Value *TooLow = Builder.CreateICmpSLT(Result, Min);
-        Result = Builder.CreateSelect(TooLow, Min, Result);
-      }
-    } else if (IsSigned && !DstFPSema.isSigned()) {
-      llvm::Type *ResultTy = Builder.getIntNTy(ResultWidth);
-      Value *Zero = ConstantInt::getNullValue(ResultTy);
-      Value *LTZero = Builder.CreateICmpSLT(Result, Zero);
-      Result = Builder.CreateSelect(LTZero, Zero, Result);
+      Value *TooHigh = SrcIsSigned ? Builder.CreateICmpSGT(Result, Max)
+                                   : Builder.CreateICmpUGT(Result, Max);
+      Result = Builder.CreateSelect(TooHigh, Max, Result, "satmax");
+    }
+    // Cannot overflow min to dest type if src is unsigned since all fixed
+    // point types can cover the unsigned min of 0.
+    if (SrcIsSigned && (LessIntBits || !DstIsSigned)) {
+      Value *Min = ConstantInt::get(
+          CGF.getLLVMContext(),
+          APFixedPoint::getMin(DstFPSema).getValue().extOrTrunc(ResultWidth));
+      Value *TooLow = Builder.CreateICmpSLT(Result, Min);
+      Result = Builder.CreateSelect(TooLow, Min, Result, "satmin");
     }
 
-    // Final resizing to dst width
-    llvm::Type *DstIntTy = Builder.getIntNTy(DstWidth);
-    if (IsSigned)
-      Result = Builder.CreateSExtOrTrunc(Result, DstIntTy);
-    else
-      Result = Builder.CreateZExtOrTrunc(Result, DstIntTy);
+    // Resize the integer part to get the final destination size.
+    if (ResultWidth != DstWidth)
+      Result = Builder.CreateIntCast(Result, DstIntTy, SrcIsSigned, "resize");
   }
   return Result;
 }
@@ -1545,10 +1739,11 @@ Value *ScalarExprEmitter::VisitConvertVectorExpr(ConvertVectorExpr *E) {
 Value *ScalarExprEmitter::VisitMemberExpr(MemberExpr *E) {
   if (CodeGenFunction::ConstantEmission Constant = CGF.tryEmitAsConstant(E)) {
     CGF.EmitIgnoredExpr(E->getBase());
-    return emitConstant(Constant, E);
+    return CGF.emitScalarConstant(Constant, E);
   } else {
-    llvm::APSInt Value;
-    if (E->EvaluateAsInt(Value, CGF.getContext(), Expr::SE_AllowSideEffects)) {
+    Expr::EvalResult Result;
+    if (E->EvaluateAsInt(Result, CGF.getContext(), Expr::SE_AllowSideEffects)) {
+      llvm::APSInt Value = Result.Val.getInt();
       CGF.EmitIgnoredExpr(E->getBase());
       return Builder.getInt(Value);
     }
@@ -2027,9 +2222,9 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
 
   case CK_IntegralCast: {
     ScalarConversionOpts Opts;
-    if (CGF.SanOpts.hasOneOf(SanitizerKind::ImplicitIntegerTruncation)) {
-      if (auto *ICE = dyn_cast<ImplicitCastExpr>(CE))
-        Opts.EmitImplicitIntegerTruncationChecks = !ICE->isPartOfExplicitCast();
+    if (auto *ICE = dyn_cast<ImplicitCastExpr>(CE)) {
+      if (!ICE->isPartOfExplicitCast())
+        Opts = ScalarConversionOpts(CGF.SanOpts);
     }
     return EmitScalarConversion(Visit(E), E->getType(), DestTy,
                                 CE->getExprLoc(), Opts);
@@ -2071,7 +2266,8 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
   }
 
   case CK_ZeroToOCLOpaqueType: {
-    assert((DestTy->isEventT() || DestTy->isQueueT()) &&
+    assert((DestTy->isEventT() || DestTy->isQueueT() ||
+            DestTy->isOCLIntelSubgroupAVCType()) &&
            "CK_ZeroToOCLEvent cast on non-event type");
     return llvm::Constant::getNullValue(ConvertType(DestTy));
   }
@@ -2131,7 +2327,7 @@ llvm::Value *ScalarExprEmitter::EmitIncDecConsiderOverflowBehavior(
   case LangOptions::SOB_Undefined:
     if (!CGF.SanOpts.has(SanitizerKind::SignedIntegerOverflow))
       return Builder.CreateNSWAdd(InVal, Amount, Name);
-    // Fall through.
+    LLVM_FALLTHROUGH;
   case LangOptions::SOB_Trapping:
     if (!E->canOverflow())
       return Builder.CreateNSWAdd(InVal, Amount, Name);
@@ -2426,9 +2622,11 @@ Value *ScalarExprEmitter::VisitUnaryLNot(const UnaryOperator *E) {
 
 Value *ScalarExprEmitter::VisitOffsetOfExpr(OffsetOfExpr *E) {
   // Try folding the offsetof to a constant.
-  llvm::APSInt Value;
-  if (E->EvaluateAsInt(Value, CGF.getContext()))
+  Expr::EvalResult EVResult;
+  if (E->EvaluateAsInt(EVResult, CGF.getContext())) {
+    llvm::APSInt Value = EVResult.Val.getInt();
     return Builder.getInt(Value);
+  }
 
   // Loop over the components of the offsetof to compute the value.
   unsigned n = E->getNumComponents();
@@ -2697,9 +2895,10 @@ LValue ScalarExprEmitter::EmitCompoundAssignLValue(
   // Expand the binary operator.
   Result = (this->*Func)(OpInfo);
 
-  // Convert the result back to the LHS type.
-  Result =
-      EmitScalarConversion(Result, E->getComputationResultType(), LHSTy, Loc);
+  // Convert the result back to the LHS type,
+  // potentially with Implicit Conversion sanitizer check.
+  Result = EmitScalarConversion(Result, E->getComputationResultType(), LHSTy,
+                                Loc, ScalarConversionOpts(CGF.SanOpts));
 
   if (atomicPHI) {
     llvm::BasicBlock *opBB = Builder.GetInsertBlock();
@@ -3137,7 +3336,7 @@ Value *ScalarExprEmitter::EmitAdd(const BinOpInfo &op) {
     case LangOptions::SOB_Undefined:
       if (!CGF.SanOpts.has(SanitizerKind::SignedIntegerOverflow))
         return Builder.CreateNSWAdd(op.LHS, op.RHS, "add");
-      // Fall through.
+      LLVM_FALLTHROUGH;
     case LangOptions::SOB_Trapping:
       if (CanElideOverflowCheck(CGF.getContext(), op))
         return Builder.CreateNSWAdd(op.LHS, op.RHS, "add");
@@ -3159,7 +3358,106 @@ Value *ScalarExprEmitter::EmitAdd(const BinOpInfo &op) {
     return propagateFMFlags(V, op);
   }
 
+  if (op.isFixedPointBinOp())
+    return EmitFixedPointBinOp(op);
+
   return Builder.CreateAdd(op.LHS, op.RHS, "add");
+}
+
+/// The resulting value must be calculated with exact precision, so the operands
+/// may not be the same type.
+Value *ScalarExprEmitter::EmitFixedPointBinOp(const BinOpInfo &op) {
+  using llvm::APSInt;
+  using llvm::ConstantInt;
+
+  const auto *BinOp = cast<BinaryOperator>(op.E);
+  assert((BinOp->getOpcode() == BO_Add || BinOp->getOpcode() == BO_Sub) &&
+         "Expected operation to be addition or subtraction");
+
+  // The result is a fixed point type and at least one of the operands is fixed
+  // point while the other is either fixed point or an int. This resulting type
+  // should be determined by Sema::handleFixedPointConversions().
+  QualType ResultTy = op.Ty;
+  QualType LHSTy = BinOp->getLHS()->getType();
+  QualType RHSTy = BinOp->getRHS()->getType();
+  ASTContext &Ctx = CGF.getContext();
+  Value *LHS = op.LHS;
+  Value *RHS = op.RHS;
+
+  auto LHSFixedSema = Ctx.getFixedPointSemantics(LHSTy);
+  auto RHSFixedSema = Ctx.getFixedPointSemantics(RHSTy);
+  auto ResultFixedSema = Ctx.getFixedPointSemantics(ResultTy);
+  auto CommonFixedSema = LHSFixedSema.getCommonSemantics(RHSFixedSema);
+
+  // Convert the operands to the full precision type.
+  Value *FullLHS = EmitFixedPointConversion(LHS, LHSFixedSema, CommonFixedSema,
+                                            BinOp->getExprLoc());
+  Value *FullRHS = EmitFixedPointConversion(RHS, RHSFixedSema, CommonFixedSema,
+                                            BinOp->getExprLoc());
+
+  // Perform the actual addition.
+  Value *Result;
+  switch (BinOp->getOpcode()) {
+  case BO_Add: {
+    if (ResultFixedSema.isSaturated()) {
+      llvm::Intrinsic::ID IID = ResultFixedSema.isSigned()
+                                    ? llvm::Intrinsic::sadd_sat
+                                    : llvm::Intrinsic::uadd_sat;
+      Result = Builder.CreateBinaryIntrinsic(IID, FullLHS, FullRHS);
+    } else {
+      Result = Builder.CreateAdd(FullLHS, FullRHS);
+    }
+    break;
+  }
+  case BO_Sub: {
+    if (ResultFixedSema.isSaturated()) {
+      llvm::Intrinsic::ID IID = ResultFixedSema.isSigned()
+                                    ? llvm::Intrinsic::ssub_sat
+                                    : llvm::Intrinsic::usub_sat;
+      Result = Builder.CreateBinaryIntrinsic(IID, FullLHS, FullRHS);
+    } else {
+      Result = Builder.CreateSub(FullLHS, FullRHS);
+    }
+    break;
+  }
+  case BO_Mul:
+  case BO_Div:
+  case BO_Shl:
+  case BO_Shr:
+  case BO_Cmp:
+  case BO_LT:
+  case BO_GT:
+  case BO_LE:
+  case BO_GE:
+  case BO_EQ:
+  case BO_NE:
+  case BO_LAnd:
+  case BO_LOr:
+  case BO_MulAssign:
+  case BO_DivAssign:
+  case BO_AddAssign:
+  case BO_SubAssign:
+  case BO_ShlAssign:
+  case BO_ShrAssign:
+    llvm_unreachable("Found unimplemented fixed point binary operation");
+  case BO_PtrMemD:
+  case BO_PtrMemI:
+  case BO_Rem:
+  case BO_Xor:
+  case BO_And:
+  case BO_Or:
+  case BO_Assign:
+  case BO_RemAssign:
+  case BO_AndAssign:
+  case BO_XorAssign:
+  case BO_OrAssign:
+  case BO_Comma:
+    llvm_unreachable("Found unsupported binary operation for fixed point types.");
+  }
+
+  // Convert to the result type.
+  return EmitFixedPointConversion(Result, CommonFixedSema, ResultFixedSema,
+                                  BinOp->getExprLoc());
 }
 
 Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
@@ -3172,7 +3470,7 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
       case LangOptions::SOB_Undefined:
         if (!CGF.SanOpts.has(SanitizerKind::SignedIntegerOverflow))
           return Builder.CreateNSWSub(op.LHS, op.RHS, "sub");
-        // Fall through.
+        LLVM_FALLTHROUGH;
       case LangOptions::SOB_Trapping:
         if (CanElideOverflowCheck(CGF.getContext(), op))
           return Builder.CreateNSWSub(op.LHS, op.RHS, "sub");
@@ -3192,6 +3490,9 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
       Value *V = Builder.CreateFSub(op.LHS, op.RHS, "sub");
       return propagateFMFlags(V, op);
     }
+
+    if (op.isFixedPointBinOp())
+      return EmitFixedPointBinOp(op);
 
     return Builder.CreateSub(op.LHS, op.RHS, "sub");
   }

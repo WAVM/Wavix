@@ -1,9 +1,8 @@
 //===- Type.h - C Language Family Type Representation -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -94,9 +93,6 @@ namespace llvm {
 
     enum { NumLowBitsAvailable = clang::TypeAlignmentInBits };
   };
-
-  template <>
-  struct isPodLike<clang::QualType> { static const bool value = true; };
 
 } // namespace llvm
 
@@ -256,28 +252,24 @@ public:
   }
 
   bool hasConst() const { return Mask & Const; }
-  void setConst(bool flag) {
-    Mask = (Mask & ~Const) | (flag ? Const : 0);
-  }
+  bool hasOnlyConst() const { return Mask == Const; }
   void removeConst() { Mask &= ~Const; }
   void addConst() { Mask |= Const; }
 
   bool hasVolatile() const { return Mask & Volatile; }
-  void setVolatile(bool flag) {
-    Mask = (Mask & ~Volatile) | (flag ? Volatile : 0);
-  }
+  bool hasOnlyVolatile() const { return Mask == Volatile; }
   void removeVolatile() { Mask &= ~Volatile; }
   void addVolatile() { Mask |= Volatile; }
 
   bool hasRestrict() const { return Mask & Restrict; }
-  void setRestrict(bool flag) {
-    Mask = (Mask & ~Restrict) | (flag ? Restrict : 0);
-  }
+  bool hasOnlyRestrict() const { return Mask == Restrict; }
   void removeRestrict() { Mask &= ~Restrict; }
   void addRestrict() { Mask |= Restrict; }
 
   bool hasCVRQualifiers() const { return getCVRQualifiers(); }
   unsigned getCVRQualifiers() const { return Mask & CVRMask; }
+  unsigned getCVRUQualifiers() const { return Mask & (CVRMask | UMask); }
+
   void setCVRQualifiers(unsigned mask) {
     assert(!(mask & ~CVRMask) && "bitmask contains non-CVR bits");
     Mask = (Mask & ~CVRMask) | mask;
@@ -984,9 +976,7 @@ public:
 
   void print(raw_ostream &OS, const PrintingPolicy &Policy,
              const Twine &PlaceHolder = Twine(),
-             unsigned Indentation = 0) const {
-    print(split(), OS, Policy, PlaceHolder, Indentation);
-  }
+             unsigned Indentation = 0) const;
 
   static void print(SplitQualType split, raw_ostream &OS,
                     const PrintingPolicy &policy, const Twine &PlaceHolder,
@@ -1000,9 +990,7 @@ public:
                     unsigned Indentation = 0);
 
   void getAsStringInternal(std::string &Str,
-                           const PrintingPolicy &Policy) const {
-    return getAsStringInternal(split(), Str, Policy);
-  }
+                           const PrintingPolicy &Policy) const;
 
   static void getAsStringInternal(SplitQualType split, std::string &out,
                                   const PrintingPolicy &policy) {
@@ -1526,7 +1514,9 @@ protected:
     ///
     /// C++ 8.3.5p4: The return type, the parameter type list and the
     /// cv-qualifier-seq, [...], are part of the function type.
-    unsigned TypeQuals : 4;
+    unsigned FastTypeQuals : Qualifiers::FastWidth;
+    /// Whether this function has extended Qualifiers.
+    unsigned HasExtQuals : 1;
 
     /// The number of parameters this function has, not counting '...'.
     /// According to [implimits] 8 bits should be enough here but this is
@@ -1992,7 +1982,7 @@ public:
   bool isObjCQualifiedClassType() const;        // Class<foo>
   bool isObjCObjectOrInterfaceType() const;
   bool isObjCIdType() const;                    // id
-
+  bool isDecltypeType() const;
   /// Was this type written with the special inert-in-ARC __unsafe_unretained
   /// qualifier?
   ///
@@ -2045,6 +2035,13 @@ public:
   bool isClkEventT() const;                     // OpenCL clk_event_t
   bool isQueueT() const;                        // OpenCL queue_t
   bool isReserveIDT() const;                    // OpenCL reserve_id_t
+
+#define EXT_OPAQUE_TYPE(ExtType, Id, Ext) \
+  bool is##Id##Type() const;
+#include "clang/Basic/OpenCLExtensionTypes.def"
+  // Type defined in cl_intel_device_side_avc_motion_estimation OpenCL extension
+  bool isOCLIntelSubgroupAVCType() const;
+  bool isOCLExtOpaqueType() const;              // Any OpenCL extension type
 
   bool isPipeType() const;                      // OpenCL pipe type
   bool isOpenCLSpecificType() const;            // Any OpenCL specific type
@@ -2268,6 +2265,9 @@ public:
   /// ISO/IEC JTC1 SC22 WG14 N1169.
   bool isFixedPointType() const;
 
+  /// Return true if this is a fixed point or integer type.
+  bool isFixedPointOrIntegerType() const;
+
   /// Return true if this is a saturated fixed point type according to
   /// ISO/IEC JTC1 SC22 WG14 N1169. This type can be signed or unsigned.
   bool isSaturatedFixedPointType() const;
@@ -2393,6 +2393,9 @@ public:
 // OpenCL image types
 #define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix) Id,
 #include "clang/Basic/OpenCLImageTypes.def"
+// OpenCL extension types
+#define EXT_OPAQUE_TYPE(ExtType, Id, Ext) Id,
+#include "clang/Basic/OpenCLExtensionTypes.def"
 // All other builtin types
 #define BUILTIN_TYPE(Id, SingletonId) Id,
 #define LAST_BUILTIN_TYPE(Id) LastKind = Id
@@ -3601,7 +3604,9 @@ protected:
     FunctionTypeBits.ExtInfo = Info.Bits;
   }
 
-  unsigned getTypeQuals() const { return FunctionTypeBits.TypeQuals; }
+  Qualifiers getFastTypeQuals() const {
+    return Qualifiers::fromFastMask(FunctionTypeBits.FastTypeQuals);
+  }
 
 public:
   QualType getReturnType() const { return ResultType; }
@@ -3616,9 +3621,14 @@ public:
 
   CallingConv getCallConv() const { return getExtInfo().getCC(); }
   ExtInfo getExtInfo() const { return ExtInfo(FunctionTypeBits.ExtInfo); }
-  bool isConst() const { return getTypeQuals() & Qualifiers::Const; }
-  bool isVolatile() const { return getTypeQuals() & Qualifiers::Volatile; }
-  bool isRestrict() const { return getTypeQuals() & Qualifiers::Restrict; }
+
+  static_assert((~Qualifiers::FastMask & Qualifiers::CVRMask) == 0,
+                "Const, volatile and restrict are assumed to be a subset of "
+                "the fast qualifiers.");
+
+  bool isConst() const { return getFastTypeQuals().hasConst(); }
+  bool isVolatile() const { return getFastTypeQuals().hasVolatile(); }
+  bool isRestrict() const { return getFastTypeQuals().hasRestrict(); }
 
   /// Determine the type of an expression that calls a function of
   /// this type.
@@ -3679,7 +3689,7 @@ class FunctionProtoType final
       private llvm::TrailingObjects<
           FunctionProtoType, QualType, FunctionType::FunctionTypeExtraBitfields,
           FunctionType::ExceptionType, Expr *, FunctionDecl *,
-          FunctionType::ExtParameterInfo> {
+          FunctionType::ExtParameterInfo, Qualifiers> {
   friend class ASTContext; // ASTContext creates these.
   friend TrailingObjects;
 
@@ -3706,6 +3716,10 @@ class FunctionProtoType final
   // * Optionally an array of getNumParams() ExtParameterInfo holding
   //   an ExtParameterInfo for each of the parameters. Present if and
   //   only if hasExtParameterInfos() is true.
+  //
+  // * Optionally a Qualifiers object to represent extra qualifiers that can't
+  //   be represented by FunctionTypeBitfields.FastTypeQuals. Present if and only
+  //   if hasExtQualifiers() is true.
   //
   // The optional FunctionTypeExtraBitfields has to be before the data
   // related to the exception specification since it contains the number
@@ -3753,7 +3767,7 @@ public:
     FunctionType::ExtInfo ExtInfo;
     bool Variadic : 1;
     bool HasTrailingReturn : 1;
-    unsigned char TypeQuals = 0;
+    Qualifiers TypeQuals;
     RefQualifierKind RefQualifier = RQ_None;
     ExceptionSpecInfo ExceptionSpec;
     const ExtParameterInfo *ExtParameterInfos = nullptr;
@@ -3865,6 +3879,10 @@ private:
     return hasExtraBitfields(getExceptionSpecType());
   }
 
+  bool hasExtQualifiers() const {
+    return FunctionTypeBits.HasExtQuals;
+  }
+
 public:
   unsigned getNumParams() const { return FunctionTypeBits.NumParams; }
 
@@ -3883,7 +3901,7 @@ public:
     EPI.Variadic = isVariadic();
     EPI.HasTrailingReturn = hasTrailingReturn();
     EPI.ExceptionSpec.Type = getExceptionSpecType();
-    EPI.TypeQuals = static_cast<unsigned char>(getTypeQuals());
+    EPI.TypeQuals = getMethodQuals();
     EPI.RefQualifier = getRefQualifier();
     if (EPI.ExceptionSpec.Type == EST_Dynamic) {
       EPI.ExceptionSpec.Exceptions = exceptions();
@@ -3993,7 +4011,12 @@ public:
   /// Whether this function prototype has a trailing return type.
   bool hasTrailingReturn() const { return FunctionTypeBits.HasTrailingReturn; }
 
-  unsigned getTypeQuals() const { return FunctionType::getTypeQuals(); }
+  Qualifiers getMethodQuals() const {
+    if (hasExtQualifiers())
+      return *getTrailingObjects<Qualifiers>();
+    else
+      return getFastTypeQuals();
+  }
 
   /// Retrieve the ref-qualifier associated with this function type.
   RefQualifierKind getRefQualifier() const {
@@ -4901,7 +4924,9 @@ public:
     return !isDependentType() || isCurrentInstantiation() || isTypeAlias();
   }
 
-  QualType desugar() const { return getCanonicalTypeInternal(); }
+  QualType desugar() const {
+    return isTypeAlias() ? getAliasedType() : getCanonicalTypeInternal();
+  }
 
   void Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Ctx) {
     Profile(ID, Template, template_arguments(), Ctx);
@@ -6415,6 +6440,10 @@ inline bool Type::isObjCBuiltinType() const {
   return isObjCIdType() || isObjCClassType() || isObjCSelType();
 }
 
+inline bool Type::isDecltypeType() const {
+  return isa<DecltypeType>(this);
+}
+
 #define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix) \
   inline bool Type::is##Id##Type() const { \
     return isSpecificBuiltinType(BuiltinType::Id); \
@@ -6452,9 +6481,30 @@ inline bool Type::isPipeType() const {
   return isa<PipeType>(CanonicalType);
 }
 
+#define EXT_OPAQUE_TYPE(ExtType, Id, Ext) \
+  inline bool Type::is##Id##Type() const { \
+    return isSpecificBuiltinType(BuiltinType::Id); \
+  }
+#include "clang/Basic/OpenCLExtensionTypes.def"
+
+inline bool Type::isOCLIntelSubgroupAVCType() const {
+#define INTEL_SUBGROUP_AVC_TYPE(ExtType, Id) \
+  isOCLIntelSubgroupAVC##Id##Type() ||
+  return
+#include "clang/Basic/OpenCLExtensionTypes.def"
+    false; // end of boolean or operation
+}
+
+inline bool Type::isOCLExtOpaqueType() const {
+#define EXT_OPAQUE_TYPE(ExtType, Id, Ext) is##Id##Type() ||
+  return
+#include "clang/Basic/OpenCLExtensionTypes.def"
+    false; // end of boolean or operation
+}
+
 inline bool Type::isOpenCLSpecificType() const {
   return isSamplerT() || isEventT() || isImageType() || isClkEventT() ||
-         isQueueT() || isReserveIDT() || isPipeType();
+         isQueueT() || isReserveIDT() || isPipeType() || isOCLExtOpaqueType();
 }
 
 inline bool Type::isTemplateTypeParmType() const {
@@ -6547,6 +6597,10 @@ inline bool Type::isFixedPointType() const {
            BT->getKind() <= BuiltinType::SatULongFract;
   }
   return false;
+}
+
+inline bool Type::isFixedPointOrIntegerType() const {
+  return isFixedPointType() || isIntegerType();
 }
 
 inline bool Type::isSaturatedFixedPointType() const {
@@ -6652,6 +6706,24 @@ inline const Type *Type::getPointeeOrArrayElementType() const {
   else if (type->isArrayType())
     return type->getBaseElementTypeUnsafe();
   return type;
+}
+
+/// Insertion operator for diagnostics. This allows sending Qualifiers into a
+/// diagnostic with <<.
+inline const DiagnosticBuilder &operator<<(const DiagnosticBuilder &DB,
+                                           Qualifiers Q) {
+  DB.AddTaggedVal(Q.getAsOpaqueValue(),
+                  DiagnosticsEngine::ArgumentKind::ak_qual);
+  return DB;
+}
+
+/// Insertion operator for partial diagnostics. This allows sending Qualifiers
+/// into a diagnostic with <<.
+inline const PartialDiagnostic &operator<<(const PartialDiagnostic &PD,
+                                           Qualifiers Q) {
+  PD.AddTaggedVal(Q.getAsOpaqueValue(),
+                  DiagnosticsEngine::ArgumentKind::ak_qual);
+  return PD;
 }
 
 /// Insertion operator for diagnostics.  This allows sending QualType's into a
@@ -6776,6 +6848,8 @@ QualType DecayedType::getPointeeType() const {
 
 // Get the decimal string representation of a fixed point type, represented
 // as a scaled integer.
+// TODO: At some point, we should change the arguments to instead just accept an
+// APFixedPoint instead of APSInt and scale.
 void FixedPointValueToString(SmallVectorImpl<char> &Str, llvm::APSInt Val,
                              unsigned Scale);
 

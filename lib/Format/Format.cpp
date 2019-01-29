@@ -1,9 +1,8 @@
 //===--- Format.cpp - Format C++ code -------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -1504,7 +1503,8 @@ public:
           SmallVectorImpl<AnnotatedLine *> &AnnotatedLines,
           FormatTokenLexer &Tokens) override {
     assert(Style.Language == FormatStyle::LK_Cpp);
-    IsObjC = guessIsObjC(AnnotatedLines, Tokens.getKeywords());
+    IsObjC = guessIsObjC(Env.getSourceManager(), AnnotatedLines,
+                         Tokens.getKeywords());
     tooling::Replacements Result;
     return {Result, 0};
   }
@@ -1512,8 +1512,10 @@ public:
   bool isObjC() { return IsObjC; }
 
 private:
-  static bool guessIsObjC(const SmallVectorImpl<AnnotatedLine *> &AnnotatedLines,
-                          const AdditionalKeywords &Keywords) {
+  static bool
+  guessIsObjC(const SourceManager &SourceManager,
+              const SmallVectorImpl<AnnotatedLine *> &AnnotatedLines,
+              const AdditionalKeywords &Keywords) {
     // Keep this array sorted, since we are binary searching over it.
     static constexpr llvm::StringLiteral FoundationIdentifiers[] = {
         "CGFloat",
@@ -1604,9 +1606,15 @@ private:
                                TT_ObjCBlockLBrace, TT_ObjCBlockLParen,
                                TT_ObjCDecl, TT_ObjCForIn, TT_ObjCMethodExpr,
                                TT_ObjCMethodSpecifier, TT_ObjCProperty)) {
+          LLVM_DEBUG(llvm::dbgs()
+                     << "Detected ObjC at location "
+                     << FormatTok->Tok.getLocation().printToString(
+                            SourceManager)
+                     << " token: " << FormatTok->TokenText << " token type: "
+                     << getTokenTypeName(FormatTok->Type) << "\n");
           return true;
         }
-        if (guessIsObjC(Line->Children, Keywords))
+        if (guessIsObjC(SourceManager, Line->Children, Keywords))
           return true;
       }
     }
@@ -1859,7 +1867,7 @@ static void sortJavaImports(const FormatStyle &Style,
     JavaImportGroups.push_back(
         findJavaImportGroup(Style, Imports[i].Identifier));
   }
-  llvm::sort(Indices.begin(), Indices.end(), [&](unsigned LHSI, unsigned RHSI) {
+  llvm::sort(Indices, [&](unsigned LHSI, unsigned RHSI) {
         // Negating IsStatic to push static imports above non-static imports.
         return std::make_tuple(!Imports[LHSI].IsStatic, JavaImportGroups[LHSI],
                                Imports[LHSI].Identifier) <
@@ -2264,8 +2272,7 @@ LangOptions getFormattingLangOpts(const FormatStyle &Style) {
   bool AlternativeOperators = Style.isCpp();
   LangOpts.CXXOperatorNames = AlternativeOperators ? 1 : 0;
   LangOpts.Bool = 1;
-  LangOpts.ObjC1 = 1;
-  LangOpts.ObjC2 = 1;
+  LangOpts.ObjC = 1;
   LangOpts.MicrosoftExt = 1;    // To get kw___try, kw___finally.
   LangOpts.DeclSpecKeyword = 1; // To get __declspec.
   return LangOpts;

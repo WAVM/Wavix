@@ -1,9 +1,8 @@
 //===- DeclBase.h - Base Classes for representing declarations --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1065,11 +1064,11 @@ public:
     unsigned OldNS = IdentifierNamespace;
     assert((OldNS & (IDNS_Tag | IDNS_Ordinary |
                      IDNS_TagFriend | IDNS_OrdinaryFriend |
-                     IDNS_LocalExtern)) &&
+                     IDNS_LocalExtern | IDNS_NonMemberOperator)) &&
            "namespace includes neither ordinary nor tag");
     assert(!(OldNS & ~(IDNS_Tag | IDNS_Ordinary | IDNS_Type |
                        IDNS_TagFriend | IDNS_OrdinaryFriend |
-                       IDNS_LocalExtern)) &&
+                       IDNS_LocalExtern | IDNS_NonMemberOperator)) &&
            "namespace includes other than ordinary or tag");
 
     Decl *Prev = getPreviousDecl();
@@ -1082,7 +1081,8 @@ public:
         IdentifierNamespace |= IDNS_Tag | IDNS_Type;
     }
 
-    if (OldNS & (IDNS_Ordinary | IDNS_OrdinaryFriend | IDNS_LocalExtern)) {
+    if (OldNS & (IDNS_Ordinary | IDNS_OrdinaryFriend |
+                 IDNS_LocalExtern | IDNS_NonMemberOperator)) {
       IdentifierNamespace |= IDNS_OrdinaryFriend;
       if (PerformFriendInjection ||
           (Prev && Prev->getIdentifierNamespace() & IDNS_Ordinary))

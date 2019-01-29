@@ -1,9 +1,8 @@
 //===- ModuleMap.cpp - Describe the layout of modules ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -53,6 +52,8 @@
 #include <utility>
 
 using namespace clang;
+
+void ModuleMapCallbacks::anchor() {}
 
 void ModuleMap::resolveLinkAsDependencies(Module *Mod) {
   auto PendingLinkAs = PendingLinkAsModule.find(Mod->Name);
@@ -523,7 +524,7 @@ void ModuleMap::diagnoseHeaderInclusion(Module *RequestingModule,
 
   // At this point, only non-modular includes remain.
 
-  if (LangOpts.ModulesStrictDeclUse) {
+  if (RequestingModule && LangOpts.ModulesStrictDeclUse) {
     Diags.Report(FilenameLoc, diag::err_undeclared_use_of_module)
         << RequestingModule->getTopLevelModule()->Name << Filename;
   } else if (RequestingModule && RequestingModuleIsModuleInterface &&
