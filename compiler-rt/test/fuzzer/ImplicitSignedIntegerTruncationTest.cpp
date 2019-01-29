@@ -1,5 +1,6 @@
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Test for signed-integer-overflow.
 #include <assert.h>
@@ -9,8 +10,8 @@
 #include <cstdlib>
 #include <iostream>
 
-static volatile int Sink;
-static unsigned char Large = UINT8_MAX;
+static volatile int32_t Sink;
+static uint8_t Large = UINT8_MAX;
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   assert(Data);

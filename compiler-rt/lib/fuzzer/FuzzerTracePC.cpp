@@ -1,9 +1,8 @@
 //===- FuzzerTracePC.cpp - PC tracing--------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // Trace PCs.
@@ -13,6 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "FuzzerTracePC.h"
+#include "FuzzerBuiltins.h"
+#include "FuzzerBuiltinsMsvc.h"
 #include "FuzzerCorpus.h"
 #include "FuzzerDefs.h"
 #include "FuzzerDictionary.h"
@@ -56,59 +57,6 @@ size_t TracePC::GetTotalPCCoverage() {
   return Res;
 }
 
-template<class CallBack>
-void TracePC::IterateInline8bitCounters(CallBack CB) const {
-  if (NumInline8bitCounters && NumInline8bitCounters == NumPCsInPCTables) {
-    size_t CounterIdx = 0;
-    for (size_t i = 0; i < NumModulesWithInline8bitCounters; i++) {
-      uint8_t *Beg = ModuleCounters[i].Start;
-      size_t Size = ModuleCounters[i].Stop - Beg;
-      assert(Size == (size_t)(ModulePCTable[i].Stop - ModulePCTable[i].Start));
-      for (size_t j = 0; j < Size; j++, CounterIdx++)
-        CB(i, j, CounterIdx);
-    }
-  }
-}
-
-// Initializes unstable counters by copying Inline8bitCounters to unstable
-// counters.
-void TracePC::InitializeUnstableCounters() {
-  IterateInline8bitCounters([&](int i, int j, int UnstableIdx) {
-    UnstableCounters[UnstableIdx].Counter = ModuleCounters[i].Start[j];
-  });
-}
-
-// Compares the current counters with counters from previous runs
-// and records differences as unstable edges.
-bool TracePC::UpdateUnstableCounters(int UnstableMode) {
-  bool Updated = false;
-  IterateInline8bitCounters([&](int i, int j, int UnstableIdx) {
-    if (ModuleCounters[i].Start[j] != UnstableCounters[UnstableIdx].Counter) {
-      Updated = true;
-      UnstableCounters[UnstableIdx].IsUnstable = true;
-      if (UnstableMode == ZeroUnstable)
-        UnstableCounters[UnstableIdx].Counter = 0;
-      else if (UnstableMode == MinUnstable)
-        UnstableCounters[UnstableIdx].Counter = std::min(
-            ModuleCounters[i].Start[j], UnstableCounters[UnstableIdx].Counter);
-    }
-  });
-  return Updated;
-}
-
-// Updates and applies unstable counters to ModuleCounters in single iteration
-void TracePC::UpdateAndApplyUnstableCounters(int UnstableMode) {
-  IterateInline8bitCounters([&](int i, int j, int UnstableIdx) {
-    if (ModuleCounters[i].Start[j] != UnstableCounters[UnstableIdx].Counter) {
-      UnstableCounters[UnstableIdx].IsUnstable = true;
-      if (UnstableMode == ZeroUnstable)
-        ModuleCounters[i].Start[j] = 0;
-      else if (UnstableMode == MinUnstable)
-        ModuleCounters[i].Start[j] = std::min(
-            ModuleCounters[i].Start[j], UnstableCounters[UnstableIdx].Counter);
-    }
-  });
-}
 
 void TracePC::HandleInline8bitCountersInit(uint8_t *Start, uint8_t *Stop) {
   if (Start == Stop) return;
@@ -243,10 +191,15 @@ void TracePC::UpdateObservedPCs() {
 
   if (NumPCsInPCTables) {
     if (NumInline8bitCounters == NumPCsInPCTables) {
-      IterateInline8bitCounters([&](int i, int j, int CounterIdx) {
-        if (ModuleCounters[i].Start[j])
-          Observe(ModulePCTable[i].Start[j]);
-      });
+      for (size_t i = 0; i < NumModulesWithInline8bitCounters; i++) {
+        uint8_t *Beg = ModuleCounters[i].Start;
+        size_t Size = ModuleCounters[i].Stop - Beg;
+        assert(Size ==
+               (size_t)(ModulePCTable[i].Stop - ModulePCTable[i].Start));
+        for (size_t j = 0; j < Size; j++)
+          if (Beg[j])
+            Observe(ModulePCTable[i].Start[j]);
+      }
     } else if (NumGuards == NumPCsInPCTables) {
       size_t GuardIdx = 1;
       for (size_t i = 0; i < NumModules; i++) {
@@ -292,8 +245,7 @@ void TracePC::IterateCoveredFunctions(CallBack CB) {
       do {
         NextFE++;
       } while (NextFE < M.Stop && !(NextFE->PCFlags & 1));
-      if (ObservedFuncs.count(FE->PC))
-        CB(FE, NextFE, ObservedFuncs[FE->PC]);
+      CB(FE, NextFE, ObservedFuncs[FE->PC]);
     }
   }
 }
@@ -358,12 +310,13 @@ void TracePC::PrintCoverage() {
     for (auto TE = First; TE < Last; TE++)
       if (!ObservedPCs.count(TE->PC))
         UncoveredPCs.push_back(TE->PC);
-    Printf("COVERED_FUNC: hits: %zd", Counter);
+    Printf("%sCOVERED_FUNC: hits: %zd", Counter ? "" : "UN", Counter);
     Printf(" edges: %zd/%zd", NumEdges - UncoveredPCs.size(), NumEdges);
     Printf(" %s %s:%zd\n", FunctionStr.c_str(), FileStr.c_str(), Line);
-    for (auto PC: UncoveredPCs)
-      Printf("  UNCOVERED_PC: %s\n",
-             DescribePC("%s:%l", GetNextInstructionPc(PC)).c_str());
+    if (Counter)
+      for (auto PC : UncoveredPCs)
+        Printf("  UNCOVERED_PC: %s\n",
+               DescribePC("%s:%l", GetNextInstructionPc(PC)).c_str());
   };
 
   IterateCoveredFunctions(CoveredFunctionCallback);
@@ -376,27 +329,6 @@ void TracePC::DumpCoverage() {
       PCsCopy[i] = PCs()[i] ? GetPreviousInstructionPc(PCs()[i]) : 0;
     EF->__sanitizer_dump_coverage(PCsCopy.data(), PCsCopy.size());
   }
-}
-
-void TracePC::PrintUnstableStats() {
-  size_t count = 0;
-  Printf("UNSTABLE_FUNCTIONS:\n");
-  IterateInline8bitCounters([&](int i, int j, int UnstableIdx) {
-    const PCTableEntry &TE = ModulePCTable[i].Start[j];
-    if (UnstableCounters[UnstableIdx].IsUnstable) {
-      count++;
-      if (ObservedFuncs.count(TE.PC)) {
-        auto VisualizePC = GetNextInstructionPc(TE.PC);
-        std::string FunctionStr = DescribePC("%F", VisualizePC);
-        if (FunctionStr.find("in ") == 0)
-          FunctionStr = FunctionStr.substr(3);
-        Printf("%s\n", FunctionStr.c_str());
-      }
-    }
-  });
-
-  Printf("stat::stability_rate: %.2f\n",
-         100 - static_cast<float>(count * 100) / NumInline8bitCounters);
 }
 
 // Value profile.
@@ -446,9 +378,8 @@ void TracePC::HandleCmp(uintptr_t PC, T Arg1, T Arg2) {
       TORC4.Insert(ArgXor, Arg1, Arg2);
   else if (sizeof(T) == 8)
       TORC8.Insert(ArgXor, Arg1, Arg2);
-  uint64_t HammingDistance = __builtin_popcountll(ArgXor); // [0,64]
-  uint64_t AbsoluteDistance =
-      (Arg1 == Arg2 ? 0 : __builtin_clzll(Arg1 - Arg2) + 1);
+  uint64_t HammingDistance = Popcountll(ArgXor);  // [0,64]
+  uint64_t AbsoluteDistance = (Arg1 == Arg2 ? 0 : Clzll(Arg1 - Arg2) + 1);
   ValueProfileMap.AddValue(PC * 128 + HammingDistance);
   ValueProfileMap.AddValue(PC * 128 + 64 + AbsoluteDistance);
 }
@@ -491,7 +422,7 @@ extern "C" {
 ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 void __sanitizer_cov_trace_pc_guard(uint32_t *Guard) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   uint32_t Idx = *Guard;
   __sancov_trace_pc_pcs[Idx] = PC;
   __sancov_trace_pc_guard_8bit_counters[Idx]++;
@@ -502,7 +433,7 @@ void __sanitizer_cov_trace_pc_guard(uint32_t *Guard) {
 ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 void __sanitizer_cov_trace_pc() {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   uintptr_t Idx = PC & (((uintptr_t)1 << fuzzer::TracePC::kTracePcBits) - 1);
   __sancov_trace_pc_pcs[Idx] = PC;
   __sancov_trace_pc_guard_8bit_counters[Idx]++;
@@ -527,7 +458,7 @@ void __sanitizer_cov_pcs_init(const uintptr_t *pcs_beg,
 ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 void __sanitizer_cov_trace_pc_indir(uintptr_t Callee) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCallerCallee(PC, Callee);
 }
 
@@ -535,7 +466,7 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_cmp8(uint64_t Arg1, uint64_t Arg2) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Arg1, Arg2);
 }
 
@@ -546,7 +477,7 @@ ATTRIBUTE_TARGET_POPCNT
 // the behaviour of __sanitizer_cov_trace_cmp[1248] ones. This, however,
 // should be changed later to make full use of instrumentation.
 void __sanitizer_cov_trace_const_cmp8(uint64_t Arg1, uint64_t Arg2) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Arg1, Arg2);
 }
 
@@ -554,7 +485,7 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_cmp4(uint32_t Arg1, uint32_t Arg2) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Arg1, Arg2);
 }
 
@@ -562,7 +493,7 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_const_cmp4(uint32_t Arg1, uint32_t Arg2) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Arg1, Arg2);
 }
 
@@ -570,7 +501,7 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_cmp2(uint16_t Arg1, uint16_t Arg2) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Arg1, Arg2);
 }
 
@@ -578,7 +509,7 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_const_cmp2(uint16_t Arg1, uint16_t Arg2) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Arg1, Arg2);
 }
 
@@ -586,7 +517,7 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_cmp1(uint8_t Arg1, uint8_t Arg2) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Arg1, Arg2);
 }
 
@@ -594,7 +525,7 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_const_cmp1(uint8_t Arg1, uint8_t Arg2) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Arg1, Arg2);
 }
 
@@ -605,31 +536,51 @@ void __sanitizer_cov_trace_switch(uint64_t Val, uint64_t *Cases) {
   uint64_t N = Cases[0];
   uint64_t ValSizeInBits = Cases[1];
   uint64_t *Vals = Cases + 2;
-  // Skip the most common and the most boring case.
-  if (Vals[N - 1]  < 256 && Val < 256)
+  // Skip the most common and the most boring case: all switch values are small.
+  // We may want to skip this at compile-time, but it will make the
+  // instrumentation less general.
+  if (Vals[N - 1]  < 256)
     return;
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  // Also skip small inputs values, they won't give good signal.
+  if (Val < 256)
+    return;
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   size_t i;
-  uint64_t Token = 0;
+  uint64_t Smaller = 0;
+  uint64_t Larger = ~(uint64_t)0;
+  // Find two switch values such that Smaller < Val < Larger.
+  // Use 0 and 0xfff..f as the defaults.
   for (i = 0; i < N; i++) {
-    Token = Val ^ Vals[i];
-    if (Val < Vals[i])
+    if (Val < Vals[i]) {
+      Larger = Vals[i];
       break;
+    }
+    if (Val > Vals[i]) Smaller = Vals[i];
   }
 
-  if (ValSizeInBits == 16)
-    fuzzer::TPC.HandleCmp(PC + i, static_cast<uint16_t>(Token), (uint16_t)(0));
-  else if (ValSizeInBits == 32)
-    fuzzer::TPC.HandleCmp(PC + i, static_cast<uint32_t>(Token), (uint32_t)(0));
-  else
-    fuzzer::TPC.HandleCmp(PC + i, Token, (uint64_t)(0));
+  // Apply HandleCmp to {Val,Smaller} and {Val, Larger},
+  // use i as the PC modifier for HandleCmp.
+  if (ValSizeInBits == 16) {
+    fuzzer::TPC.HandleCmp(PC + 2 * i, static_cast<uint16_t>(Val),
+                          (uint16_t)(Smaller));
+    fuzzer::TPC.HandleCmp(PC + 2 * i + 1, static_cast<uint16_t>(Val),
+                          (uint16_t)(Larger));
+  } else if (ValSizeInBits == 32) {
+    fuzzer::TPC.HandleCmp(PC + 2 * i, static_cast<uint32_t>(Val),
+                          (uint32_t)(Smaller));
+    fuzzer::TPC.HandleCmp(PC + 2 * i + 1, static_cast<uint32_t>(Val),
+                          (uint32_t)(Larger));
+  } else {
+    fuzzer::TPC.HandleCmp(PC + 2*i, Val, Smaller);
+    fuzzer::TPC.HandleCmp(PC + 2*i + 1, Val, Larger);
+  }
 }
 
 ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_div4(uint32_t Val) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Val, (uint32_t)0);
 }
 
@@ -637,7 +588,7 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_div8(uint64_t Val) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Val, (uint64_t)0);
 }
 
@@ -645,7 +596,7 @@ ATTRIBUTE_INTERFACE
 ATTRIBUTE_NO_SANITIZE_ALL
 ATTRIBUTE_TARGET_POPCNT
 void __sanitizer_cov_trace_gep(uintptr_t Idx) {
-  uintptr_t PC = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+  uintptr_t PC = reinterpret_cast<uintptr_t>(GET_CALLER_PC());
   fuzzer::TPC.HandleCmp(PC, Idx, (uintptr_t)0);
 }
 

@@ -1,9 +1,8 @@
 //===-- sanitizer_win.cc --------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -737,10 +736,6 @@ bool WriteToFile(fd_t fd, const void *buff, uptr buff_size, uptr *bytes_written,
   }
 }
 
-bool RenameFile(const char *oldpath, const char *newpath, error_t *error_p) {
-  UNIMPLEMENTED();
-}
-
 uptr internal_sched_yield() {
   Sleep(0);
   return 0;
@@ -1008,6 +1003,10 @@ void CheckVMASize() {
   // Do nothing.
 }
 
+void InitializePlatformEarly() {
+  // Do nothing.
+}
+
 void MaybeReexec() {
   // No need to re-exec on Windows.
 }
@@ -1016,7 +1015,16 @@ void CheckASLR() {
   // Do nothing
 }
 
+void CheckMPROTECT() {
+  // Do nothing
+}
+
 char **GetArgv() {
+  // FIXME: Actually implement this function.
+  return 0;
+}
+
+char **GetEnviron() {
   // FIXME: Actually implement this function.
   return 0;
 }

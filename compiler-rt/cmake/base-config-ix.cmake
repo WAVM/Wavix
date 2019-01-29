@@ -8,6 +8,12 @@ include(CheckCXXSourceCompiles)
 
 check_include_file(unwind.h HAVE_UNWIND_H)
 
+# Used by sanitizer_common and tests.
+check_include_file(rpc/xdr.h HAVE_RPC_XDR_H)
+if (NOT HAVE_RPC_XDR_H)
+  set(HAVE_RPC_XDR_H 0)
+endif()
+
 # Top level target used to build all compiler-rt libraries.
 add_custom_target(compiler-rt ALL)
 add_custom_target(install-compiler-rt)
@@ -122,8 +128,6 @@ macro(test_targets)
   # what version of MSVC to pretend to be so that the STL works.
   set(MSVC_VERSION_FLAG "")
   if (MSVC)
-    # Find and run MSVC (not clang-cl) and get its version. This will tell
-    # clang-cl what version of MSVC to pretend to be so that the STL works.
     execute_process(COMMAND "$ENV{VSINSTALLDIR}/VC/bin/cl.exe"
       OUTPUT_QUIET
       ERROR_VARIABLE MSVC_COMPAT_VERSION

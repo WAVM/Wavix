@@ -1,9 +1,8 @@
 //===-- xray_buffer_queue.cc -----------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,16 +12,60 @@
 //
 //===----------------------------------------------------------------------===//
 #include "xray_buffer_queue.h"
+#include "sanitizer_common/sanitizer_atomic.h"
 #include "sanitizer_common/sanitizer_common.h"
 #include "sanitizer_common/sanitizer_libc.h"
+#if !SANITIZER_FUCHSIA
 #include "sanitizer_common/sanitizer_posix.h"
+#endif
 #include "xray_allocator.h"
 #include "xray_defs.h"
 #include <memory>
 #include <sys/mman.h>
 
 using namespace __xray;
-using namespace __sanitizer;
+
+namespace {
+
+BufferQueue::ControlBlock *allocControlBlock(size_t Size, size_t Count) {
+  auto B =
+      allocateBuffer((sizeof(BufferQueue::ControlBlock) - 1) + (Size * Count));
+  return B == nullptr ? nullptr
+                      : reinterpret_cast<BufferQueue::ControlBlock *>(B);
+}
+
+void deallocControlBlock(BufferQueue::ControlBlock *C, size_t Size,
+                         size_t Count) {
+  deallocateBuffer(reinterpret_cast<unsigned char *>(C),
+                   (sizeof(BufferQueue::ControlBlock) - 1) + (Size * Count));
+}
+
+void decRefCount(BufferQueue::ControlBlock *C, size_t Size, size_t Count) {
+  if (C == nullptr)
+    return;
+  if (atomic_fetch_sub(&C->RefCount, 1, memory_order_acq_rel) == 1)
+    deallocControlBlock(C, Size, Count);
+}
+
+void incRefCount(BufferQueue::ControlBlock *C) {
+  if (C == nullptr)
+    return;
+  atomic_fetch_add(&C->RefCount, 1, memory_order_acq_rel);
+}
+
+// We use a struct to ensure that we are allocating one atomic_uint64_t per
+// cache line. This allows us to not worry about false-sharing among atomic
+// objects being updated (constantly) by different threads.
+struct ExtentsPadded {
+  union {
+    atomic_uint64_t Extents;
+    unsigned char Storage[kCacheLineSize];
+  };
+};
+
+constexpr size_t kExtentsSize = sizeof(ExtentsPadded);
+
+} // namespace
 
 BufferQueue::ErrorCode BufferQueue::init(size_t BS, size_t BC) {
   SpinMutexLock Guard(&Mutex);
@@ -30,17 +73,33 @@ BufferQueue::ErrorCode BufferQueue::init(size_t BS, size_t BC) {
   if (!finalizing())
     return BufferQueue::ErrorCode::AlreadyInitialized;
 
+  cleanupBuffers();
+
   bool Success = false;
   BufferSize = BS;
   BufferCount = BC;
-  BackingStore = allocateBuffer(BufferSize * BufferCount);
+
+  BackingStore = allocControlBlock(BufferSize, BufferCount);
   if (BackingStore == nullptr)
     return BufferQueue::ErrorCode::NotEnoughMemory;
 
-  auto CleanupBackingStore = __sanitizer::at_scope_exit([&, this] {
+  auto CleanupBackingStore = at_scope_exit([&, this] {
     if (Success)
       return;
-    deallocateBuffer(BackingStore, BufferSize * BufferCount);
+    deallocControlBlock(BackingStore, BufferSize, BufferCount);
+    BackingStore = nullptr;
+  });
+
+  // Initialize enough atomic_uint64_t instances, each
+  ExtentsBackingStore = allocControlBlock(kExtentsSize, BufferCount);
+  if (ExtentsBackingStore == nullptr)
+    return BufferQueue::ErrorCode::NotEnoughMemory;
+
+  auto CleanupExtentsBackingStore = at_scope_exit([&, this] {
+    if (Success)
+      return;
+    deallocControlBlock(ExtentsBackingStore, kExtentsSize, BufferCount);
+    ExtentsBackingStore = nullptr;
   });
 
   Buffers = initArray<BufferRep>(BufferCount);
@@ -51,14 +110,27 @@ BufferQueue::ErrorCode BufferQueue::init(size_t BS, size_t BC) {
   // to the new generation.
   atomic_fetch_add(&Generation, 1, memory_order_acq_rel);
 
-  Success = true;
+  // First, we initialize the refcount in the ControlBlock, which we treat as
+  // being at the start of the BackingStore pointer.
+  atomic_store(&BackingStore->RefCount, 1, memory_order_release);
+  atomic_store(&ExtentsBackingStore->RefCount, 1, memory_order_release);
+
+  // Then we initialise the individual buffers that sub-divide the whole backing
+  // store. Each buffer will start at the `Data` member of the ControlBlock, and
+  // will be offsets from these locations.
   for (size_t i = 0; i < BufferCount; ++i) {
     auto &T = Buffers[i];
     auto &Buf = T.Buff;
-    atomic_store(&Buf.Extents, 0, memory_order_release);
+    auto *E = reinterpret_cast<ExtentsPadded *>(&ExtentsBackingStore->Data +
+                                                (kExtentsSize * i));
+    Buf.Extents = &E->Extents;
+    atomic_store(Buf.Extents, 0, memory_order_release);
     Buf.Generation = generation();
-    Buf.Data = reinterpret_cast<char *>(BackingStore) + (BufferSize * i);
+    Buf.Data = &BackingStore->Data + (BufferSize * i);
     Buf.Size = BufferSize;
+    Buf.BackingStore = BackingStore;
+    Buf.ExtentsBackingStore = ExtentsBackingStore;
+    Buf.Count = BufferCount;
     T.Used = false;
   }
 
@@ -66,6 +138,7 @@ BufferQueue::ErrorCode BufferQueue::init(size_t BS, size_t BC) {
   First = Buffers;
   LiveBuffers = 0;
   atomic_store(&Finalizing, 0, memory_order_release);
+  Success = true;
   return BufferQueue::ErrorCode::Ok;
 }
 
@@ -76,6 +149,7 @@ BufferQueue::BufferQueue(size_t B, size_t N,
       Mutex(),
       Finalizing{1},
       BackingStore(nullptr),
+      ExtentsBackingStore(nullptr),
       Buffers(nullptr),
       Next(Buffers),
       First(Buffers),
@@ -99,9 +173,10 @@ BufferQueue::ErrorCode BufferQueue::getBuffer(Buffer &Buf) {
     ++LiveBuffers;
   }
 
-  Buf.Data = B->Buff.Data;
+  incRefCount(BackingStore);
+  incRefCount(ExtentsBackingStore);
+  Buf = B->Buff;
   Buf.Generation = generation();
-  Buf.Size = B->Buff.Size;
   B->Used = true;
   return ErrorCode::Ok;
 }
@@ -112,24 +187,16 @@ BufferQueue::ErrorCode BufferQueue::releaseBuffer(Buffer &Buf) {
   BufferRep *B = nullptr;
   {
     SpinMutexLock Guard(&Mutex);
-    if (Buf.Data < BackingStore ||
-        Buf.Data > reinterpret_cast<char *>(BackingStore) +
-                       (BufferCount * BufferSize)) {
-      if (Buf.Generation != generation()) {
-        Buf.Data = nullptr;
-        Buf.Size = 0;
-        Buf.Generation = 0;
-        return BufferQueue::ErrorCode::Ok;
-      }
-      return BufferQueue::ErrorCode::UnrecognizedBuffer;
+    if (Buf.Generation != generation() || LiveBuffers == 0) {
+      Buf = {};
+      decRefCount(Buf.BackingStore, Buf.Size, Buf.Count);
+      decRefCount(Buf.ExtentsBackingStore, kExtentsSize, Buf.Count);
+      return BufferQueue::ErrorCode::Ok;
     }
 
-    if (LiveBuffers == 0) {
-      Buf.Data = nullptr;
-      Buf.Size = Buf.Size;
-      Buf.Generation = 0;
-      return ErrorCode::Ok;
-    }
+    if (Buf.Data < &BackingStore->Data ||
+        Buf.Data > &BackingStore->Data + (BufferCount * BufferSize))
+      return BufferQueue::ErrorCode::UnrecognizedBuffer;
 
     --LiveBuffers;
     B = First++;
@@ -138,16 +205,13 @@ BufferQueue::ErrorCode BufferQueue::releaseBuffer(Buffer &Buf) {
   }
 
   // Now that the buffer has been released, we mark it as "used".
-  B->Buff.Data = Buf.Data;
-  B->Buff.Size = Buf.Size;
-  B->Buff.Generation = Buf.Generation;
+  B->Buff = Buf;
   B->Used = true;
-  atomic_store(&B->Buff.Extents,
-               atomic_load(&Buf.Extents, memory_order_acquire),
+  decRefCount(Buf.BackingStore, Buf.Size, Buf.Count);
+  decRefCount(Buf.ExtentsBackingStore, kExtentsSize, Buf.Count);
+  atomic_store(B->Buff.Extents, atomic_load(Buf.Extents, memory_order_acquire),
                memory_order_release);
-  Buf.Data = nullptr;
-  Buf.Size = 0;
-  Buf.Generation = 0;
+  Buf = {};
   return ErrorCode::Ok;
 }
 
@@ -157,9 +221,17 @@ BufferQueue::ErrorCode BufferQueue::finalize() {
   return ErrorCode::Ok;
 }
 
-BufferQueue::~BufferQueue() {
+void BufferQueue::cleanupBuffers() {
   for (auto B = Buffers, E = Buffers + BufferCount; B != E; ++B)
     B->~BufferRep();
   deallocateBuffer(Buffers, BufferCount);
-  deallocateBuffer(BackingStore, BufferSize * BufferCount);
+  decRefCount(BackingStore, BufferSize, BufferCount);
+  decRefCount(ExtentsBackingStore, kExtentsSize, BufferCount);
+  BackingStore = nullptr;
+  ExtentsBackingStore = nullptr;
+  Buffers = nullptr;
+  BufferCount = 0;
+  BufferSize = 0;
 }
+
+BufferQueue::~BufferQueue() { cleanupBuffers(); }

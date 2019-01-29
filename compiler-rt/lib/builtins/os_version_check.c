@@ -1,9 +1,8 @@
 /* ===-- os_version_check.c - OS version checking  -------------------------===
  *
- *                     The LLVM Compiler Infrastructure
- *
- * This file is dual licensed under the MIT and the University of Illinois Open
- * Source Licenses. See LICENSE.TXT for details.
+ * Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+ * See https://llvm.org/LICENSE.txt for license information.
+ * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  *
  * ===----------------------------------------------------------------------===
  *
@@ -15,7 +14,6 @@
 
 #ifdef __APPLE__
 
-#include <CoreFoundation/CoreFoundation.h>
 #include <TargetConditionals.h>
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
@@ -27,6 +25,33 @@
 /* These three variables hold the host's OS version. */
 static int32_t GlobalMajor, GlobalMinor, GlobalSubminor;
 static dispatch_once_t DispatchOnceCounter;
+
+/* We can't include <CoreFoundation/CoreFoundation.h> directly from here, so
+ * just forward declare everything that we need from it. */
+
+typedef const void *CFDataRef, *CFAllocatorRef, *CFPropertyListRef,
+                   *CFStringRef, *CFDictionaryRef, *CFTypeRef, *CFErrorRef;
+
+#if __LLP64__
+typedef unsigned long long CFTypeID;
+typedef unsigned long long CFOptionFlags;
+typedef signed long long CFIndex;
+#else
+typedef unsigned long CFTypeID;
+typedef unsigned long CFOptionFlags;
+typedef signed long CFIndex;
+#endif
+
+typedef unsigned char UInt8;
+typedef _Bool Boolean;
+typedef CFIndex CFPropertyListFormat;
+typedef uint32_t CFStringEncoding;
+
+/* kCFStringEncodingASCII analog. */
+#define CF_STRING_ENCODING_ASCII 0x0600
+/* kCFStringEncodingUTF8 analog. */
+#define CF_STRING_ENCODING_UTF8 0x08000100
+#define CF_PROPERTY_LIST_IMMUTABLE 0
 
 typedef CFDataRef (*CFDataCreateWithBytesNoCopyFuncTy)(CFAllocatorRef,
                                                        const UInt8 *, CFIndex,
@@ -55,8 +80,7 @@ static void parseSystemVersionPList(void *Unused) {
   const void *NullAllocator = dlsym(RTLD_DEFAULT, "kCFAllocatorNull");
   if (!NullAllocator)
     return;
-  const CFAllocatorRef kCFAllocatorNull =
-      *(const CFAllocatorRef *)NullAllocator;
+  const CFAllocatorRef AllocatorNull = *(const CFAllocatorRef *)NullAllocator;
   CFDataCreateWithBytesNoCopyFuncTy CFDataCreateWithBytesNoCopyFunc =
       (CFDataCreateWithBytesNoCopyFuncTy)dlsym(RTLD_DEFAULT,
                                                "CFDataCreateWithBytesNoCopy");
@@ -140,21 +164,21 @@ static void parseSystemVersionPList(void *Unused) {
   /* Get the file buffer into CF's format. We pass in a null allocator here *
    * because we free PListBuf ourselves */
   FileContentsRef = (*CFDataCreateWithBytesNoCopyFunc)(
-      NULL, PListBuf, (CFIndex)NumRead, kCFAllocatorNull);
+      NULL, PListBuf, (CFIndex)NumRead, AllocatorNull);
   if (!FileContentsRef)
     goto Fail;
 
   if (CFPropertyListCreateWithDataFunc)
     PListRef = (*CFPropertyListCreateWithDataFunc)(
-        NULL, FileContentsRef, kCFPropertyListImmutable, NULL, NULL);
+        NULL, FileContentsRef, CF_PROPERTY_LIST_IMMUTABLE, NULL, NULL);
   else
     PListRef = (*CFPropertyListCreateFromXMLDataFunc)(
-        NULL, FileContentsRef, kCFPropertyListImmutable, NULL);
+        NULL, FileContentsRef, CF_PROPERTY_LIST_IMMUTABLE, NULL);
   if (!PListRef)
     goto Fail;
 
   CFStringRef ProductVersion = (*CFStringCreateWithCStringNoCopyFunc)(
-      NULL, "ProductVersion", kCFStringEncodingASCII, kCFAllocatorNull);
+      NULL, "ProductVersion", CF_STRING_ENCODING_ASCII, AllocatorNull);
   if (!ProductVersion)
     goto Fail;
   CFTypeRef OpaqueValue = (*CFDictionaryGetValueFunc)(PListRef, ProductVersion);
@@ -165,7 +189,7 @@ static void parseSystemVersionPList(void *Unused) {
 
   char VersionStr[32];
   if (!(*CFStringGetCStringFunc)((CFStringRef)OpaqueValue, VersionStr,
-                                 sizeof(VersionStr), kCFStringEncodingUTF8))
+                                 sizeof(VersionStr), CF_STRING_ENCODING_UTF8))
     goto Fail;
   sscanf(VersionStr, "%d.%d.%d", &GlobalMajor, &GlobalMinor, &GlobalSubminor);
 

@@ -3,6 +3,7 @@
 
 // We don't really support running tests using profile runtime on Windows.
 // UNSUPPORTED: windows-msvc
+
 #include <stdio.h>
 int foo() { return 1; }
 int XXX = foo();

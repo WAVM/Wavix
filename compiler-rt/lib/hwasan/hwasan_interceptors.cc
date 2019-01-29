@@ -1,9 +1,8 @@
 //===-- hwasan_interceptors.cc --------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,6 +16,7 @@
 
 #include "interception/interception.h"
 #include "hwasan.h"
+#include "hwasan_allocator.h"
 #include "hwasan_mapping.h"
 #include "hwasan_thread.h"
 #include "hwasan_poisoning.h"
@@ -43,11 +43,6 @@ using __sanitizer::memory_order;
 using __sanitizer::atomic_load;
 using __sanitizer::atomic_store;
 using __sanitizer::atomic_uintptr_t;
-
-DECLARE_REAL(SIZE_T, strlen, const char *s)
-DECLARE_REAL(SIZE_T, strnlen, const char *s, SIZE_T maxlen)
-DECLARE_REAL(void *, memcpy, void *dest, const void *src, uptr n)
-DECLARE_REAL(void *, memset, void *dest, int c, uptr n)
 
 bool IsInInterceptorScope() {
   Thread *t = GetCurrentThread();
@@ -92,42 +87,6 @@ static void *AllocateFromLocalPool(uptr size_in_bytes) {
 } while (0)
 
 
-
-#define HWASAN_READ_RANGE(ctx, offset, size) \
-  CHECK_UNPOISONED(offset, size)
-#define HWASAN_WRITE_RANGE(ctx, offset, size) \
-  CHECK_UNPOISONED(offset, size)
-
-
-
-// Check that [x, x+n) range is unpoisoned.
-#define CHECK_UNPOISONED_0(x, n)                                       \
-  do {                                                                 \
-    sptr __offset = __hwasan_test_shadow(x, n);                         \
-    if (__hwasan::IsInSymbolizer()) break;                              \
-    if (__offset >= 0) {                                               \
-      GET_CALLER_PC_BP_SP;                                             \
-      (void)sp;                                                        \
-      ReportInvalidAccessInsideAddressRange(__func__, x, n, __offset); \
-      __hwasan::PrintWarning(pc, bp);                                   \
-      if (__hwasan::flags()->halt_on_error) {                           \
-        Printf("Exiting\n");                                           \
-        Die();                                                         \
-      }                                                                \
-    }                                                                  \
-  } while (0)
-
-// Check that [x, x+n) range is unpoisoned unless we are in a nested
-// interceptor.
-#define CHECK_UNPOISONED(x, n)                             \
-  do {                                                     \
-    if (!IsInInterceptorScope()) CHECK_UNPOISONED_0(x, n); \
-  } while (0)
-
-#define CHECK_UNPOISONED_STRING_OF_LEN(x, len, n)               \
-  CHECK_UNPOISONED((x),                                         \
-    common_flags()->strict_string_checks ? (len) + 1 : (n) )
-
 int __sanitizer_posix_memalign(void **memptr, uptr alignment, uptr size) {
   GET_MALLOC_STACK_TRACE;
   CHECK_NE(memptr, 0);
@@ -166,13 +125,13 @@ void * __sanitizer_pvalloc(uptr size) {
 void __sanitizer_free(void *ptr) {
   GET_MALLOC_STACK_TRACE;
   if (!ptr || UNLIKELY(IsInDlsymAllocPool(ptr))) return;
-  HwasanDeallocate(&stack, ptr);
+  hwasan_free(ptr, &stack);
 }
 
 void __sanitizer_cfree(void *ptr) {
   GET_MALLOC_STACK_TRACE;
   if (!ptr || UNLIKELY(IsInDlsymAllocPool(ptr))) return;
-  HwasanDeallocate(&stack, ptr);
+  hwasan_free(ptr, &stack);
 }
 
 uptr __sanitizer_malloc_usable_size(const void *ptr) {
@@ -186,7 +145,7 @@ struct __sanitizer_struct_mallinfo __sanitizer_mallinfo() {
 }
 
 int __sanitizer_mallopt(int cmd, int value) {
-  return -1;
+  return 0;
 }
 
 void __sanitizer_malloc_stats(void) {
@@ -258,33 +217,15 @@ INTERCEPTOR_ALIAS(void, malloc_stats, void);
 #endif // HWASAN_WITH_INTERCEPTORS
 
 
-#if HWASAN_WITH_INTERCEPTORS
-extern "C" int pthread_attr_init(void *attr);
-extern "C" int pthread_attr_destroy(void *attr);
-
-struct ThreadStartArg {
-  thread_callback_t callback;
-  void *param;
-};
-
-static void *HwasanThreadStartFunc(void *arg) {
-  __hwasan_thread_enter();
-  ThreadStartArg A = *reinterpret_cast<ThreadStartArg*>(arg);
-  UnmapOrDie(arg, GetPageSizeCached());
-  return A.callback(A.param);
-}
-
-INTERCEPTOR(int, pthread_create, void *th, void *attr, void *(*callback)(void*),
-            void * param) {
+#if HWASAN_WITH_INTERCEPTORS && !defined(__aarch64__)
+INTERCEPTOR(int, pthread_create, void *th, void *attr,
+            void *(*callback)(void *), void *param) {
   ScopedTaggingDisabler disabler;
-  ThreadStartArg *A = reinterpret_cast<ThreadStartArg *> (MmapOrDie(
-      GetPageSizeCached(), "pthread_create"));
-  *A = {callback, param};
   int res = REAL(pthread_create)(UntagPtr(th), UntagPtr(attr),
-                                 &HwasanThreadStartFunc, A);
+                                 callback, param);
   return res;
 }
-#endif // HWASAN_WITH_INTERCEPTORS
+#endif
 
 static void BeforeFork() {
   StackDepotLockAll();
@@ -325,7 +266,11 @@ void InitializeInterceptors() {
   INTERCEPT_FUNCTION(fork);
 
 #if HWASAN_WITH_INTERCEPTORS
+#if !defined(__aarch64__)
   INTERCEPT_FUNCTION(pthread_create);
+#endif
+  INTERCEPT_FUNCTION(realloc);
+  INTERCEPT_FUNCTION(free);
 #endif
 
   inited = 1;

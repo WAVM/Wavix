@@ -1,9 +1,8 @@
 //===-- asan_internal.h -----------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -110,6 +109,11 @@ void AppendToErrorMessageBuffer(const char *buffer);
 void *AsanDlSymNext(const char *sym);
 
 void ReserveShadowMemoryRange(uptr beg, uptr end, const char *name);
+
+// Returns `true` iff most of ASan init process should be skipped due to the
+// ASan library being loaded via `dlopen()`. Platforms may perform any
+// `dlopen()` specific initialization inside this function.
+bool HandleDlopenInit();
 
 // Add convenient macro for interface functions that may be represented as
 // weak hooks.

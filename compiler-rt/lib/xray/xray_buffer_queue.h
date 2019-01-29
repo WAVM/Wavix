@@ -1,9 +1,8 @@
 //===-- xray_buffer_queue.h ------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,17 +24,44 @@
 namespace __xray {
 
 /// BufferQueue implements a circular queue of fixed sized buffers (much like a
-/// freelist) but is concerned mostly with making it really quick to initialise,
-/// finalise, and get/return buffers to the queue. This is one key component of
-/// the "flight data recorder" (FDR) mode to support ongoing XRay function call
+/// freelist) but is concerned with making it quick to initialise, finalise, and
+/// get from or return buffers to the queue. This is one key component of the
+/// "flight data recorder" (FDR) mode to support ongoing XRay function call
 /// trace collection.
 class BufferQueue {
 public:
+  /// ControlBlock represents the memory layout of how we interpret the backing
+  /// store for all buffers and extents managed by a BufferQueue instance. The
+  /// ControlBlock has the reference count as the first member, sized according
+  /// to platform-specific cache-line size. We never use the Buffer member of
+  /// the union, which is only there for compiler-supported alignment and
+  /// sizing.
+  ///
+  /// This ensures that the `Data` member will be placed at least kCacheLineSize
+  /// bytes from the beginning of the structure.
+  struct ControlBlock {
+    union {
+      atomic_uint64_t RefCount;
+      char Buffer[kCacheLineSize];
+    };
+
+    /// We need to make this size 1, to conform to the C++ rules for array data
+    /// members. Typically, we want to subtract this 1 byte for sizing
+    /// information.
+    char Data[1];
+  };
+
   struct Buffer {
-    atomic_uint64_t Extents{0};
+    atomic_uint64_t *Extents = nullptr;
     uint64_t Generation{0};
     void *Data = nullptr;
     size_t Size = 0;
+
+  private:
+    friend class BufferQueue;
+    ControlBlock *BackingStore = nullptr;
+    ControlBlock *ExtentsBackingStore = nullptr;
+    size_t Count = 0;
   };
 
   struct BufferRep {
@@ -114,9 +140,11 @@ private:
   SpinMutex Mutex;
   atomic_uint8_t Finalizing;
 
-  // A pointer to a contiguous block of memory to serve as the backing store for
-  // all the individual buffers handed out.
-  uint8_t *BackingStore;
+  // The collocated ControlBlock and buffer storage.
+  ControlBlock *BackingStore;
+
+  // The collocated ControlBlock and extents storage.
+  ControlBlock *ExtentsBackingStore;
 
   // A dynamically allocated array of BufferRep instances.
   BufferRep *Buffers;
@@ -134,6 +162,9 @@ private:
   // We use a generation number to identify buffers and which generation they're
   // associated with.
   atomic_uint64_t Generation;
+
+  /// Releases references to the buffers backed by the current buffer queue.
+  void cleanupBuffers();
 
 public:
   enum class ErrorCode : unsigned {

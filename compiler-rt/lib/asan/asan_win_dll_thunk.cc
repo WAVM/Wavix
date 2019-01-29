@@ -1,9 +1,8 @@
 //===-- asan_win_dll_thunk.cc ---------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -48,6 +47,7 @@ INTERCEPT_WRAP_W_WWW(_recalloc)
 INTERCEPT_WRAP_W_WWW(_recalloc_base)
 
 INTERCEPT_WRAP_W_W(_msize)
+INTERCEPT_WRAP_W_W(_msize_base)
 INTERCEPT_WRAP_W_W(_expand)
 INTERCEPT_WRAP_W_W(_expand_dbg)
 

@@ -1,9 +1,8 @@
 //===-- sanitizer_flags.h ---------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -103,7 +102,7 @@ COMMON_FLAG(bool, allow_user_segv_handler, true,
             "handle_*=1 will be upgraded to handle_*=2.")
 COMMON_FLAG(bool, use_sigaltstack, true,
             "If set, uses alternate stack for signal handling.")
-COMMON_FLAG(bool, detect_deadlocks, false,
+COMMON_FLAG(bool, detect_deadlocks, true,
             "If set, deadlock detection is enabled.")
 COMMON_FLAG(
     uptr, clear_shadow_mmap_threshold, 64 * 1024,
@@ -243,3 +242,6 @@ COMMON_FLAG(bool, dump_registers, true,
 COMMON_FLAG(bool, detect_write_exec, false,
           "If true, triggers warning when writable-executable pages requests "
           "are being made")
+COMMON_FLAG(bool, test_only_emulate_no_memorymap, false,
+            "TEST ONLY fail to read memory mappings to emulate sanitized "
+            "\"init\"")

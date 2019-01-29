@@ -1,9 +1,8 @@
 /* ===-- int_lib.h - configuration header for compiler-rt  -----------------===
  *
- *                     The LLVM Compiler Infrastructure
- *
- * This file is dual licensed under the MIT and the University of Illinois Open
- * Source Licenses. See LICENSE.TXT for details.
+ * Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+ * See https://llvm.org/LICENSE.txt for license information.
+ * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  *
  * ===----------------------------------------------------------------------===
  *
@@ -43,7 +42,7 @@
 
 #define AEABI_RTABI __attribute__((__pcs__("aapcs")))
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #define ALWAYS_INLINE __forceinline
 #define NOINLINE __declspec(noinline)
 #define NORETURN __declspec(noreturn)

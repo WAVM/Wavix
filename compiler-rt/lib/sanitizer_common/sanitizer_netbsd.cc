@@ -1,9 +1,8 @@
 //===-- sanitizer_netbsd.cc -----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -169,6 +168,11 @@ uptr internal_filesize(fd_t fd) {
   return (uptr)st.st_size;
 }
 
+uptr internal_dup(int oldfd) {
+  DEFINE__REAL(int, dup, int a);
+  return _REAL(dup, oldfd);
+}
+
 uptr internal_dup2(int oldfd, int newfd) {
   DEFINE__REAL(int, dup2, int a, int b);
   return _REAL(dup2, oldfd, newfd);
@@ -202,7 +206,7 @@ void internal__exit(int exitcode) {
 
 unsigned int internal_sleep(unsigned int seconds) {
   struct timespec ts;
-  ts.tv_sec = 1;
+  ts.tv_sec = seconds;
   ts.tv_nsec = 0;
   CHECK(&_sys___nanosleep50);
   int res = _sys___nanosleep50(&ts, &ts);

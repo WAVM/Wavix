@@ -1,9 +1,8 @@
 //===-- asan_malloc_win.cc ------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -141,6 +140,11 @@ size_t _msize(void *ptr) {
 }
 
 ALLOCATION_FUNCTION_ATTRIBUTE
+size_t _msize_base(void *ptr) {
+  return _msize(ptr);
+}
+
+ALLOCATION_FUNCTION_ATTRIBUTE
 void *_expand(void *memblock, size_t size) {
   // _expand is used in realloc-like functions to resize the buffer if possible.
   // We don't want memory to stand still while resizing buffers, so return 0.
@@ -235,6 +239,7 @@ void ReplaceSystemMalloc() {
   TryToOverrideFunction("_recalloc_base", (uptr)_recalloc);
   TryToOverrideFunction("_recalloc_crt", (uptr)_recalloc);
   TryToOverrideFunction("_msize", (uptr)_msize);
+  TryToOverrideFunction("_msize_base", (uptr)_msize);
   TryToOverrideFunction("_expand", (uptr)_expand);
   TryToOverrideFunction("_expand_base", (uptr)_expand);
 

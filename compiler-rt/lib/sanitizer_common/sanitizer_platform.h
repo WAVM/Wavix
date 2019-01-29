@@ -1,9 +1,8 @@
 //===-- sanitizer_platform.h ------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -275,12 +274,6 @@
 # define SANITIZER_POINTER_FORMAT_LENGTH FIRST_32_SECOND_64(8, 12)
 #endif
 
-// Assume obsolete RPC headers are available by default
-#if !defined(HAVE_RPC_XDR_H) && !defined(HAVE_TIRPC_RPC_XDR_H)
-# define HAVE_RPC_XDR_H (SANITIZER_LINUX && !SANITIZER_ANDROID)
-# define HAVE_TIRPC_RPC_XDR_H 0
-#endif
-
 /// \macro MSC_PREREQ
 /// \brief Is the compiler MSVC of at least the specified version?
 /// The common \param version values to check for are:
@@ -340,6 +333,15 @@
 #define SANITIZER_SYMBOLIZER_MARKUP 1
 #else
 #define SANITIZER_SYMBOLIZER_MARKUP 0
+#endif
+
+// Enable ability to support sanitizer initialization that is
+// compatible with the sanitizer library being loaded via
+// `dlopen()`.
+#if SANITIZER_MAC
+#define SANITIZER_SUPPORTS_INIT_FOR_DLOPEN 1
+#else
+#define SANITIZER_SUPPORTS_INIT_FOR_DLOPEN 0
 #endif
 
 #endif // SANITIZER_PLATFORM_H

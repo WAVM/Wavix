@@ -1,9 +1,8 @@
 //===-- sanitizer_coverage_fuchsia.cc -------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -31,6 +30,7 @@
 #include "sanitizer_atomic.h"
 #include "sanitizer_common.h"
 #include "sanitizer_internal_defs.h"
+#include "sanitizer_symbolizer_fuchsia.h"
 
 #include <zircon/process.h>
 #include <zircon/sanitizer.h>
@@ -101,7 +101,7 @@ class TracePcGuardController final {
       // uses the `dumpfile` symbolizer markup element to highlight the
       // dump.  See the explanation for this in:
       // https://fuchsia.googlesource.com/zircon/+/master/docs/symbolizer_markup.md
-      Printf("SanitizerCoverage: {{{dumpfile:%s:%s}}} with up to %u PCs\n",
+      Printf("SanitizerCoverage: " FORMAT_DUMPFILE " with up to %u PCs\n",
              kSancovSinkName, vmo_name_, next_index_ - 1);
     }
   }
