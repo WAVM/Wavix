@@ -181,7 +181,7 @@ void Writer::createImportSection() {
     Import.Table.ElemType = WASM_TYPE_FUNCREF;
     Import.Table.Limits = {0, TableSize, 0};
     if (Config->SharedTable)
-      Import.Table.Flags |= WASM_LIMITS_FLAG_IS_SHARED;
+      Import.Table.Limits.Flags |= WASM_LIMITS_FLAG_IS_SHARED;
     writeImport(OS, Import);
   }
 
@@ -688,11 +688,7 @@ void Writer::createNameSection() {
 
     for (const InputGlobal *G : InputGlobals) {
       writeUleb128(GlobalSubsection.OS, G->getGlobalIndex(), "global index");
-      if (!G->getDebugName().empty()) {
-        writeStr(FunctionSubsection.OS, G->getDebugName(), "symbol name");
-      } else {
-        writeStr(FunctionSubsection.OS, maybeDemangleSymbol(G->getName()), "symbol name");
-      }
+      writeStr(GlobalSubsection.OS, maybeDemangleSymbol(G->getName()), "symbol name");
     }
 
     GlobalSubsection.writeTo(Section->getStream());

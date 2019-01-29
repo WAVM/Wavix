@@ -80,6 +80,7 @@ bool WebAssemblyTargetInfo::initFeatureMap(
     llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags, StringRef CPU,
     const std::vector<std::string> &FeaturesVec) const {
   if (CPU == "bleeding-edge") {
+    Features["atomics"] = true;
     Features["nontrapping-fptoint"] = true;
     Features["sign-ext"] = true;
     setSIMDLevel(Features, SIMD128);

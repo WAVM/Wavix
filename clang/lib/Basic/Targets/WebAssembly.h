@@ -66,15 +66,7 @@ private:
   bool
   initFeatureMap(llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags,
                  StringRef CPU,
-                 const std::vector<std::string> &FeaturesVec) const override {
-    if (CPU == "bleeding-edge") {
-      Features["atomics"] = true;
-      Features["simd128"] = true;
-      Features["nontrapping-fptoint"] = true;
-      Features["sign-ext"] = true;
-    }
-    return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
-  }
+                 const std::vector<std::string> &FeaturesVec) const override;
 
   bool hasFeature(StringRef Feature) const final;
 
