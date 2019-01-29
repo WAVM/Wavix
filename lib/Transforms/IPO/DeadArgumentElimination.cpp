@@ -1,9 +1,8 @@
 //===- DeadArgumentElimination.cpp - Eliminate dead arguments -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,7 +23,6 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
-#include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
@@ -165,7 +163,7 @@ bool DeadArgumentEliminationPass::DeleteDeadVarargs(Function &Fn) {
   unsigned NumArgs = Params.size();
 
   // Create the new function body and insert it into the module...
-  Function *NF = Function::Create(NFTy, Fn.getLinkage());
+  Function *NF = Function::Create(NFTy, Fn.getLinkage(), Fn.getAddressSpace());
   NF->copyAttributesFrom(&Fn);
   NF->setComdat(Fn.getComdat());
   Fn.getParent()->getFunctionList().insert(Fn.getIterator(), NF);
@@ -864,7 +862,7 @@ bool DeadArgumentEliminationPass::RemoveDeadStuffFromFunction(Function *F) {
     return false;
 
   // Create the new function body and insert it into the module...
-  Function *NF = Function::Create(NFTy, F->getLinkage());
+  Function *NF = Function::Create(NFTy, F->getLinkage(), F->getAddressSpace());
   NF->copyAttributesFrom(F);
   NF->setComdat(F->getComdat());
   NF->setAttributes(NewPAL);
@@ -954,16 +952,16 @@ bool DeadArgumentEliminationPass::RemoveDeadStuffFromFunction(Function *F) {
     ArgAttrVec.clear();
 
     Instruction *New = NewCS.getInstruction();
-    if (!Call->use_empty()) {
+    if (!Call->use_empty() || Call->isUsedByMetadata()) {
       if (New->getType() == Call->getType()) {
         // Return type not changed? Just replace users then.
         Call->replaceAllUsesWith(New);
         New->takeName(Call);
       } else if (New->getType()->isVoidTy()) {
-        // Our return value has uses, but they will get removed later on.
-        // Replace by null for now.
+        // If the return value is dead, replace any uses of it with undef
+        // (any non-debug value uses will get removed later on).
         if (!Call->getType()->isX86_MMXTy())
-          Call->replaceAllUsesWith(Constant::getNullValue(Call->getType()));
+          Call->replaceAllUsesWith(UndefValue::get(Call->getType()));
       } else {
         assert((RetTy->isStructTy() || RetTy->isArrayTy()) &&
                "Return type changed, but not into a void. The old return type"
@@ -1023,10 +1021,10 @@ bool DeadArgumentEliminationPass::RemoveDeadStuffFromFunction(Function *F) {
       I2->takeName(&*I);
       ++I2;
     } else {
-      // If this argument is dead, replace any uses of it with null constants
-      // (these are guaranteed to become unused later on).
+      // If this argument is dead, replace any uses of it with undef
+      // (any non-debug value uses will get removed later on).
       if (!I->getType()->isX86_MMXTy())
-        I->replaceAllUsesWith(Constant::getNullValue(I->getType()));
+        I->replaceAllUsesWith(UndefValue::get(I->getType()));
     }
 
   // If we change the return value of the function we must rewrite any return

@@ -1,9 +1,8 @@
 //===- llvm/unittest/ADT/SmallSetTest.cpp ------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -142,8 +141,4 @@ TEST(SmallSetTest, IteratorIncMoveCopy) {
   auto Iter2 = s1.begin();
   Iter = std::move(Iter2);
   EXPECT_EQ("str 0", *Iter);
-
-  auto Iter3 = s1.end();
-  Iter3 = Iter2;
-  EXPECT_EQ(Iter3, Iter2);
 }

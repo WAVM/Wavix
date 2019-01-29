@@ -1,9 +1,8 @@
 //===- CodeGen/AsmPrinter/EHStreamer.cpp - Exception Directive Streamer ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -345,7 +344,9 @@ computeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
 ///     unwound and handling continues.
 ///  3. Type ID table contains references to all the C++ typeinfo for all
 ///     catches in the function.  This tables is reverse indexed base 1.
-void EHStreamer::emitExceptionTable() {
+///
+/// Returns the starting symbol of an exception table.
+MCSymbol *EHStreamer::emitExceptionTable() {
   const MachineFunction *MF = Asm->MF;
   const std::vector<const GlobalValue *> &TypeInfos = MF->getTypeInfos();
   const std::vector<unsigned> &FilterIds = MF->getFilterIds();
@@ -375,6 +376,7 @@ void EHStreamer::emitExceptionTable() {
   computeCallSiteTable(CallSites, LandingPads, FirstActions);
 
   bool IsSJLJ = Asm->MAI->getExceptionHandlingType() == ExceptionHandling::SjLj;
+  bool IsWasm = Asm->MAI->getExceptionHandlingType() == ExceptionHandling::Wasm;
   unsigned CallSiteEncoding =
       IsSJLJ ? dwarf::DW_EH_PE_udata4 : dwarf::DW_EH_PE_uleb128;
   bool HaveTTData = !TypeInfos.empty() || !FilterIds.empty();
@@ -457,8 +459,8 @@ void EHStreamer::emitExceptionTable() {
   Asm->EmitLabelDifferenceAsULEB128(CstEndLabel, CstBeginLabel);
   Asm->OutStreamer->EmitLabel(CstBeginLabel);
 
-  // SjLj Exception handling
-  if (IsSJLJ) {
+  // SjLj / Wasm Exception handling
+  if (IsSJLJ || IsWasm) {
     unsigned idx = 0;
     for (SmallVectorImpl<CallSiteEntry>::const_iterator
          I = CallSites.begin(), E = CallSites.end(); I != E; ++I, ++idx) {
@@ -604,6 +606,7 @@ void EHStreamer::emitExceptionTable() {
   }
 
   Asm->EmitAlignment(2);
+  return GCCETSym;
 }
 
 void EHStreamer::emitTypeInfos(unsigned TTypeEncoding, MCSymbol *TTBaseLabel) {

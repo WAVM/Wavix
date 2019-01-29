@@ -1,9 +1,8 @@
 //===- Metadata.cpp - Implement Metadata classes --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1484,7 +1483,7 @@ void GlobalObject::copyMetadata(const GlobalObject *Other, unsigned Offset) {
       std::vector<uint64_t> Elements(OrigElements.size() + 2);
       Elements[0] = dwarf::DW_OP_plus_uconst;
       Elements[1] = Offset;
-      std::copy(OrigElements.begin(), OrigElements.end(), Elements.begin() + 2);
+      llvm::copy(OrigElements, Elements.begin() + 2);
       E = DIExpression::get(getContext(), Elements);
       Attachment = DIGlobalVariableExpression::get(getContext(), GV, E);
     }

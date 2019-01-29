@@ -1,9 +1,8 @@
 //===---- IndirectionUtils.cpp - Utilities for call indirection in Orc ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -92,7 +91,7 @@ JITTargetAddress JITCompileCallbackManager::executeCompileCallback(
       {
         raw_string_ostream ErrMsgStream(ErrMsg);
         ErrMsgStream << "No compile callback for trampoline at "
-                     << format("0x%016x", TrampolineAddr);
+                     << format("0x%016" PRIx64, TrampolineAddr);
       }
       ES.reportError(
           make_error<StringError>(std::move(ErrMsg), inconvertibleErrorCode()));
@@ -101,7 +100,7 @@ JITTargetAddress JITCompileCallbackManager::executeCompileCallback(
       Name = I->second;
   }
 
-  if (auto Sym = ES.lookup({&CallbacksJD}, Name, true))
+  if (auto Sym = ES.lookup(JITDylibSearchList({{&CallbacksJD, true}}), Name))
     return Sym->getAddress();
   else {
     llvm::dbgs() << "Didn't find callback.\n";

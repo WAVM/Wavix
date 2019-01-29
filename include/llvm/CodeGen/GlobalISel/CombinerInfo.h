@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/GlobalISel/CombinerInfo.h ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,7 +16,7 @@
 #include <cassert>
 namespace llvm {
 
-class CombinerChangeObserver;
+class GISelChangeObserver;
 class LegalizerInfo;
 class MachineInstr;
 class MachineIRBuilder;
@@ -43,7 +42,18 @@ public:
   /// illegal ops that are created.
   bool LegalizeIllegalOps; // TODO: Make use of this.
   const LegalizerInfo *LInfo;
-  virtual bool combine(CombinerChangeObserver &Observer, MachineInstr &MI,
+
+  /// Attempt to combine instructions using MI as the root.
+  ///
+  /// Use Observer to report the creation, modification, and erasure of
+  /// instructions. GISelChangeObserver will automatically report certain
+  /// kinds of operations. These operations are:
+  /// * Instructions that are newly inserted into the MachineFunction
+  /// * Instructions that are erased from the MachineFunction.
+  ///
+  /// However, it is important to report instruction modification and this is
+  /// not automatic.
+  virtual bool combine(GISelChangeObserver &Observer, MachineInstr &MI,
                        MachineIRBuilder &B) const = 0;
 };
 } // namespace llvm

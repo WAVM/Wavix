@@ -1,9 +1,8 @@
 //===--------------------- SummaryView.h ---------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -29,19 +28,20 @@
 #ifndef LLVM_TOOLS_LLVM_MCA_SUMMARYVIEW_H
 #define LLVM_TOOLS_LLVM_MCA_SUMMARYVIEW_H
 
-#include "SourceMgr.h"
 #include "Views/View.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/MC/MCSchedule.h"
 #include "llvm/Support/raw_ostream.h"
 
+namespace llvm {
 namespace mca {
 
 /// A view that collects and prints a few performance numbers.
 class SummaryView : public View {
   const llvm::MCSchedModel &SM;
-  const SourceMgr &Source;
+  llvm::ArrayRef<llvm::MCInst> Source;
   const unsigned DispatchWidth;
+  unsigned LastInstructionIdx;
   unsigned TotalCycles;
   // The total number of micro opcodes contributed by a block of instructions.
   unsigned NumMicroOps;
@@ -62,15 +62,15 @@ class SummaryView : public View {
   double getBlockRThroughput() const;
 
 public:
-  SummaryView(const llvm::MCSchedModel &Model, const SourceMgr &S,
+  SummaryView(const llvm::MCSchedModel &Model, llvm::ArrayRef<llvm::MCInst> S,
               unsigned Width);
 
   void onCycleEnd() override { ++TotalCycles; }
-
   void onEvent(const HWInstructionEvent &Event) override;
 
   void printView(llvm::raw_ostream &OS) const override;
 };
 } // namespace mca
+} // namespace llvm
 
 #endif

@@ -1,9 +1,8 @@
 //===-- SparcInstrInfo.td - Target Description for Sparc Target -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -137,6 +136,16 @@ def MEMri : Operand<iPTR> {
 }
 
 def TLSSym : Operand<iPTR>;
+
+def SparcMembarTagAsmOperand : AsmOperandClass {
+  let Name = "MembarTag";
+  let ParserMethod = "parseMembarTag";
+}
+
+def MembarTag : Operand<i32> {
+  let PrintMethod = "printMembarTag";
+  let ParserMatchClass = SparcMembarTagAsmOperand;
+}
 
 // Branch targets have OtherVT type.
 def brtarget : Operand<OtherVT> {
@@ -1503,7 +1512,7 @@ def : Pat<(ctpop i32:$src),
           (POPCrr (SRLri $src, 0))>;
 
 let Predicates = [HasV9], hasSideEffects = 1, rd = 0, rs1 = 0b01111 in
- def MEMBARi : F3_2<2, 0b101000, (outs), (ins simm13Op:$simm13),
+ def MEMBARi : F3_2<2, 0b101000, (outs), (ins MembarTag:$simm13),
                     "membar $simm13", []>;
 
 // The CAS instruction, unlike other instructions, only comes in a 

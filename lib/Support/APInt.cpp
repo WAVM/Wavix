@@ -1,9 +1,8 @@
 //===-- APInt.cpp - Implement APInt class ---------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1947,7 +1946,43 @@ APInt APInt::ushl_ov(const APInt &ShAmt, bool &Overflow) const {
   return *this << ShAmt;
 }
 
+APInt APInt::sadd_sat(const APInt &RHS) const {
+  bool Overflow;
+  APInt Res = sadd_ov(RHS, Overflow);
+  if (!Overflow)
+    return Res;
 
+  return isNegative() ? APInt::getSignedMinValue(BitWidth)
+                      : APInt::getSignedMaxValue(BitWidth);
+}
+
+APInt APInt::uadd_sat(const APInt &RHS) const {
+  bool Overflow;
+  APInt Res = uadd_ov(RHS, Overflow);
+  if (!Overflow)
+    return Res;
+
+  return APInt::getMaxValue(BitWidth);
+}
+
+APInt APInt::ssub_sat(const APInt &RHS) const {
+  bool Overflow;
+  APInt Res = ssub_ov(RHS, Overflow);
+  if (!Overflow)
+    return Res;
+
+  return isNegative() ? APInt::getSignedMinValue(BitWidth)
+                      : APInt::getSignedMaxValue(BitWidth);
+}
+
+APInt APInt::usub_sat(const APInt &RHS) const {
+  bool Overflow;
+  APInt Res = usub_ov(RHS, Overflow);
+  if (!Overflow)
+    return Res;
+
+  return APInt(BitWidth, 0);
+}
 
 
 void APInt::fromString(unsigned numbits, StringRef str, uint8_t radix) {

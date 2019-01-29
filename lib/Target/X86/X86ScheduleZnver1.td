@@ -1,9 +1,8 @@
 //=- X86ScheduleZnver1.td - X86 Znver1 Scheduling -------------*- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -94,6 +93,8 @@ def : ReadAdvance<ReadAfterLd, 4>;
 def : ReadAdvance<ReadAfterVecLd, 8>;
 def : ReadAdvance<ReadAfterVecXLd, 8>;
 def : ReadAdvance<ReadAfterVecYLd, 8>;
+
+def : ReadAdvance<ReadInt2Fpu, 0>;
 
 // The Integer PRF for Zen is 168 entries, and it holds the architectural and
 // speculative version of the 64-bit integer registers.
@@ -790,7 +791,7 @@ def : InstRW<[WriteMicrocoded], (instregex "RDTSC")>;
 def : InstRW<[WriteMicrocoded], (instrs RDPMC)>;
 
 // RDRAND.
-def : InstRW<[WriteMicrocoded], (instregex "RDRAND(16|32|64)r")>;
+def : InstRW<[WriteMicrocoded], (instrs RDRAND16r, RDRAND32r, RDRAND64r)>;
 
 // XGETBV.
 def : InstRW<[WriteMicrocoded], (instrs XGETBV)>;

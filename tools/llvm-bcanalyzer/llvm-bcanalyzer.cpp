@@ -1,9 +1,8 @@
 //===-- llvm-bcanalyzer.cpp - Bitcode Analyzer --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -247,6 +246,7 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
       STRINGIFY_CODE(CST_CODE, CE_CMP)
       STRINGIFY_CODE(CST_CODE, INLINEASM)
       STRINGIFY_CODE(CST_CODE, CE_SHUFVEC_EX)
+      STRINGIFY_CODE(CST_CODE, CE_UNOP)
     case bitc::CST_CODE_BLOCKADDRESS:    return "CST_CODE_BLOCKADDRESS";
       STRINGIFY_CODE(CST_CODE, DATA)
     }
@@ -267,6 +267,7 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
       STRINGIFY_CODE(FUNC_CODE, INST_BR)
       STRINGIFY_CODE(FUNC_CODE, INST_SWITCH)
       STRINGIFY_CODE(FUNC_CODE, INST_INVOKE)
+      STRINGIFY_CODE(FUNC_CODE, INST_UNOP)
       STRINGIFY_CODE(FUNC_CODE, INST_UNREACHABLE)
       STRINGIFY_CODE(FUNC_CODE, INST_CLEANUPRET)
       STRINGIFY_CODE(FUNC_CODE, INST_CATCHRET)

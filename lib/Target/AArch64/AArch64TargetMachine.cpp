@@ -1,9 +1,8 @@
 //===-- AArch64TargetMachine.cpp - Define TargetMachine for AArch64 -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -30,6 +29,7 @@
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CodeGen.h"
@@ -123,6 +123,10 @@ static cl::opt<bool>
     BranchRelaxation("aarch64-enable-branch-relax", cl::Hidden, cl::init(true),
                      cl::desc("Relax out of range conditional branches"));
 
+static cl::opt<bool> EnableCompressJumpTables(
+    "aarch64-enable-compress-jump-tables", cl::Hidden, cl::init(true),
+    cl::desc("Use smallest entry possible for jump tables"));
+
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
     EnableGlobalMerge("aarch64-enable-global-merge", cl::Hidden,
@@ -158,6 +162,7 @@ extern "C" void LLVMInitializeAArch64Target() {
   initializeAArch64AdvSIMDScalarPass(*PR);
   initializeAArch64BranchTargetsPass(*PR);
   initializeAArch64CollectLOHPass(*PR);
+  initializeAArch64CompressJumpTablesPass(*PR);
   initializeAArch64ConditionalComparesPass(*PR);
   initializeAArch64ConditionOptimizerPass(*PR);
   initializeAArch64DeadRegisterDefinitionsPass(*PR);
@@ -171,6 +176,7 @@ extern "C" void LLVMInitializeAArch64Target() {
   initializeFalkorHWPFFixPass(*PR);
   initializeFalkorMarkStridedAccessesLegacyPass(*PR);
   initializeLDTLSCleanupPass(*PR);
+  initializeAArch64SpeculationHardeningPass(*PR);
 }
 
 //===----------------------------------------------------------------------===//
@@ -202,8 +208,8 @@ static std::string computeDataLayout(const Triple &TT,
 
 static Reloc::Model getEffectiveRelocModel(const Triple &TT,
                                            Optional<Reloc::Model> RM) {
-  // AArch64 Darwin is always PIC.
-  if (TT.isOSDarwin())
+  // AArch64 Darwin and Windows are always PIC.
+  if (TT.isOSDarwin() || TT.isOSWindows())
     return Reloc::PIC_;
   // On ELF platforms the default static relocation model has a smart enough
   // linker to cope with referencing external symbols defined in a shared
@@ -213,9 +219,9 @@ static Reloc::Model getEffectiveRelocModel(const Triple &TT,
   return *RM;
 }
 
-static CodeModel::Model getEffectiveCodeModel(const Triple &TT,
-                                              Optional<CodeModel::Model> CM,
-                                              bool JIT) {
+static CodeModel::Model
+getEffectiveAArch64CodeModel(const Triple &TT, Optional<CodeModel::Model> CM,
+                             bool JIT) {
   if (CM) {
     if (*CM != CodeModel::Small && *CM != CodeModel::Tiny &&
         *CM != CodeModel::Large) {
@@ -249,7 +255,7 @@ AArch64TargetMachine::AArch64TargetMachine(const Target &T, const Triple &TT,
     : LLVMTargetMachine(T,
                         computeDataLayout(TT, Options.MCOptions, LittleEndian),
                         TT, CPU, FS, Options, getEffectiveRelocModel(TT, RM),
-                        getEffectiveCodeModel(TT, CM, JIT), OL),
+                        getEffectiveAArch64CodeModel(TT, CM, JIT), OL),
       TLOF(createTLOF(getTargetTriple())), isLittle(LittleEndian) {
   initAsmInfo();
 
@@ -258,9 +264,21 @@ AArch64TargetMachine::AArch64TargetMachine(const Target &T, const Triple &TT,
     this->Options.NoTrapAfterNoreturn = true;
   }
 
+  if (getMCAsmInfo()->usesWindowsCFI()) {
+    // Unwinding can get confused if the last instruction in an
+    // exception-handling region (function, funclet, try block, etc.)
+    // is a call.
+    //
+    // FIXME: We could elide the trap if the next instruction would be in
+    // the same region anyway.
+    this->Options.TrapUnreachable = true;
+  }
+
   // Enable GlobalISel at or below EnableGlobalISelAt0.
-  if (getOptLevel() <= EnableGlobalISelAtO)
+  if (getOptLevel() <= EnableGlobalISelAtO) {
     setGlobalISel(true);
+    setGlobalISelAbort(GlobalISelAbortMode::Disable);
+  }
 
   // AArch64 supports the MachineOutliner.
   setMachineOutliner(true);
@@ -403,8 +421,10 @@ void AArch64PassConfig::addIRPasses() {
   TargetPassConfig::addIRPasses();
 
   // Match interleaved memory accesses to ldN/stN intrinsics.
-  if (TM->getOptLevel() != CodeGenOpt::None)
+  if (TM->getOptLevel() != CodeGenOpt::None) {
+    addPass(createInterleavedLoadCombinePass());
     addPass(createInterleavedAccessPass());
+  }
 
   if (TM->getOptLevel() == CodeGenOpt::Aggressive && EnableGEPOpt) {
     // Call SeparateConstOffsetFromGEP pass to extract constants within indices
@@ -530,12 +550,28 @@ void AArch64PassConfig::addPreSched2() {
   if (TM->getOptLevel() != CodeGenOpt::None) {
     if (EnableLoadStoreOpt)
       addPass(createAArch64LoadStoreOptimizationPass());
+  }
+
+  // The AArch64SpeculationHardeningPass destroys dominator tree and natural
+  // loop info, which is needed for the FalkorHWPFFixPass and also later on.
+  // Therefore, run the AArch64SpeculationHardeningPass before the
+  // FalkorHWPFFixPass to avoid recomputing dominator tree and natural loop
+  // info.
+  addPass(createAArch64SpeculationHardeningPass());
+
+  if (TM->getOptLevel() != CodeGenOpt::None) {
     if (EnableFalkorHWPFFix)
       addPass(createFalkorHWPFFixPass());
   }
 }
 
 void AArch64PassConfig::addPreEmitPass() {
+  // Machine Block Placement might have created new opportunities when run
+  // at O3, where the Tail Duplication Threshold is set to 4 instructions.
+  // Run the load/store optimizer once more.
+  if (TM->getOptLevel() >= CodeGenOpt::Aggressive && EnableLoadStoreOpt)
+    addPass(createAArch64LoadStoreOptimizationPass());
+
   if (EnableA53Fix835769)
     addPass(createAArch64A53Fix835769());
   // Relax conditional branch instructions if they're otherwise out of
@@ -545,6 +581,9 @@ void AArch64PassConfig::addPreEmitPass() {
 
   if (EnableBranchTargets)
     addPass(createAArch64BranchTargetsPass());
+
+  if (TM->getOptLevel() != CodeGenOpt::None && EnableCompressJumpTables)
+    addPass(createAArch64CompressJumpTablesPass());
 
   if (TM->getOptLevel() != CodeGenOpt::None && EnableCollectLOH &&
       TM->getTargetTriple().isOSBinFormatMachO())

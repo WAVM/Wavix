@@ -1,9 +1,8 @@
 //===- X86TargetParser.def - X86 target parsing defines ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -102,6 +101,7 @@ X86_CPU_SUBTYPE_COMPAT("icelake-server", INTEL_COREI7_ICELAKE_SERVER, "icelake-s
 // Entries below this are not in libgcc/compiler-rt.
 X86_CPU_SUBTYPE       ("core2",          INTEL_CORE2_65)
 X86_CPU_SUBTYPE       ("penryn",         INTEL_CORE2_45)
+X86_CPU_SUBTYPE       ("cascadelake",    INTEL_COREI7_CASCADELAKE)
 X86_CPU_SUBTYPE       ("k6",             AMDPENTIUM_K6)
 X86_CPU_SUBTYPE       ("k6-2",           AMDPENTIUM_K62)
 X86_CPU_SUBTYPE       ("k6-3",           AMDPENTIUM_K63)

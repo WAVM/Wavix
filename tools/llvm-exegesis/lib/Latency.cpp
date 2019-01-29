@@ -1,9 +1,8 @@
 //===-- Latency.cpp ---------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -12,6 +11,8 @@
 #include "Assembler.h"
 #include "BenchmarkRunner.h"
 #include "MCInstrDescView.h"
+#include "PerfHelper.h"
+#include "Target.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstBuilder.h"
@@ -49,7 +50,7 @@ computeAliasingInstructions(const LLVMState &State, const Instruction &Instr,
   for (const unsigned OtherOpcode : Opcodes) {
     if (OtherOpcode == Instr.Description->getOpcode())
       continue;
-    const Instruction OtherInstr(State, OtherOpcode);
+    const Instruction &OtherInstr = State.getIC().getInstr(OtherOpcode);
     if (OtherInstr.hasMemoryOperands())
       continue;
     if (Instr.hasAliasingRegistersThrough(OtherInstr))
@@ -164,18 +165,6 @@ LatencySnippetGenerator::generateCodeTemplates(const Instruction &Instr) const {
   return std::move(Results);
 }
 
-const char *LatencyBenchmarkRunner::getCounterName() const {
-  if (!State.getSubtargetInfo().getSchedModel().hasExtraProcessorInfo())
-    llvm::report_fatal_error("sched model is missing extra processor info!");
-  const char *CounterName = State.getSubtargetInfo()
-                                .getSchedModel()
-                                .getExtraProcessorInfo()
-                                .PfmCounters.CycleCounter;
-  if (!CounterName)
-    llvm::report_fatal_error("sched model does not define a cycle counter");
-  return CounterName;
-}
-
 LatencyBenchmarkRunner::~LatencyBenchmarkRunner() = default;
 
 llvm::Expected<std::vector<BenchmarkMeasure>>
@@ -185,9 +174,9 @@ LatencyBenchmarkRunner::runMeasurements(
   // measure several times and take the minimum value.
   constexpr const int NumMeasurements = 30;
   int64_t MinValue = std::numeric_limits<int64_t>::max();
-  const char *CounterName = getCounterName();
+  const char *CounterName = State.getPfmCounters().CycleCounter;
   if (!CounterName)
-    llvm::report_fatal_error("could not determine cycle counter name");
+    llvm::report_fatal_error("sched model does not define a cycle counter");
   for (size_t I = 0; I < NumMeasurements; ++I) {
     auto ExpectedCounterValue = Executor.runAndMeasure(CounterName);
     if (!ExpectedCounterValue)

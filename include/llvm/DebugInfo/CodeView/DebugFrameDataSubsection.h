@@ -1,9 +1,8 @@
 //===- DebugFrameDataSubsection.h ------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,6 +12,7 @@
 #include "llvm/DebugInfo/CodeView/CodeView.h"
 #include "llvm/DebugInfo/CodeView/DebugSubsection.h"
 #include "llvm/Support/BinaryStreamReader.h"
+#include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 
 namespace llvm {
@@ -31,10 +31,10 @@ public:
   FixedStreamArray<FrameData>::Iterator begin() const { return Frames.begin(); }
   FixedStreamArray<FrameData>::Iterator end() const { return Frames.end(); }
 
-  const uint32_t *getRelocPtr() const { return RelocPtr; }
+  const support::ulittle32_t *getRelocPtr() const { return RelocPtr; }
 
 private:
-  const uint32_t *RelocPtr = nullptr;
+  const support::ulittle32_t *RelocPtr = nullptr;
   FixedStreamArray<FrameData> Frames;
 };
 

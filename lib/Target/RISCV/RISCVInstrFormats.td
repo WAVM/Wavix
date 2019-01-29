@@ -1,9 +1,8 @@
 //===-- RISCVInstrFormats.td - RISCV Instruction Formats ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -45,11 +44,12 @@ def InstFormatCSS    : InstFormat<10>;
 def InstFormatCIW    : InstFormat<11>;
 def InstFormatCL     : InstFormat<12>;
 def InstFormatCS     : InstFormat<13>;
-def InstFormatCB     : InstFormat<14>;
-def InstFormatCJ     : InstFormat<15>;
-def InstFormatOther  : InstFormat<16>;
+def InstFormatCA     : InstFormat<14>;
+def InstFormatCB     : InstFormat<15>;
+def InstFormatCJ     : InstFormat<16>;
+def InstFormatOther  : InstFormat<17>;
 
-// The following opcode names and match those given in Table 19.1 in the
+// The following opcode names match those given in Table 19.1 in the
 // RISC-V User-level ISA specification ("RISC-V base opcode map").
 class RISCVOpcode<bits<7> val> {
   bits<7> Value = val;

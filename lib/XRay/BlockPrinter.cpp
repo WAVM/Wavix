@@ -1,9 +1,8 @@
 //===- BlockPrinter.cpp - FDR Block Pretty Printer Implementation --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 #include "llvm/XRay/BlockPrinter.h"
@@ -60,6 +59,24 @@ Error BlockPrinter::visit(TSCWrapRecord &R) {
 
 // Custom events will be rendered like "function" events.
 Error BlockPrinter::visit(CustomEventRecord &R) {
+  if (CurrentState == State::Metadata)
+    OS << "\n";
+  CurrentState = State::CustomEvent;
+  OS << "*  ";
+  auto E = RP.visit(R);
+  return E;
+}
+
+Error BlockPrinter::visit(CustomEventRecordV5 &R) {
+  if (CurrentState == State::Metadata)
+    OS << "\n";
+  CurrentState = State::CustomEvent;
+  OS << "*  ";
+  auto E = RP.visit(R);
+  return E;
+}
+
+Error BlockPrinter::visit(TypedEventRecord &R) {
   if (CurrentState == State::Metadata)
     OS << "\n";
   CurrentState = State::CustomEvent;

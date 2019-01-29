@@ -1,9 +1,8 @@
 //===- RelocVisitor.h - Visitor for object file relocations -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -101,6 +100,8 @@ private:
     case Triple::arm:
     case Triple::armeb:
       return visitARM(Rel, R, Value);
+    case Triple::avr:
+      return visitAVR(Rel, R, Value);
     case Triple::lanai:
       return visitLanai(Rel, R, Value);
     case Triple::mipsel:
@@ -129,6 +130,8 @@ private:
     case ELF::R_X86_64_NONE:
       return 0;
     case ELF::R_X86_64_64:
+    case ELF::R_X86_64_DTPOFF32:
+    case ELF::R_X86_64_DTPOFF64:
       return Value + getELFAddend(R);
     case ELF::R_X86_64_PC32:
       return Value + getELFAddend(R) - R.getOffset();
@@ -257,6 +260,16 @@ private:
     return 0;
   }
 
+  uint64_t visitAVR(uint32_t Rel, RelocationRef R, uint64_t Value) {
+    if (Rel == ELF::R_AVR_16) {
+      return (Value + getELFAddend(R)) & 0xFFFF;
+    } else if (Rel == ELF::R_AVR_32) {
+      return (Value + getELFAddend(R)) & 0xFFFFFFFF;
+    }
+    HasError = true;
+    return 0;
+  }
+
   uint64_t visitLanai(uint32_t Rel, RelocationRef R, uint64_t Value) {
     if (Rel == ELF::R_LANAI_32)
       return (Value + getELFAddend(R)) & 0xFFFFFFFF;
@@ -333,6 +346,7 @@ private:
       case wasm::R_WEBASSEMBLY_GLOBAL_INDEX_LEB:
       case wasm::R_WEBASSEMBLY_FUNCTION_OFFSET_I32:
       case wasm::R_WEBASSEMBLY_SECTION_OFFSET_I32:
+      case wasm::R_WEBASSEMBLY_EVENT_INDEX_LEB:
         // For wasm section, its offset at 0 -- ignoring Value
         return 0;
       }

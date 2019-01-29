@@ -1,9 +1,8 @@
 //===- ELF.cpp - ELF object file implementation ---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -139,6 +138,13 @@ StringRef llvm::object::getELFRelocationTypeName(uint32_t Machine,
       break;
     }
     break;
+  case ELF::EM_MSP430:
+    switch (Type) {
+#include "llvm/BinaryFormat/ELFRelocs/MSP430.def"
+    default:
+      break;
+    }
+    break;
   default:
     break;
   }
@@ -147,7 +153,7 @@ StringRef llvm::object::getELFRelocationTypeName(uint32_t Machine,
 
 #undef ELF_RELOC
 
-uint32_t llvm::object::getELFRelrRelocationType(uint32_t Machine) {
+uint32_t llvm::object::getELFRelativeRelocationType(uint32_t Machine) {
   switch (Machine) {
   case ELF::EM_X86_64:
     return ELF::R_X86_64_RELATIVE;
@@ -293,7 +299,7 @@ ELFFile<ELFT>::decode_relrs(Elf_Relr_Range relrs) const {
   Elf_Rela Rela;
   Rela.r_info = 0;
   Rela.r_addend = 0;
-  Rela.setType(getRelrRelocationType(), false);
+  Rela.setType(getRelativeRelocationType(), false);
   std::vector<Elf_Rela> Relocs;
 
   // Word type: uint32_t for Elf32, and uint64_t for Elf64.

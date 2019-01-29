@@ -1,9 +1,8 @@
 //===- InstCombineShifts.cpp ----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -725,9 +724,9 @@ Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
 
     Value *X;
     const APInt *ShOp1;
-    if (match(Op0, m_Shl(m_Value(X), m_APInt(ShOp1)))) {
-      unsigned ShlAmt = ShOp1->getZExtValue();
-      if (ShlAmt < ShAmt) {
+    if (match(Op0, m_Shl(m_Value(X), m_APInt(ShOp1))) && ShOp1->ult(BitWidth)) {
+      if (ShOp1->ult(ShAmt)) {
+        unsigned ShlAmt = ShOp1->getZExtValue();
         Constant *ShiftDiff = ConstantInt::get(Ty, ShAmt - ShlAmt);
         if (cast<BinaryOperator>(Op0)->hasNoUnsignedWrap()) {
           // (X <<nuw C1) >>u C2 --> X >>u (C2 - C1)
@@ -740,7 +739,8 @@ Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
         APInt Mask(APInt::getLowBitsSet(BitWidth, BitWidth - ShAmt));
         return BinaryOperator::CreateAnd(NewLShr, ConstantInt::get(Ty, Mask));
       }
-      if (ShlAmt > ShAmt) {
+      if (ShOp1->ugt(ShAmt)) {
+        unsigned ShlAmt = ShOp1->getZExtValue();
         Constant *ShiftDiff = ConstantInt::get(Ty, ShlAmt - ShAmt);
         if (cast<BinaryOperator>(Op0)->hasNoUnsignedWrap()) {
           // (X <<nuw C1) >>u C2 --> X <<nuw (C1 - C2)
@@ -753,7 +753,7 @@ Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
         APInt Mask(APInt::getLowBitsSet(BitWidth, BitWidth - ShAmt));
         return BinaryOperator::CreateAnd(NewShl, ConstantInt::get(Ty, Mask));
       }
-      assert(ShlAmt == ShAmt);
+      assert(*ShOp1 == ShAmt);
       // (X << C) >>u C --> X & (-1 >>u C)
       APInt Mask(APInt::getLowBitsSet(BitWidth, BitWidth - ShAmt));
       return BinaryOperator::CreateAnd(X, ConstantInt::get(Ty, Mask));

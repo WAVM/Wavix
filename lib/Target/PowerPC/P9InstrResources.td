@@ -1,9 +1,8 @@
 //===- P9InstrResources.td - P9 Instruction Resource Defs  -*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -111,11 +110,11 @@ def : InstRW<[P9_ALU_3C, IP_EXEC_1C, DISP_1C, DISP_1C],
     (instregex "CNT(L|T)Z(D|W)(8)?(o)?$"),
     (instregex "POPCNT(D|W)$"),
     (instregex "CMPB(8)?$"),
+    (instregex "SETB(8)?$"),
     XSTDIVDP,
     XSTSQRTDP,
     XSXSIGDP,
     XSCVSPDPN,
-    SETB,
     BPERMD
 )>;
 

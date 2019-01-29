@@ -1,9 +1,8 @@
 //===-- WasmEHPrepare - Prepare excepton handling for WebAssembly --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -137,6 +136,7 @@ class WasmEHPrepare : public FunctionPass {
   Value *LSDAField = nullptr;      // lsda field
   Value *SelectorField = nullptr;  // selector
 
+  Function *ThrowF = nullptr;           // wasm.throw() intrinsic
   Function *CatchF = nullptr;           // wasm.catch.extract() intrinsic
   Function *LPadIndexF = nullptr;       // wasm.landingpad.index() intrinsic
   Function *LSDAF = nullptr;            // wasm.lsda() intrinsic
@@ -144,6 +144,9 @@ class WasmEHPrepare : public FunctionPass {
   Function *GetSelectorF = nullptr;     // wasm.get.ehselector() intrinsic
   Function *CallPersonalityF = nullptr; // _Unwind_CallPersonality() wrapper
   Function *ClangCallTermF = nullptr;   // __clang_call_terminate() function
+
+  bool prepareEHPads(Function &F);
+  bool prepareThrows(Function &F);
 
   void prepareEHPad(BasicBlock *BB, unsigned Index);
   void prepareTerminateCleanupPad(BasicBlock *BB);
@@ -177,7 +180,62 @@ bool WasmEHPrepare::doInitialization(Module &M) {
   return false;
 }
 
+// Erase the specified BBs if the BB does not have any remaining predecessors,
+// and also all its dead children.
+template <typename Container>
+static void eraseDeadBBsAndChildren(const Container &BBs) {
+  SmallVector<BasicBlock *, 8> WL(BBs.begin(), BBs.end());
+  while (!WL.empty()) {
+    auto *BB = WL.pop_back_val();
+    if (pred_begin(BB) != pred_end(BB))
+      continue;
+    WL.append(succ_begin(BB), succ_end(BB));
+    DeleteDeadBlock(BB);
+  }
+}
+
 bool WasmEHPrepare::runOnFunction(Function &F) {
+  bool Changed = false;
+  Changed |= prepareThrows(F);
+  Changed |= prepareEHPads(F);
+  return Changed;
+}
+
+bool WasmEHPrepare::prepareThrows(Function &F) {
+  Module &M = *F.getParent();
+  IRBuilder<> IRB(F.getContext());
+  bool Changed = false;
+
+  // wasm.throw() intinsic, which will be lowered to wasm 'throw' instruction.
+  ThrowF = Intrinsic::getDeclaration(&M, Intrinsic::wasm_throw);
+
+  // Insert an unreachable instruction after a call to @llvm.wasm.throw and
+  // delete all following instructions within the BB, and delete all the dead
+  // children of the BB as well.
+  for (User *U : ThrowF->users()) {
+    // A call to @llvm.wasm.throw() is only generated from
+    // __builtin_wasm_throw() builtin call within libcxxabi, and cannot be an
+    // InvokeInst.
+    auto *ThrowI = cast<CallInst>(U);
+    if (ThrowI->getFunction() != &F)
+      continue;
+    Changed = true;
+    auto *BB = ThrowI->getParent();
+    SmallVector<BasicBlock *, 4> Succs(succ_begin(BB), succ_end(BB));
+    auto &InstList = BB->getInstList();
+    InstList.erase(std::next(BasicBlock::iterator(ThrowI)), InstList.end());
+    IRB.SetInsertPoint(BB);
+    IRB.CreateUnreachable();
+    eraseDeadBBsAndChildren(Succs);
+  }
+
+  return Changed;
+}
+
+bool WasmEHPrepare::prepareEHPads(Function &F) {
+  Module &M = *F.getParent();
+  IRBuilder<> IRB(F.getContext());
+
   SmallVector<BasicBlock *, 16> CatchPads;
   SmallVector<BasicBlock *, 16> CleanupPads;
   for (BasicBlock &BB : F) {
@@ -193,9 +251,6 @@ bool WasmEHPrepare::runOnFunction(Function &F) {
   if (CatchPads.empty() && CleanupPads.empty())
     return false;
   assert(F.hasPersonalityFn() && "Personality function not found");
-
-  Module &M = *F.getParent();
-  IRBuilder<> IRB(F.getContext());
 
   // __wasm_lpad_context global variable
   LPadContextGV = cast<GlobalVariable>(
@@ -300,7 +355,7 @@ void WasmEHPrepare::prepareEHPad(BasicBlock *BB, unsigned Index) {
   // This is to create a map of <landingpad EH label, landingpad index> in
   // SelectionDAGISel, which is to be used in EHStreamer to emit LSDA tables.
   // Pseudocode: wasm.landingpad.index(Index);
-  IRB.CreateCall(LPadIndexF, IRB.getInt32(Index));
+  IRB.CreateCall(LPadIndexF, {FPI, IRB.getInt32(Index)});
 
   // Pseudocode: __wasm_lpad_context.lpad_index = index;
   IRB.CreateStore(IRB.getInt32(Index), LPadIndexField);

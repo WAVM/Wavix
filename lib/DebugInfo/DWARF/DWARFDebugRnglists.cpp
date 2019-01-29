@@ -1,9 +1,8 @@
 //===- DWARFDebugRnglists.cpp ---------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -123,7 +122,7 @@ DWARFDebugRnglist::getAbsoluteRanges(llvm::Optional<SectionedAddress> BaseAddr,
     if (RLE.EntryKind == dwarf::DW_RLE_base_addressx) {
       BaseAddr = U.getAddrOffsetSectionItem(RLE.Value0);
       if (!BaseAddr)
-        BaseAddr = {RLE.Value0, 0};
+        BaseAddr = {RLE.Value0, -1ULL};
       continue;
     }
     if (RLE.EntryKind == dwarf::DW_RLE_base_address) {
@@ -156,7 +155,7 @@ DWARFDebugRnglist::getAbsoluteRanges(llvm::Optional<SectionedAddress> BaseAddr,
     case dwarf::DW_RLE_startx_length: {
       auto Start = U.getAddrOffsetSectionItem(RLE.Value0);
       if (!Start)
-        Start = {0, 0};
+        Start = {0, -1ULL};
       E.SectionIndex = Start->SectionIndex;
       E.LowPC = Start->Address;
       E.HighPC = E.LowPC + RLE.Value1;

@@ -1,9 +1,8 @@
 //===-- X86.td - Target definition file for the Intel X86 --*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -98,6 +97,9 @@ def FeatureSlowSHLD : SubtargetFeature<"slow-shld", "IsSHLDSlow", "true",
                                        "SHLD instruction is slow">;
 def FeatureSlowPMULLD : SubtargetFeature<"slow-pmulld", "IsPMULLDSlow", "true",
                                         "PMULLD instruction is slow">;
+def FeatureSlowPMADDWD : SubtargetFeature<"slow-pmaddwd", "IsPMADDWDSlow",
+                                          "true",
+                                          "PMADDWD is slower than PMULLD">;
 // FIXME: This should not apply to CPUs that do not have SSE.
 def FeatureSlowUAMem16 : SubtargetFeature<"slow-unaligned-mem-16",
                                 "IsUAMem16Slow", "true",
@@ -446,6 +448,7 @@ include "X86SchedHaswell.td"
 include "X86SchedBroadwell.td"
 include "X86ScheduleSLM.td"
 include "X86ScheduleZnver1.td"
+include "X86ScheduleBdVer2.td"
 include "X86ScheduleBtVer2.td"
 include "X86SchedSkylakeClient.td"
 include "X86SchedSkylakeServer.td"
@@ -460,8 +463,6 @@ def ProcIntelGLP  : SubtargetFeature<"glp", "X86ProcFamily", "IntelGLP",
                     "Intel Goldmont Plus processors">;
 def ProcIntelTRM  : SubtargetFeature<"tremont", "X86ProcFamily", "IntelTRM",
                     "Intel Tremont processors">;
-def ProcIntelKNL  : SubtargetFeature<"knl", "X86ProcFamily",
-                    "IntelKNL", "Intel Knights Landing processors">;
 
 class Proc<string Name, list<SubtargetFeature> Features>
  : ProcessorModel<Name, GenericModel, Features>;
@@ -808,7 +809,26 @@ class SkylakeClientProc<string Name> : ProcModel<Name, SkylakeClientModel,
 ]>;
 def : SkylakeClientProc<"skylake">;
 
-def KNLFeatures : ProcessorFeatures<IVBFeatures.Value, [
+def KNLFeatures : ProcessorFeatures<[], [
+  FeatureX87,
+  FeatureCMOV,
+  FeatureMMX,
+  FeatureFXSR,
+  FeatureNOPL,
+  Feature64Bit,
+  FeatureCMPXCHG16B,
+  FeaturePOPCNT,
+  FeatureSlowDivide64,
+  FeaturePCLMUL,
+  FeatureXSAVE,
+  FeatureXSAVEOPT,
+  FeatureLAHFSAHF,
+  FeatureSlow3OpsLEA,
+  FeatureSlowIncDec,
+  FeatureAES,
+  FeatureRDRAND,
+  FeatureF16C,
+  FeatureFSGSBase,
   FeatureAVX512,
   FeatureERI,
   FeatureCDI,
@@ -827,19 +847,19 @@ def KNLFeatures : ProcessorFeatures<IVBFeatures.Value, [
 // FIXME: define KNL model
 class KnightsLandingProc<string Name> : ProcModel<Name, HaswellModel,
                                                   KNLFeatures.Value, [
-  ProcIntelKNL,
   FeatureSlowTwoMemOps,
   FeatureFastPartialYMMorZMMWrite,
-  FeatureHasFastGather
+  FeatureHasFastGather,
+  FeatureSlowPMADDWD
 ]>;
 def : KnightsLandingProc<"knl">;
 
 class KnightsMillProc<string Name> : ProcModel<Name, HaswellModel,
                                                KNLFeatures.Value, [
-  ProcIntelKNL,
   FeatureSlowTwoMemOps,
   FeatureFastPartialYMMorZMMWrite,
   FeatureHasFastGather,
+  FeatureSlowPMADDWD,
   FeatureVPOPCNTDQ
 ]>;
 def : KnightsMillProc<"knm">; // TODO Add AVX5124FMAPS/AVX5124VNNIW features
@@ -861,6 +881,17 @@ class SkylakeServerProc<string Name> : ProcModel<Name, SkylakeServerModel,
 ]>;
 def : SkylakeServerProc<"skylake-avx512">;
 def : SkylakeServerProc<"skx">; // Legacy alias.
+
+def CLXFeatures : ProcessorFeatures<SKXFeatures.Value, [
+  FeatureVNNI
+]>;
+
+class CascadelakeProc<string Name> : ProcModel<Name, SkylakeServerModel,
+                                              CLXFeatures.Value, [
+  FeatureHasFastGather,
+  FeaturePOPCNTFalseDeps
+]>;
+def : CascadelakeProc<"cascadelake">;
 
 def CNLFeatures : ProcessorFeatures<SKLFeatures.Value, [
   FeatureAVX512,
@@ -991,7 +1022,7 @@ def : ProcessorModel<"btver2", BtVer2Model, [
 ]>;
 
 // Bulldozer
-def : Proc<"bdver1", [
+def : ProcessorModel<"bdver1", BdVer2Model, [
   FeatureX87,
   FeatureCMOV,
   FeatureXOP,
@@ -1016,7 +1047,7 @@ def : Proc<"bdver1", [
   FeatureMacroFusion
 ]>;
 // Piledriver
-def : Proc<"bdver2", [
+def : ProcessorModel<"bdver2", BdVer2Model, [
   FeatureX87,
   FeatureCMOV,
   FeatureXOP,

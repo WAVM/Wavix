@@ -1,9 +1,8 @@
 //===--- DwarfCFIEHPrinter.h - DWARF-based Unwind Information Printer -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,6 +15,7 @@
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Object/ELF.h"
 #include "llvm/Object/ELFTypes.h"
+#include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/Debug.h"
@@ -31,15 +31,15 @@ namespace DwarfCFIEH {
 template <typename ELFT>
 class PrinterContext {
   ScopedPrinter &W;
-  const object::ELFFile<ELFT> *Obj;
+  const object::ELFObjectFile<ELFT> *ObjF;
 
   void printEHFrameHdr(uint64_t Offset, uint64_t Address, uint64_t Size) const;
 
   void printEHFrame(const typename ELFT::Shdr *EHFrameShdr) const;
 
 public:
-  PrinterContext(ScopedPrinter &W, const object::ELFFile<ELFT> *Obj)
-      : W(W), Obj(Obj) {}
+  PrinterContext(ScopedPrinter &W, const object::ELFObjectFile<ELFT> *ObjF)
+      : W(W), ObjF(ObjF) {}
 
   void printUnwindInformation() const;
 };
@@ -59,6 +59,7 @@ static const typename ELFO::Elf_Shdr *findSectionByAddress(const ELFO *Obj,
 
 template <typename ELFT>
 void PrinterContext<ELFT>::printUnwindInformation() const {
+  const object::ELFFile<ELFT> *Obj = ObjF->getELFFile();
   const typename ELFT::Phdr *EHFramePhdr = nullptr;
 
   auto PHs = Obj->program_headers();
@@ -101,6 +102,7 @@ void PrinterContext<ELFT>::printEHFrameHdr(uint64_t EHFrameHdrOffset,
   W.startLine() << format("Offset: 0x%" PRIx64 "\n", EHFrameHdrOffset);
   W.startLine() << format("Size: 0x%" PRIx64 "\n", EHFrameHdrSize);
 
+  const object::ELFFile<ELFT> *Obj = ObjF->getELFFile();
   const auto *EHFrameHdrShdr = findSectionByAddress(Obj, EHFrameHdrAddress);
   if (EHFrameHdrShdr) {
     auto SectionName = Obj->getSectionName(EHFrameHdrShdr);
@@ -173,6 +175,7 @@ void PrinterContext<ELFT>::printEHFrame(
                           ShOffset, Address);
   W.indent();
 
+  const object::ELFFile<ELFT> *Obj = ObjF->getELFFile();
   auto Result = Obj->getSectionContents(EHFrameShdr);
   if (Error E = Result.takeError())
     reportError(toString(std::move(E)));
@@ -183,7 +186,8 @@ void PrinterContext<ELFT>::printEHFrame(
                 Contents.size()),
       ELFT::TargetEndianness == support::endianness::little,
       ELFT::Is64Bits ? 8 : 4);
-  DWARFDebugFrame EHFrame(/*IsEH=*/true, /*EHFrameAddress=*/Address);
+  DWARFDebugFrame EHFrame(Triple::ArchType(ObjF->getArch()), /*IsEH=*/true,
+                          /*EHFrameAddress=*/Address);
   EHFrame.parse(DE);
 
   for (const auto &Entry : EHFrame) {

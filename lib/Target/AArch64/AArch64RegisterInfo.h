@@ -1,9 +1,8 @@
 //==- AArch64RegisterInfo.h - AArch64 Register Information Impl --*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -29,6 +28,11 @@ class AArch64RegisterInfo final : public AArch64GenRegisterInfo {
 
 public:
   AArch64RegisterInfo(const Triple &TT);
+
+  // FIXME: This should be tablegen'd like getDwarfRegNum is
+  int getSEHRegNum(unsigned i) const {
+    return getEncodingValue(i);
+  }
 
   bool isReservedReg(const MachineFunction &MF, unsigned Reg) const;
   bool isAnyArgRegReserved(const MachineFunction &MF) const;
@@ -59,6 +63,9 @@ public:
   // Calls involved in thread-local variable lookup save more registers than
   // normal calls, so they need a different mask to represent this.
   const uint32_t *getTLSCallPreservedMask() const;
+
+  // Funclets on ARM64 Windows don't preserve any registers.
+  const uint32_t *getNoPreservedMask() const override;
 
   /// getThisReturnPreservedMask - Returns a call preserved mask specific to the
   /// case that 'returned' is on an i64 first argument if the calling convention

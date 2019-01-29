@@ -1,9 +1,8 @@
 //===-- HexagonISelLowering.cpp - Hexagon DAG Lowering Implementation -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1359,6 +1358,11 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BSWAP, MVT::i32, Legal);
   setOperationAction(ISD::BSWAP, MVT::i64, Legal);
 
+  setOperationAction(ISD::FSHL, MVT::i32, Legal);
+  setOperationAction(ISD::FSHL, MVT::i64, Legal);
+  setOperationAction(ISD::FSHR, MVT::i32, Legal);
+  setOperationAction(ISD::FSHR, MVT::i64, Legal);
+
   for (unsigned IntExpOp :
        {ISD::SDIV,      ISD::UDIV,      ISD::SREM,      ISD::UREM,
         ISD::SDIVREM,   ISD::UDIVREM,   ISD::ROTL,      ISD::ROTR,
@@ -1505,13 +1509,6 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v4i16, Custom);
   setOperationAction(ISD::VECTOR_SHUFFLE, MVT::v8i8,  Custom);
 
-  // Subtarget-specific operation actions.
-  //
-  if (Subtarget.hasV60Ops()) {
-    setOperationAction(ISD::ROTL, MVT::i32, Custom);
-    setOperationAction(ISD::ROTL, MVT::i64, Custom);
-  }
-
   // V5+.
   setOperationAction(ISD::FMA,  MVT::f64, Expand);
   setOperationAction(ISD::FADD, MVT::f64, Expand);
@@ -1540,6 +1537,19 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
                  MVT::v2i16, MVT::v2i32, MVT::v4i8, MVT::v4i16, MVT::v8i8}) {
     setIndexedLoadAction(ISD::POST_INC, VT, Legal);
     setIndexedStoreAction(ISD::POST_INC, VT, Legal);
+  }
+
+  // Subtarget-specific operation actions.
+  //
+  if (Subtarget.hasV60Ops()) {
+    setOperationAction(ISD::ROTL, MVT::i32, Legal);
+    setOperationAction(ISD::ROTL, MVT::i64, Legal);
+    setOperationAction(ISD::ROTR, MVT::i32, Legal);
+    setOperationAction(ISD::ROTR, MVT::i64, Legal);
+  }
+  if (Subtarget.hasV66Ops()) {
+    setOperationAction(ISD::FADD, MVT::f64, Legal);
+    setOperationAction(ISD::FSUB, MVT::f64, Legal);
   }
 
   if (Subtarget.useHVXOps())
@@ -1764,11 +1774,8 @@ bool HexagonTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     // The intrinsic function call is of the form { ElTy, i8* }
     // @llvm.hexagon.L2.loadXX.pbr(i8*, i32). The pointer and memory access type
     // should be derived from ElTy.
-    PointerType *PtrTy = I.getCalledFunction()
-                             ->getReturnType()
-                             ->getContainedType(0)
-                             ->getPointerTo();
-    Info.memVT = MVT::getVT(PtrTy->getElementType());
+    Type *ElTy = I.getCalledFunction()->getReturnType()->getStructElementType(0);
+    Info.memVT = MVT::getVT(ElTy);
     llvm::Value *BasePtrVal = I.getOperand(0);
     Info.ptrVal = getUnderLyingObjectForBrevLdIntr(BasePtrVal);
     // The offset value comes through Modifier register. For now, assume the
@@ -1834,12 +1841,12 @@ bool HexagonTargetLowering::isShuffleMaskLegal(ArrayRef<int> Mask,
 }
 
 TargetLoweringBase::LegalizeTypeAction
-HexagonTargetLowering::getPreferredVectorAction(EVT VT) const {
+HexagonTargetLowering::getPreferredVectorAction(MVT VT) const {
   if (VT.getVectorNumElements() == 1)
     return TargetLoweringBase::TypeScalarizeVector;
 
   // Always widen vectors of i1.
-  MVT ElemTy = VT.getSimpleVT().getVectorElementType();
+  MVT ElemTy = VT.getVectorElementType();
   if (ElemTy == MVT::i1)
     return TargetLoweringBase::TypeWidenVector;
 
@@ -3080,17 +3087,44 @@ HexagonTargetLowering::findRepresentativeClass(const TargetRegisterInfo *TRI,
   return TargetLowering::findRepresentativeClass(TRI, VT);
 }
 
+bool HexagonTargetLowering::shouldReduceLoadWidth(SDNode *Load,
+      ISD::LoadExtType ExtTy, EVT NewVT) const {
+  // TODO: This may be worth removing. Check regression tests for diffs.
+  if (!TargetLoweringBase::shouldReduceLoadWidth(Load, ExtTy, NewVT))
+    return false;
+
+  auto *L = cast<LoadSDNode>(Load);
+  std::pair<SDValue,int> BO = getBaseAndOffset(L->getBasePtr());
+  // Small-data object, do not shrink.
+  if (BO.first.getOpcode() == HexagonISD::CONST32_GP)
+    return false;
+  if (GlobalAddressSDNode *GA = dyn_cast<GlobalAddressSDNode>(BO.first)) {
+    auto &HTM = static_cast<const HexagonTargetMachine&>(getTargetMachine());
+    const auto *GO = dyn_cast_or_null<const GlobalObject>(GA->getGlobal());
+    return !GO || !HTM.getObjFileLowering()->isGlobalInSmallSection(GO, HTM);
+  }
+  return true;
+}
+
 Value *HexagonTargetLowering::emitLoadLinked(IRBuilder<> &Builder, Value *Addr,
       AtomicOrdering Ord) const {
   BasicBlock *BB = Builder.GetInsertBlock();
   Module *M = BB->getParent()->getParent();
-  Type *Ty = cast<PointerType>(Addr->getType())->getElementType();
+  auto PT = cast<PointerType>(Addr->getType());
+  Type *Ty = PT->getElementType();
   unsigned SZ = Ty->getPrimitiveSizeInBits();
   assert((SZ == 32 || SZ == 64) && "Only 32/64-bit atomic loads supported");
   Intrinsic::ID IntID = (SZ == 32) ? Intrinsic::hexagon_L2_loadw_locked
                                    : Intrinsic::hexagon_L4_loadd_locked;
+
+  PointerType *NewPtrTy
+    = Builder.getIntNTy(SZ)->getPointerTo(PT->getAddressSpace());
+  Addr = Builder.CreateBitCast(Addr, NewPtrTy);
+
   Value *Fn = Intrinsic::getDeclaration(M, IntID);
-  return Builder.CreateCall(Fn, Addr, "larx");
+  Value *Call = Builder.CreateCall(Fn, Addr, "larx");
+
+  return Builder.CreateBitCast(Call, Ty);
 }
 
 /// Perform a store-conditional operation to Addr. Return the status of the
@@ -3101,10 +3135,17 @@ Value *HexagonTargetLowering::emitStoreConditional(IRBuilder<> &Builder,
   Module *M = BB->getParent()->getParent();
   Type *Ty = Val->getType();
   unsigned SZ = Ty->getPrimitiveSizeInBits();
+
+  Type *CastTy = Builder.getIntNTy(SZ);
   assert((SZ == 32 || SZ == 64) && "Only 32/64-bit atomic stores supported");
   Intrinsic::ID IntID = (SZ == 32) ? Intrinsic::hexagon_S2_storew_locked
                                    : Intrinsic::hexagon_S4_stored_locked;
   Value *Fn = Intrinsic::getDeclaration(M, IntID);
+
+  unsigned AS = Addr->getType()->getPointerAddressSpace();
+  Addr = Builder.CreateBitCast(Addr, CastTy->getPointerTo(AS));
+  Val = Builder.CreateBitCast(Val, CastTy);
+
   Value *Call = Builder.CreateCall(Fn, {Addr, Val}, "stcx");
   Value *Cmp = Builder.CreateICmpEQ(Call, Builder.getInt32(0), "");
   Value *Ext = Builder.CreateZExt(Cmp, Type::getInt32Ty(M->getContext()));

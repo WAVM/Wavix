@@ -1,9 +1,8 @@
 //===- ELF.h - ELF object file implementation -------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -32,7 +31,7 @@ namespace llvm {
 namespace object {
 
 StringRef getELFRelocationTypeName(uint32_t Machine, uint32_t Type);
-uint32_t getELFRelrRelocationType(uint32_t Machine);
+uint32_t getELFRelativeRelocationType(uint32_t Machine);
 StringRef getELFSectionTypeName(uint32_t Machine, uint32_t Type);
 
 // Subclasses of ELFFile may need this for template instantiation
@@ -113,7 +112,7 @@ public:
   StringRef getRelocationTypeName(uint32_t Type) const;
   void getRelocationTypeName(uint32_t Type,
                              SmallVectorImpl<char> &Result) const;
-  uint32_t getRelrRelocationType() const;
+  uint32_t getRelativeRelocationType() const;
 
   const char *getDynamicTagAsString(unsigned Arch, uint64_t Type) const;
   const char *getDynamicTagAsString(uint64_t Type) const;
@@ -415,8 +414,8 @@ void ELFFile<ELFT>::getRelocationTypeName(uint32_t Type,
 }
 
 template <class ELFT>
-uint32_t ELFFile<ELFT>::getRelrRelocationType() const {
-  return getELFRelrRelocationType(getHeader()->e_machine);
+uint32_t ELFFile<ELFT>::getRelativeRelocationType() const {
+  return getELFRelativeRelocationType(getHeader()->e_machine);
 }
 
 template <class ELFT>

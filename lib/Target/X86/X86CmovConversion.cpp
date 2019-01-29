@@ -1,9 +1,8 @@
 //====- X86CmovConversion.cpp - Convert Cmov to Branch --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -80,12 +79,6 @@ STATISTIC(NumOfSkippedCmovGroups, "Number of unsupported CMOV-groups");
 STATISTIC(NumOfCmovGroupCandidate, "Number of CMOV-group candidates");
 STATISTIC(NumOfLoopCandidate, "Number of CMOV-conversion profitable loops");
 STATISTIC(NumOfOptimizedCmovGroups, "Number of optimized CMOV-groups");
-
-namespace llvm {
-
-void initializeX86CmovConverterPassPass(PassRegistry &);
-
-} // end namespace llvm
 
 // This internal switch can be used to turn off the cmov/branch optimization.
 static cl::opt<bool>

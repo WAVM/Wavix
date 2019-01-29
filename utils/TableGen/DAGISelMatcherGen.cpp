@@ -1,9 +1,8 @@
 //===- DAGISelMatcherGen.cpp - Matcher generator --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -120,7 +119,7 @@ namespace {
     /// If this is the first time a node with unique identifier Name has been
     /// seen, record it. Otherwise, emit a check to make sure this is the same
     /// node. Returns true if this is the first encounter.
-    bool recordUniqueNode(const std::string &Name);
+    bool recordUniqueNode(ArrayRef<std::string> Names);
 
     // Result Code Generation.
     unsigned getNamedArgumentSlot(StringRef Name) {
@@ -319,8 +318,8 @@ void MatcherGen::EmitOperatorMatchCode(const TreePatternNode *N,
   // to handle this.
   if ((N->getOperator()->getName() == "and" ||
        N->getOperator()->getName() == "or") &&
-      N->getChild(1)->isLeaf() && N->getChild(1)->getPredicateFns().empty() &&
-      N->getPredicateFns().empty()) {
+      N->getChild(1)->isLeaf() && N->getChild(1)->getPredicateCalls().empty() &&
+      N->getPredicateCalls().empty()) {
     if (IntInit *II = dyn_cast<IntInit>(N->getChild(1)->getLeafValue())) {
       if (!isPowerOf2_32(II->getValue())) {  // Don't bother with single bits.
         // If this is at the root of the pattern, we emit a redundant
@@ -441,21 +440,39 @@ void MatcherGen::EmitOperatorMatchCode(const TreePatternNode *N,
   }
 }
 
-bool MatcherGen::recordUniqueNode(const std::string &Name) {
-  unsigned &VarMapEntry = VariableMap[Name];
-  if (VarMapEntry == 0) {
-    // If it is a named node, we must emit a 'Record' opcode.
-    AddMatcher(new RecordMatcher("$" + Name, NextRecordedOperandNo));
-    VarMapEntry = ++NextRecordedOperandNo;
-    return true;
+bool MatcherGen::recordUniqueNode(ArrayRef<std::string> Names) {
+  unsigned Entry = 0;
+  for (const std::string &Name : Names) {
+    unsigned &VarMapEntry = VariableMap[Name];
+    if (!Entry)
+      Entry = VarMapEntry;
+    assert(Entry == VarMapEntry);
   }
 
-  // If we get here, this is a second reference to a specific name.  Since
-  // we already have checked that the first reference is valid, we don't
-  // have to recursively match it, just check that it's the same as the
-  // previously named thing.
-  AddMatcher(new CheckSameMatcher(VarMapEntry-1));
-  return false;
+  bool NewRecord = false;
+  if (Entry == 0) {
+    // If it is a named node, we must emit a 'Record' opcode.
+    std::string WhatFor;
+    for (const std::string &Name : Names) {
+      if (!WhatFor.empty())
+        WhatFor += ',';
+      WhatFor += "$" + Name;
+    }
+    AddMatcher(new RecordMatcher(WhatFor, NextRecordedOperandNo));
+    Entry = ++NextRecordedOperandNo;
+    NewRecord = true;
+  } else {
+    // If we get here, this is a second reference to a specific name.  Since
+    // we already have checked that the first reference is valid, we don't
+    // have to recursively match it, just check that it's the same as the
+    // previously named thing.
+    AddMatcher(new CheckSameMatcher(Entry-1));
+  }
+
+  for (const std::string &Name : Names)
+    VariableMap[Name] = Entry;
+
+  return NewRecord;
 }
 
 void MatcherGen::EmitMatchCode(const TreePatternNode *N,
@@ -475,9 +492,18 @@ void MatcherGen::EmitMatchCode(const TreePatternNode *N,
 
   // If this node has a name associated with it, capture it in VariableMap. If
   // we already saw this in the pattern, emit code to verify dagness.
+  SmallVector<std::string, 4> Names;
   if (!N->getName().empty())
-    if (!recordUniqueNode(N->getName()))
+    Names.push_back(N->getName());
+
+  for (const ScopedName &Name : N->getNamesAsPredicateArg()) {
+    Names.push_back(("pred:" + Twine(Name.getScope()) + ":" + Name.getIdentifier()).str());
+  }
+
+  if (!Names.empty()) {
+    if (!recordUniqueNode(Names))
       return;
+  }
 
   if (N->isLeaf())
     EmitLeafMatchCode(N);
@@ -485,8 +511,19 @@ void MatcherGen::EmitMatchCode(const TreePatternNode *N,
     EmitOperatorMatchCode(N, NodeNoTypes, ForceMode);
 
   // If there are node predicates for this node, generate their checks.
-  for (unsigned i = 0, e = N->getPredicateFns().size(); i != e; ++i)
-    AddMatcher(new CheckPredicateMatcher(N->getPredicateFns()[i]));
+  for (unsigned i = 0, e = N->getPredicateCalls().size(); i != e; ++i) {
+    const TreePredicateCall &Pred = N->getPredicateCalls()[i];
+    SmallVector<unsigned, 4> Operands;
+    if (Pred.Fn.usesOperands()) {
+      TreePattern *TP = Pred.Fn.getOrigPatFragRecord();
+      for (unsigned i = 0; i < TP->getNumArgs(); ++i) {
+        std::string Name =
+            ("pred:" + Twine(Pred.Scope) + ":" + TP->getArgName(i)).str();
+        Operands.push_back(getNamedArgumentSlot(Name));
+      }
+    }
+    AddMatcher(new CheckPredicateMatcher(Pred.Fn, Operands));
+  }
 
   for (unsigned i = 0, e = ResultsToTypeCheck.size(); i != e; ++i)
     AddMatcher(new CheckTypeMatcher(N->getSimpleType(ResultsToTypeCheck[i]),
@@ -962,9 +999,16 @@ void MatcherGen::EmitResultCode() {
   }
 
   assert(Ops.size() >= NumSrcResults && "Didn't provide enough results");
-  Ops.resize(NumSrcResults);
+  SmallVector<unsigned, 8> Results(Ops);
 
-  AddMatcher(new CompleteMatchMatcher(Ops, Pattern));
+  // Apply result permutation.
+  for (unsigned ResNo = 0; ResNo < Pattern.getDstPattern()->getNumResults();
+       ++ResNo) {
+    Results[ResNo] = Ops[Pattern.getDstPattern()->getResultIndex(ResNo)];
+  }
+
+  Results.resize(NumSrcResults);
+  AddMatcher(new CompleteMatchMatcher(Results, Pattern));
 }
 
 

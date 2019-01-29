@@ -1,9 +1,8 @@
 //=== WebAssemblyLateEHPrepare.cpp - WebAssembly Exception Preparation -===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -31,6 +30,7 @@ class WebAssemblyLateEHPrepare final : public MachineFunctionPass {
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
+  bool removeUnnecessaryUnreachables(MachineFunction &MF);
   bool replaceFuncletReturns(MachineFunction &MF);
   bool hoistCatches(MachineFunction &MF);
   bool addCatchAlls(MachineFunction &MF);
@@ -59,7 +59,7 @@ FunctionPass *llvm::createWebAssemblyLateEHPrepare() {
 // possible search paths should be the same.
 // Returns nullptr in case it does not find any EH pad in the search, or finds
 // multiple different EH pads.
-static MachineBasicBlock *GetMatchingEHPad(MachineInstr *MI) {
+static MachineBasicBlock *getMatchingEHPad(MachineInstr *MI) {
   MachineFunction *MF = MI->getParent()->getParent();
   SmallVector<MachineBasicBlock *, 2> WL;
   SmallPtrSet<MachineBasicBlock *, 2> Visited;
@@ -83,18 +83,15 @@ static MachineBasicBlock *GetMatchingEHPad(MachineInstr *MI) {
   return EHPad;
 }
 
-// Erases the given BBs and all their children from the function. If other BBs
-// have the BB as a successor, the successor relationships will be deleted as
-// well.
+// Erase the specified BBs if the BB does not have any remaining predecessors,
+// and also all its dead children.
 template <typename Container>
-static void EraseBBsAndChildren(const Container &MBBs) {
+static void eraseDeadBBsAndChildren(const Container &MBBs) {
   SmallVector<MachineBasicBlock *, 8> WL(MBBs.begin(), MBBs.end());
   while (!WL.empty()) {
     MachineBasicBlock *MBB = WL.pop_back_val();
-    SmallVector<MachineBasicBlock *, 4> Preds(MBB->pred_begin(),
-                                              MBB->pred_end());
-    for (auto *Pred : Preds)
-      Pred->removeSuccessor(MBB);
+    if (!MBB->pred_empty())
+      continue;
     SmallVector<MachineBasicBlock *, 4> Succs(MBB->succ_begin(),
                                               MBB->succ_end());
     WL.append(MBB->succ_begin(), MBB->succ_end());
@@ -105,11 +102,16 @@ static void EraseBBsAndChildren(const Container &MBBs) {
 }
 
 bool WebAssemblyLateEHPrepare::runOnMachineFunction(MachineFunction &MF) {
+  LLVM_DEBUG(dbgs() << "********** Late EH Prepare **********\n"
+                       "********** Function: "
+                    << MF.getName() << '\n');
+
   if (MF.getTarget().getMCAsmInfo()->getExceptionHandlingType() !=
       ExceptionHandling::Wasm)
     return false;
 
   bool Changed = false;
+  Changed |= removeUnnecessaryUnreachables(MF);
   Changed |= addRethrows(MF);
   if (!MF.getFunction().hasPersonalityFn())
     return Changed;
@@ -119,6 +121,31 @@ bool WebAssemblyLateEHPrepare::runOnMachineFunction(MachineFunction &MF) {
   Changed |= ensureSingleBBTermPads(MF);
   Changed |= mergeTerminatePads(MF);
   Changed |= addCatchAllTerminatePads(MF);
+  return Changed;
+}
+
+bool WebAssemblyLateEHPrepare::removeUnnecessaryUnreachables(
+    MachineFunction &MF) {
+  bool Changed = false;
+  for (auto &MBB : MF) {
+    for (auto &MI : MBB) {
+      if (!WebAssembly::isThrow(MI))
+        continue;
+      Changed = true;
+
+      // The instruction after the throw should be an unreachable or a branch to
+      // another BB that should eventually lead to an unreachable. Delete it
+      // because throw itself is a terminator, and also delete successors if
+      // any.
+      MBB.erase(std::next(MachineBasicBlock::iterator(MI)), MBB.end());
+      SmallVector<MachineBasicBlock *, 8> Succs(MBB.succ_begin(),
+                                                MBB.succ_end());
+      for (auto *Succ : Succs)
+        MBB.removeSuccessor(Succ);
+      eraseDeadBBsAndChildren(Succs);
+    }
+  }
+
   return Changed;
 }
 
@@ -183,7 +210,7 @@ bool WebAssemblyLateEHPrepare::hoistCatches(MachineFunction &MF) {
         Catches.push_back(&MI);
 
   for (auto *Catch : Catches) {
-    MachineBasicBlock *EHPad = GetMatchingEHPad(Catch);
+    MachineBasicBlock *EHPad = getMatchingEHPad(Catch);
     assert(EHPad && "No matching EH pad for catch");
     if (EHPad->begin() == Catch)
       continue;
@@ -242,7 +269,7 @@ bool WebAssemblyLateEHPrepare::addRethrows(MachineFunction &MF) {
         Rethrow = BuildMI(MBB, InsertPt, MI.getDebugLoc(),
                           TII.get(WebAssembly::RETHROW_TO_CALLER));
 
-      // Becasue __cxa_rethrow does not return, the instruction after the
+      // Because __cxa_rethrow does not return, the instruction after the
       // rethrow should be an unreachable or a branch to another BB that should
       // eventually lead to an unreachable. Delete it because rethrow itself is
       // a terminator, and also delete non-EH pad successors if any.
@@ -251,7 +278,9 @@ bool WebAssemblyLateEHPrepare::addRethrows(MachineFunction &MF) {
       for (auto *Succ : MBB.successors())
         if (!Succ->isEHPad())
           NonPadSuccessors.push_back(Succ);
-      EraseBBsAndChildren(NonPadSuccessors);
+      for (auto *Succ : NonPadSuccessors)
+        MBB.removeSuccessor(Succ);
+      eraseDeadBBsAndChildren(NonPadSuccessors);
     }
   return Changed;
 }
@@ -261,7 +290,7 @@ bool WebAssemblyLateEHPrepare::addRethrows(MachineFunction &MF) {
 //   %exn = catch 0
 //   call @__clang_call_terminate(%exn)
 //   unreachable
-// (There can be set_local and get_locals before the call if we didn't run
+// (There can be local.set and local.gets before the call if we didn't run
 // RegStackify)
 // But code transformations can change or add more control flow, so the call to
 // __clang_call_terminate() function may not be in the original EH pad anymore.
@@ -283,7 +312,7 @@ bool WebAssemblyLateEHPrepare::ensureSingleBBTermPads(MachineFunction &MF) {
 
   bool Changed = false;
   for (auto *Call : ClangCallTerminateCalls) {
-    MachineBasicBlock *EHPad = GetMatchingEHPad(Call);
+    MachineBasicBlock *EHPad = getMatchingEHPad(Call);
     assert(EHPad && "No matching EH pad for catch");
 
     // If it is already the form we want, skip it
@@ -300,7 +329,7 @@ bool WebAssemblyLateEHPrepare::ensureSingleBBTermPads(MachineFunction &MF) {
     // This runs after hoistCatches(), so catch instruction should be at the top
     assert(WebAssembly::isCatch(*Catch));
     // Takes the result register of the catch instruction as argument. There may
-    // have been some other set_local/get_locals in between, but at this point
+    // have been some other local.set/local.gets in between, but at this point
     // we don't care.
     Call->getOperand(1).setReg(Catch->getOperand(0).getReg());
     auto InsertPos = std::next(MachineBasicBlock::iterator(Catch));
@@ -308,7 +337,11 @@ bool WebAssemblyLateEHPrepare::ensureSingleBBTermPads(MachineFunction &MF) {
     BuildMI(*EHPad, InsertPos, Call->getDebugLoc(),
             TII.get(WebAssembly::UNREACHABLE));
     EHPad->erase(InsertPos, EHPad->end());
-    EraseBBsAndChildren(EHPad->successors());
+    SmallVector<MachineBasicBlock *, 8> Succs(EHPad->succ_begin(),
+                                              EHPad->succ_end());
+    for (auto *Succ : Succs)
+      EHPad->removeSuccessor(Succ);
+    eraseDeadBBsAndChildren(Succs);
   }
   return Changed;
 }

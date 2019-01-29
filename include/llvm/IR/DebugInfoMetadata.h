@@ -1,9 +1,8 @@
 //===- llvm/IR/DebugInfoMetadata.h - Debug info metadata --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1192,18 +1191,19 @@ private:
   bool SplitDebugInlining;
   bool DebugInfoForProfiling;
   unsigned NameTableKind;
+  bool RangesBaseAddress;
 
   DICompileUnit(LLVMContext &C, StorageType Storage, unsigned SourceLanguage,
                 bool IsOptimized, unsigned RuntimeVersion,
                 unsigned EmissionKind, uint64_t DWOId, bool SplitDebugInlining,
                 bool DebugInfoForProfiling, unsigned NameTableKind,
-                ArrayRef<Metadata *> Ops)
+                bool RangesBaseAddress, ArrayRef<Metadata *> Ops)
       : DIScope(C, DICompileUnitKind, Storage, dwarf::DW_TAG_compile_unit, Ops),
         SourceLanguage(SourceLanguage), IsOptimized(IsOptimized),
         RuntimeVersion(RuntimeVersion), EmissionKind(EmissionKind),
         DWOId(DWOId), SplitDebugInlining(SplitDebugInlining),
         DebugInfoForProfiling(DebugInfoForProfiling),
-        NameTableKind(NameTableKind) {
+        NameTableKind(NameTableKind), RangesBaseAddress(RangesBaseAddress) {
     assert(Storage != Uniqued);
   }
   ~DICompileUnit() = default;
@@ -1217,15 +1217,16 @@ private:
           DIGlobalVariableExpressionArray GlobalVariables,
           DIImportedEntityArray ImportedEntities, DIMacroNodeArray Macros,
           uint64_t DWOId, bool SplitDebugInlining, bool DebugInfoForProfiling,
-          unsigned NameTableKind, StorageType Storage,
+          unsigned NameTableKind, bool RangesBaseAddress, StorageType Storage,
           bool ShouldCreate = true) {
-    return getImpl(
-        Context, SourceLanguage, File, getCanonicalMDString(Context, Producer),
-        IsOptimized, getCanonicalMDString(Context, Flags), RuntimeVersion,
-        getCanonicalMDString(Context, SplitDebugFilename), EmissionKind,
-        EnumTypes.get(), RetainedTypes.get(), GlobalVariables.get(),
-        ImportedEntities.get(), Macros.get(), DWOId, SplitDebugInlining,
-        DebugInfoForProfiling, NameTableKind, Storage, ShouldCreate);
+    return getImpl(Context, SourceLanguage, File,
+                   getCanonicalMDString(Context, Producer), IsOptimized,
+                   getCanonicalMDString(Context, Flags), RuntimeVersion,
+                   getCanonicalMDString(Context, SplitDebugFilename),
+                   EmissionKind, EnumTypes.get(), RetainedTypes.get(),
+                   GlobalVariables.get(), ImportedEntities.get(), Macros.get(),
+                   DWOId, SplitDebugInlining, DebugInfoForProfiling,
+                   NameTableKind, RangesBaseAddress, Storage, ShouldCreate);
   }
   static DICompileUnit *
   getImpl(LLVMContext &Context, unsigned SourceLanguage, Metadata *File,
@@ -1235,16 +1236,16 @@ private:
           Metadata *GlobalVariables, Metadata *ImportedEntities,
           Metadata *Macros, uint64_t DWOId, bool SplitDebugInlining,
           bool DebugInfoForProfiling, unsigned NameTableKind,
-          StorageType Storage, bool ShouldCreate = true);
+          bool RangesBaseAddress, StorageType Storage, bool ShouldCreate = true);
 
   TempDICompileUnit cloneImpl() const {
-    return getTemporary(getContext(), getSourceLanguage(), getFile(),
-                        getProducer(), isOptimized(), getFlags(),
-                        getRuntimeVersion(), getSplitDebugFilename(),
-                        getEmissionKind(), getEnumTypes(), getRetainedTypes(),
-                        getGlobalVariables(), getImportedEntities(),
-                        getMacros(), DWOId, getSplitDebugInlining(),
-                        getDebugInfoForProfiling(), getNameTableKind());
+    return getTemporary(
+        getContext(), getSourceLanguage(), getFile(), getProducer(),
+        isOptimized(), getFlags(), getRuntimeVersion(), getSplitDebugFilename(),
+        getEmissionKind(), getEnumTypes(), getRetainedTypes(),
+        getGlobalVariables(), getImportedEntities(), getMacros(), DWOId,
+        getSplitDebugInlining(), getDebugInfoForProfiling(), getNameTableKind(),
+        getRangesBaseAddress());
   }
 
 public:
@@ -1260,11 +1261,11 @@ public:
        DIGlobalVariableExpressionArray GlobalVariables,
        DIImportedEntityArray ImportedEntities, DIMacroNodeArray Macros,
        uint64_t DWOId, bool SplitDebugInlining, bool DebugInfoForProfiling,
-       DebugNameTableKind NameTableKind),
+       DebugNameTableKind NameTableKind, bool RangesBaseAddress),
       (SourceLanguage, File, Producer, IsOptimized, Flags, RuntimeVersion,
        SplitDebugFilename, EmissionKind, EnumTypes, RetainedTypes,
        GlobalVariables, ImportedEntities, Macros, DWOId, SplitDebugInlining,
-       DebugInfoForProfiling, (unsigned)NameTableKind))
+       DebugInfoForProfiling, (unsigned)NameTableKind, RangesBaseAddress))
   DEFINE_MDNODE_GET_DISTINCT_TEMPORARY(
       DICompileUnit,
       (unsigned SourceLanguage, Metadata *File, MDString *Producer,
@@ -1273,11 +1274,11 @@ public:
        Metadata *RetainedTypes, Metadata *GlobalVariables,
        Metadata *ImportedEntities, Metadata *Macros, uint64_t DWOId,
        bool SplitDebugInlining, bool DebugInfoForProfiling,
-       unsigned NameTableKind),
+       unsigned NameTableKind, bool RangesBaseAddress),
       (SourceLanguage, File, Producer, IsOptimized, Flags, RuntimeVersion,
        SplitDebugFilename, EmissionKind, EnumTypes, RetainedTypes,
        GlobalVariables, ImportedEntities, Macros, DWOId, SplitDebugInlining,
-       DebugInfoForProfiling, NameTableKind))
+       DebugInfoForProfiling, NameTableKind, RangesBaseAddress))
 
   TempDICompileUnit clone() const { return cloneImpl(); }
 
@@ -1294,9 +1295,14 @@ public:
   DebugNameTableKind getNameTableKind() const {
     return (DebugNameTableKind)NameTableKind;
   }
-  StringRef getProducer() const { return getStringOperand(1); }
-  StringRef getFlags() const { return getStringOperand(2); }
-  StringRef getSplitDebugFilename() const { return getStringOperand(3); }
+  bool getRangesBaseAddress() const {
+    return RangesBaseAddress; }
+  StringRef getProducer() const {
+    return getStringOperand(1); }
+  StringRef getFlags() const {
+    return getStringOperand(2); }
+  StringRef getSplitDebugFilename() const {
+    return getStringOperand(3); }
   DICompositeTypeArray getEnumTypes() const {
     return cast_or_null<MDTuple>(getRawEnumTypes());
   }
@@ -1423,6 +1429,9 @@ class DILocation : public MDNode {
 
   /// Reverse transformation as getPrefixEncodingFromUnsigned.
   static unsigned getUnsignedFromPrefixEncoding(unsigned U) {
+    if (U & 1)
+      return 0;
+    U >>= 1;
     return (U & 0x20) ? (((U >> 1) & 0xfe0) | (U & 0x1f)) : (U & 0x1f);
   }
 
@@ -1439,6 +1448,14 @@ class DILocation : public MDNode {
     // a DILocation containing temporary metadata.
     return getTemporary(getContext(), getLine(), getColumn(), getRawScope(),
                         getRawInlinedAt(), isImplicitCode());
+  }
+
+  static unsigned encodeComponent(unsigned C) {
+    return (C == 0) ? 1U : (getPrefixEncodingFromUnsigned(C) << 1);
+  }
+
+  static unsigned encodingBits(unsigned C) {
+    return (C == 0) ? 1 : (C > 0x1f ? 14 : 7);
   }
 
 public:
@@ -1511,20 +1528,32 @@ public:
   /// order. If the lowest bit is 1, the current component is empty, and the
   /// next component will start in the next bit. Otherwise, the current
   /// component is non-empty, and its content starts in the next bit. The
-  /// length of each components is either 5 bit or 12 bit: if the 7th bit
+  /// value of each components is either 5 bit or 12 bit: if the 7th bit
   /// is 0, the bit 2~6 (5 bits) are used to represent the component; if the
   /// 7th bit is 1, the bit 2~6 (5 bits) and 8~14 (7 bits) are combined to
-  /// represent the component.
+  /// represent the component. Thus, the number of bits used for a component
+  /// is either 0 (if it and all the next components are empty); 1 - if it is
+  /// empty; 7 - if its value is up to and including 0x1f (lsb and msb are both
+  /// 0); or 14, if its value is up to and including 0x1ff. Note that the last
+  /// component is also capped at 0x1ff, even in the case when both first
+  /// components are 0, and we'd technically have 29 bits available.
+  ///
+  /// For precise control over the data being encoded in the discriminator,
+  /// use encodeDiscriminator/decodeDiscriminator.
 
   inline unsigned getDiscriminator() const;
 
   /// Returns a new DILocation with updated \p Discriminator.
   inline const DILocation *cloneWithDiscriminator(unsigned Discriminator) const;
 
-  /// Returns a new DILocation with updated base discriminator \p BD.
-  inline const DILocation *setBaseDiscriminator(unsigned BD) const;
+  /// Returns a new DILocation with updated base discriminator \p BD. Only the
+  /// base discriminator is set in the new DILocation, the other encoded values
+  /// are elided.
+  /// If the discriminator cannot be encoded, the function returns None.
+  inline Optional<const DILocation *> cloneWithBaseDiscriminator(unsigned BD) const;
 
-  /// Returns the duplication factor stored in the discriminator.
+  /// Returns the duplication factor stored in the discriminator, or 1 if no
+  /// duplication factor (or 0) is encoded.
   inline unsigned getDuplicationFactor() const;
 
   /// Returns the copy identifier stored in the discriminator.
@@ -1533,9 +1562,11 @@ public:
   /// Returns the base discriminator stored in the discriminator.
   inline unsigned getBaseDiscriminator() const;
 
-  /// Returns a new DILocation with duplication factor \p DF encoded in the
-  /// discriminator.
-  inline const DILocation *cloneWithDuplicationFactor(unsigned DF) const;
+  /// Returns a new DILocation with duplication factor \p DF * current
+  /// duplication factor encoded in the discriminator. The current duplication
+  /// factor is as defined by getDuplicationFactor().
+  /// Returns None if encoding failed.
+  inline Optional<const DILocation *> cloneByMultiplyingDuplicationFactor(unsigned DF) const;
 
   /// When two instructions are combined into a single instruction we also
   /// need to combine the original locations into a single location.
@@ -1556,19 +1587,32 @@ public:
 
   /// Returns the base discriminator for a given encoded discriminator \p D.
   static unsigned getBaseDiscriminatorFromDiscriminator(unsigned D) {
-    if ((D & 1) == 0)
-      return getUnsignedFromPrefixEncoding(D >> 1);
-    else
-      return 0;
+    return getUnsignedFromPrefixEncoding(D);
   }
 
-  /// Returns the duplication factor for a given encoded discriminator \p D.
+  /// Raw encoding of the discriminator. APIs such as cloneWithDuplicationFactor
+  /// have certain special case behavior (e.g. treating empty duplication factor
+  /// as the value '1').
+  /// This API, in conjunction with cloneWithDiscriminator, may be used to encode
+  /// the raw values provided. \p BD: base discriminator \p DF: duplication factor
+  /// \p CI: copy index
+  /// The return is None if the values cannot be encoded in 32 bits - for
+  /// example, values for BD or DF larger than 12 bits. Otherwise, the return
+  /// is the encoded value.
+  static Optional<unsigned> encodeDiscriminator(unsigned BD, unsigned DF, unsigned CI);
+
+  /// Raw decoder for values in an encoded discriminator D.
+  static void decodeDiscriminator(unsigned D, unsigned &BD, unsigned &DF,
+                                  unsigned &CI);
+
+  /// Returns the duplication factor for a given encoded discriminator \p D, or
+  /// 1 if no value or 0 is encoded.
   static unsigned getDuplicationFactorFromDiscriminator(unsigned D) {
     D = getNextComponentInDiscriminator(D);
-    if (D == 0 || (D & 1))
+    unsigned Ret = getUnsignedFromPrefixEncoding(D);
+    if (Ret == 0)
       return 1;
-    else
-      return getUnsignedFromPrefixEncoding(D >> 1);
+    return Ret;
   }
 
   /// Returns the copy identifier for a given encoded discriminator \p D.
@@ -1607,102 +1651,118 @@ class DISubprogram : public DILocalScope {
   /// negative.
   int ThisAdjustment;
 
-  // Virtuality can only assume three values, so we can pack
-  // in 2 bits (none/pure/pure_virtual).
-  unsigned Virtuality : 2;
+public:
+  /// Debug info subprogram flags.
+  enum DISPFlags : uint32_t {
+#define HANDLE_DISP_FLAG(ID, NAME) SPFlag##NAME = ID,
+#define DISP_FLAG_LARGEST_NEEDED
+#include "llvm/IR/DebugInfoFlags.def"
+    SPFlagNonvirtual = SPFlagZero,
+    SPFlagVirtuality = SPFlagVirtual | SPFlagPureVirtual,
+    LLVM_MARK_AS_BITMASK_ENUM(SPFlagLargest)
+  };
 
-  // These are boolean flags so one bit is enough.
-  // MSVC starts a new container field every time the base
-  // type changes so we can't use 'bool' to ensure these bits
-  // are packed.
-  unsigned IsLocalToUnit : 1;
-  unsigned IsDefinition : 1;
-  unsigned IsOptimized : 1;
+  static DISPFlags getFlag(StringRef Flag);
+  static StringRef getFlagString(DISPFlags Flag);
 
-  unsigned Padding : 3;
+  /// Split up a flags bitfield for easier printing.
+  ///
+  /// Split \c Flags into \c SplitFlags, a vector of its components.  Returns
+  /// any remaining (unrecognized) bits.
+  static DISPFlags splitFlags(DISPFlags Flags,
+                              SmallVectorImpl<DISPFlags> &SplitFlags);
 
+  // Helper for converting old bitfields to new flags word.
+  static DISPFlags toSPFlags(bool IsLocalToUnit, bool IsDefinition,
+                             bool IsOptimized,
+                             unsigned Virtuality = SPFlagNonvirtual) {
+    // We're assuming virtuality is the low-order field.
+    static_assert(
+        int(SPFlagVirtual) == int(dwarf::DW_VIRTUALITY_virtual) &&
+            int(SPFlagPureVirtual) == int(dwarf::DW_VIRTUALITY_pure_virtual),
+        "Virtuality constant mismatch");
+    return static_cast<DISPFlags>(
+        (Virtuality & SPFlagVirtuality) |
+        (IsLocalToUnit ? SPFlagLocalToUnit : SPFlagZero) |
+        (IsDefinition ? SPFlagDefinition : SPFlagZero) |
+        (IsOptimized ? SPFlagOptimized : SPFlagZero));
+  }
+
+private:
   DIFlags Flags;
+  DISPFlags SPFlags;
 
   DISubprogram(LLVMContext &C, StorageType Storage, unsigned Line,
-               unsigned ScopeLine, unsigned Virtuality, unsigned VirtualIndex,
-               int ThisAdjustment, DIFlags Flags, bool IsLocalToUnit,
-               bool IsDefinition, bool IsOptimized, ArrayRef<Metadata *> Ops)
+               unsigned ScopeLine, unsigned VirtualIndex, int ThisAdjustment,
+               DIFlags Flags, DISPFlags SPFlags, ArrayRef<Metadata *> Ops)
       : DILocalScope(C, DISubprogramKind, Storage, dwarf::DW_TAG_subprogram,
                      Ops),
         Line(Line), ScopeLine(ScopeLine), VirtualIndex(VirtualIndex),
-        ThisAdjustment(ThisAdjustment), Virtuality(Virtuality),
-        IsLocalToUnit(IsLocalToUnit), IsDefinition(IsDefinition),
-        IsOptimized(IsOptimized), Flags(Flags) {
+        ThisAdjustment(ThisAdjustment), Flags(Flags), SPFlags(SPFlags) {
     static_assert(dwarf::DW_VIRTUALITY_max < 4, "Virtuality out of range");
-    assert(Virtuality < 4 && "Virtuality out of range");
   }
   ~DISubprogram() = default;
 
   static DISubprogram *
   getImpl(LLVMContext &Context, DIScopeRef Scope, StringRef Name,
           StringRef LinkageName, DIFile *File, unsigned Line,
-          DISubroutineType *Type, bool IsLocalToUnit, bool IsDefinition,
-          unsigned ScopeLine, DITypeRef ContainingType, unsigned Virtuality,
+          DISubroutineType *Type, unsigned ScopeLine, DITypeRef ContainingType,
           unsigned VirtualIndex, int ThisAdjustment, DIFlags Flags,
-          bool IsOptimized, DICompileUnit *Unit,
+          DISPFlags SPFlags, DICompileUnit *Unit,
           DITemplateParameterArray TemplateParams, DISubprogram *Declaration,
           DINodeArray RetainedNodes, DITypeArray ThrownTypes,
           StorageType Storage, bool ShouldCreate = true) {
     return getImpl(Context, Scope, getCanonicalMDString(Context, Name),
                    getCanonicalMDString(Context, LinkageName), File, Line, Type,
-                   IsLocalToUnit, IsDefinition, ScopeLine, ContainingType,
-                   Virtuality, VirtualIndex, ThisAdjustment, Flags, IsOptimized,
-                   Unit, TemplateParams.get(), Declaration, RetainedNodes.get(),
-                   ThrownTypes.get(), Storage, ShouldCreate);
+                   ScopeLine, ContainingType, VirtualIndex, ThisAdjustment,
+                   Flags, SPFlags, Unit, TemplateParams.get(), Declaration,
+                   RetainedNodes.get(), ThrownTypes.get(), Storage,
+                   ShouldCreate);
   }
-  static DISubprogram *
-  getImpl(LLVMContext &Context, Metadata *Scope, MDString *Name,
-          MDString *LinkageName, Metadata *File, unsigned Line, Metadata *Type,
-          bool IsLocalToUnit, bool IsDefinition, unsigned ScopeLine,
-          Metadata *ContainingType, unsigned Virtuality, unsigned VirtualIndex,
-          int ThisAdjustment, DIFlags Flags, bool IsOptimized, Metadata *Unit,
-          Metadata *TemplateParams, Metadata *Declaration, Metadata *RetainedNodes,
-          Metadata *ThrownTypes, StorageType Storage, bool ShouldCreate = true);
+  static DISubprogram *getImpl(LLVMContext &Context, Metadata *Scope,
+                               MDString *Name, MDString *LinkageName,
+                               Metadata *File, unsigned Line, Metadata *Type,
+                               unsigned ScopeLine, Metadata *ContainingType,
+                               unsigned VirtualIndex, int ThisAdjustment,
+                               DIFlags Flags, DISPFlags SPFlags, Metadata *Unit,
+                               Metadata *TemplateParams, Metadata *Declaration,
+                               Metadata *RetainedNodes, Metadata *ThrownTypes,
+                               StorageType Storage, bool ShouldCreate = true);
 
   TempDISubprogram cloneImpl() const {
     return getTemporary(getContext(), getScope(), getName(), getLinkageName(),
-                        getFile(), getLine(), getType(), isLocalToUnit(),
-                        isDefinition(), getScopeLine(), getContainingType(),
-                        getVirtuality(), getVirtualIndex(), getThisAdjustment(),
-                        getFlags(), isOptimized(), getUnit(),
-                        getTemplateParams(), getDeclaration(), getRetainedNodes(),
-                        getThrownTypes());
+                        getFile(), getLine(), getType(), getScopeLine(),
+                        getContainingType(), getVirtualIndex(),
+                        getThisAdjustment(), getFlags(), getSPFlags(),
+                        getUnit(), getTemplateParams(), getDeclaration(),
+                        getRetainedNodes(), getThrownTypes());
   }
 
 public:
-  DEFINE_MDNODE_GET(DISubprogram,
-                    (DIScopeRef Scope, StringRef Name, StringRef LinkageName,
-                     DIFile *File, unsigned Line, DISubroutineType *Type,
-                     bool IsLocalToUnit, bool IsDefinition, unsigned ScopeLine,
-                     DITypeRef ContainingType, unsigned Virtuality,
-                     unsigned VirtualIndex, int ThisAdjustment, DIFlags Flags,
-                     bool IsOptimized, DICompileUnit *Unit,
-                     DITemplateParameterArray TemplateParams = nullptr,
-                     DISubprogram *Declaration = nullptr,
-                     DINodeArray RetainedNodes = nullptr,
-                     DITypeArray ThrownTypes = nullptr),
-                    (Scope, Name, LinkageName, File, Line, Type, IsLocalToUnit,
-                     IsDefinition, ScopeLine, ContainingType, Virtuality,
-                     VirtualIndex, ThisAdjustment, Flags, IsOptimized, Unit,
-                     TemplateParams, Declaration, RetainedNodes, ThrownTypes))
+  DEFINE_MDNODE_GET(
+      DISubprogram,
+      (DIScopeRef Scope, StringRef Name, StringRef LinkageName, DIFile *File,
+       unsigned Line, DISubroutineType *Type, unsigned ScopeLine,
+       DITypeRef ContainingType, unsigned VirtualIndex, int ThisAdjustment,
+       DIFlags Flags, DISPFlags SPFlags, DICompileUnit *Unit,
+       DITemplateParameterArray TemplateParams = nullptr,
+       DISubprogram *Declaration = nullptr, DINodeArray RetainedNodes = nullptr,
+       DITypeArray ThrownTypes = nullptr),
+      (Scope, Name, LinkageName, File, Line, Type, ScopeLine, ContainingType,
+       VirtualIndex, ThisAdjustment, Flags, SPFlags, Unit, TemplateParams,
+       Declaration, RetainedNodes, ThrownTypes))
+
   DEFINE_MDNODE_GET(
       DISubprogram,
       (Metadata * Scope, MDString *Name, MDString *LinkageName, Metadata *File,
-       unsigned Line, Metadata *Type, bool IsLocalToUnit, bool IsDefinition,
-       unsigned ScopeLine, Metadata *ContainingType, unsigned Virtuality,
-       unsigned VirtualIndex, int ThisAdjustment, DIFlags Flags,
-       bool IsOptimized, Metadata *Unit, Metadata *TemplateParams = nullptr,
-       Metadata *Declaration = nullptr, Metadata *RetainedNodes = nullptr,
-       Metadata *ThrownTypes = nullptr),
-      (Scope, Name, LinkageName, File, Line, Type, IsLocalToUnit, IsDefinition,
-       ScopeLine, ContainingType, Virtuality, VirtualIndex, ThisAdjustment,
-       Flags, IsOptimized, Unit, TemplateParams, Declaration, RetainedNodes,
-       ThrownTypes))
+       unsigned Line, Metadata *Type, unsigned ScopeLine,
+       Metadata *ContainingType, unsigned VirtualIndex, int ThisAdjustment,
+       DIFlags Flags, DISPFlags SPFlags, Metadata *Unit,
+       Metadata *TemplateParams = nullptr, Metadata *Declaration = nullptr,
+       Metadata *RetainedNodes = nullptr, Metadata *ThrownTypes = nullptr),
+      (Scope, Name, LinkageName, File, Line, Type, ScopeLine, ContainingType,
+       VirtualIndex, ThisAdjustment, Flags, SPFlags, Unit, TemplateParams,
+       Declaration, RetainedNodes, ThrownTypes))
 
   TempDISubprogram clone() const { return cloneImpl(); }
 
@@ -1715,14 +1775,15 @@ public:
 
 public:
   unsigned getLine() const { return Line; }
-  unsigned getVirtuality() const { return Virtuality; }
+  unsigned getVirtuality() const { return getSPFlags() & SPFlagVirtuality; }
   unsigned getVirtualIndex() const { return VirtualIndex; }
   int getThisAdjustment() const { return ThisAdjustment; }
   unsigned getScopeLine() const { return ScopeLine; }
   DIFlags getFlags() const { return Flags; }
-  bool isLocalToUnit() const { return IsLocalToUnit; }
-  bool isDefinition() const { return IsDefinition; }
-  bool isOptimized() const { return IsOptimized; }
+  DISPFlags getSPFlags() const { return SPFlags; }
+  bool isLocalToUnit() const { return getSPFlags() & SPFlagLocalToUnit; }
+  bool isDefinition() const { return getSPFlags() & SPFlagDefinition; }
+  bool isOptimized() const { return getSPFlags() & SPFlagOptimized; }
 
   bool isArtificial() const { return getFlags() & FlagArtificial; }
   bool isPrivate() const {
@@ -1975,28 +2036,26 @@ unsigned DILocation::getCopyIdentifier() const {
   return getCopyIdentifierFromDiscriminator(getDiscriminator());
 }
 
-const DILocation *DILocation::setBaseDiscriminator(unsigned D) const {
-  if (D == 0)
+Optional<const DILocation *> DILocation::cloneWithBaseDiscriminator(unsigned D) const {
+  unsigned BD, DF, CI;
+  decodeDiscriminator(getDiscriminator(), BD, DF, CI);
+  if (D == BD)
     return this;
-  else
-    return cloneWithDiscriminator(getPrefixEncodingFromUnsigned(D) << 1);
+  if (Optional<unsigned> Encoded = encodeDiscriminator(D, DF, CI))
+    return cloneWithDiscriminator(*Encoded);
+  return None;
 }
 
-const DILocation *DILocation::cloneWithDuplicationFactor(unsigned DF) const {
+Optional<const DILocation *> DILocation::cloneByMultiplyingDuplicationFactor(unsigned DF) const {
   DF *= getDuplicationFactor();
   if (DF <= 1)
     return this;
 
   unsigned BD = getBaseDiscriminator();
-  unsigned CI = getCopyIdentifier() << (DF > 0x1f ? 14 : 7);
-  unsigned D = CI | (getPrefixEncodingFromUnsigned(DF) << 1);
-
-  if (BD == 0)
-    D = (D << 1) | 1;
-  else
-    D = (D << (BD > 0x1f ? 14 : 7)) | (getPrefixEncodingFromUnsigned(BD) << 1);
-
-  return cloneWithDiscriminator(D);
+  unsigned CI = getCopyIdentifier();
+  if (Optional<unsigned> D = encodeDiscriminator(BD, DF, CI))
+    return cloneWithDiscriminator(*D);
+  return None;
 }
 
 class DINamespace : public DIScope {

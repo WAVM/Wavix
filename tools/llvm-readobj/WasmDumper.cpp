@@ -1,9 +1,8 @@
 //===-- WasmDumper.cpp - Wasm-specific object file dumper -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,20 +24,19 @@ namespace {
 static const EnumEntry<unsigned> WasmSymbolTypes[] = {
 #define ENUM_ENTRY(X)                                                          \
   { #X, wasm::WASM_SYMBOL_TYPE_##X }
-    ENUM_ENTRY(FUNCTION),
-    ENUM_ENTRY(DATA),
-    ENUM_ENTRY(GLOBAL),
-    ENUM_ENTRY(SECTION),
+    ENUM_ENTRY(FUNCTION), ENUM_ENTRY(DATA),  ENUM_ENTRY(GLOBAL),
+    ENUM_ENTRY(SECTION),  ENUM_ENTRY(EVENT),
 #undef ENUM_ENTRY
 };
 
 static const EnumEntry<uint32_t> WasmSectionTypes[] = {
 #define ENUM_ENTRY(X)                                                          \
   { #X, wasm::WASM_SEC_##X }
-    ENUM_ENTRY(CUSTOM),   ENUM_ENTRY(TYPE),   ENUM_ENTRY(IMPORT),
-    ENUM_ENTRY(FUNCTION), ENUM_ENTRY(TABLE),  ENUM_ENTRY(MEMORY),
-    ENUM_ENTRY(GLOBAL),   ENUM_ENTRY(EXPORT), ENUM_ENTRY(START),
-    ENUM_ENTRY(ELEM),     ENUM_ENTRY(CODE),   ENUM_ENTRY(DATA),
+    ENUM_ENTRY(CUSTOM),   ENUM_ENTRY(TYPE),  ENUM_ENTRY(IMPORT),
+    ENUM_ENTRY(FUNCTION), ENUM_ENTRY(TABLE), ENUM_ENTRY(MEMORY),
+    ENUM_ENTRY(GLOBAL),   ENUM_ENTRY(EVENT), ENUM_ENTRY(EXPORT),
+    ENUM_ENTRY(START),    ENUM_ENTRY(ELEM),  ENUM_ENTRY(CODE),
+    ENUM_ENTRY(DATA),
 #undef ENUM_ENTRY
 };
 
@@ -48,10 +46,8 @@ public:
       : ObjDumper(Writer), Obj(Obj) {}
 
   void printFileHeaders() override;
-  void printSections() override;
+  void printSectionHeaders() override;
   void printRelocations() override;
-  void printSymbols() override;
-  void printDynamicSymbols() override { llvm_unreachable("unimplemented"); }
   void printUnwindInfo() override { llvm_unreachable("unimplemented"); }
   void printStackMap() const override { llvm_unreachable("unimplemented"); }
 
@@ -60,6 +56,9 @@ protected:
   void printRelocation(const SectionRef &Section, const RelocationRef &Reloc);
 
 private:
+  void printSymbols() override;
+  void printDynamicSymbols() override { llvm_unreachable("unimplemented"); }
+
   const WasmObjectFile *Obj;
 };
 
@@ -148,7 +147,7 @@ void WasmDumper::printSymbols() {
     printSymbol(Symbol);
 }
 
-void WasmDumper::printSections() {
+void WasmDumper::printSectionHeaders() {
   ListScope Group(W, "Sections");
   for (const SectionRef &Section : Obj->sections()) {
     const WasmSection &WasmSec = Obj->getWasmSection(Section);

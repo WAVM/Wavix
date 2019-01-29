@@ -1,9 +1,8 @@
 //===- HexagonSubtarget.cpp - Hexagon Subtarget Information ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -98,6 +97,7 @@ HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
       {"hexagonv60", Hexagon::ArchEnum::V60},
       {"hexagonv62", Hexagon::ArchEnum::V62},
       {"hexagonv65", Hexagon::ArchEnum::V65},
+      {"hexagonv66", Hexagon::ArchEnum::V66},
   };
 
   auto FoundIt = CpuTable.find(CPUString);
@@ -275,11 +275,11 @@ void HexagonSubtarget::BankConflictMutation::apply(ScheduleDAGInstrs *DAG) {
     if (!L0.mayLoad() || L0.mayStore() ||
         HII.getAddrMode(L0) != HexagonII::BaseImmOffset)
       continue;
-    int Offset0;
+    int64_t Offset0;
     unsigned Size0;
-    unsigned Base0 = HII.getBaseAndOffset(L0, Offset0, Size0);
+    MachineOperand *BaseOp0 = HII.getBaseAndOffset(L0, Offset0, Size0);
     // Is the access size is longer than the L1 cache line, skip the check.
-    if (Base0 == 0 || Size0 >= 32)
+    if (BaseOp0 == nullptr || !BaseOp0->isReg() || Size0 >= 32)
       continue;
     // Scan only up to 32 instructions ahead (to avoid n^2 complexity).
     for (unsigned j = i+1, m = std::min(i+32, e); j != m; ++j) {
@@ -288,10 +288,11 @@ void HexagonSubtarget::BankConflictMutation::apply(ScheduleDAGInstrs *DAG) {
       if (!L1.mayLoad() || L1.mayStore() ||
           HII.getAddrMode(L1) != HexagonII::BaseImmOffset)
         continue;
-      int Offset1;
+      int64_t Offset1;
       unsigned Size1;
-      unsigned Base1 = HII.getBaseAndOffset(L1, Offset1, Size1);
-      if (Base1 == 0 || Size1 >= 32 || Base0 != Base1)
+      MachineOperand *BaseOp1 = HII.getBaseAndOffset(L1, Offset1, Size1);
+      if (BaseOp1 == nullptr || !BaseOp1->isReg() || Size1 >= 32 ||
+          BaseOp0->getReg() != BaseOp1->getReg())
         continue;
       // Check bits 3 and 4 of the offset: if they differ, a bank conflict
       // is unlikely.

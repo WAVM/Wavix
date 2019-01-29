@@ -33,7 +33,7 @@ Lexical Analysis
 ================
 
 TableGen supports BCPL (``// ...``) and nestable C-style (``/* ... */``)
-comments.
+comments.  TableGen also provides simple `Preprocessing Support`_.
 
 The following is a listing of the basic punctuation tokens::
 
@@ -102,6 +102,12 @@ wide variety of meanings:
                :!isa    !dag     !le      !lt        !ge
                :!gt     !ne
 
+TableGen also has !cond operator that needs a slightly different
+syntax compared to other "bang operators":
+
+.. productionlist::
+   CondOperator: !cond
+
 
 Syntax
 ======
@@ -140,7 +146,7 @@ considered to define the class if any of the following is true:
 #. The :token:`Body` in the :token:`ObjectBody` is present and is not empty.
 #. The :token:`BaseClassList` in the :token:`ObjectBody` is present.
 
-You can declare an empty class by giving and empty :token:`TemplateArgList`
+You can declare an empty class by giving an empty :token:`TemplateArgList`
 and an empty :token:`ObjectBody`. This can serve as a restricted form of
 forward declaration: note that records deriving from the forward-declared
 class will inherit no fields from it since the record expansion is done
@@ -315,6 +321,8 @@ The initial :token:`DagArg` is called the "operator" of the dag.
 
 .. productionlist::
    SimpleValue: `BangOperator` ["<" `Type` ">"] "(" `ValueListNE` ")"
+              :| `CondOperator` "(" `CondVal` ("," `CondVal`)* ")"
+   CondVal: `Value` ":" `Value`
 
 Bodies
 ------
@@ -448,3 +456,50 @@ applied at the end of parsing the base classes of a record.
    BaseMultiClassList: `MultiClassID` ("," `MultiClassID`)*
    MultiClassID: `TokIdentifier`
    MultiClassObject: `Def` | `Defm` | `Let` | `Foreach`
+
+Preprocessing Support
+=====================
+
+TableGen's embedded preprocessor is only intended for conditional compilation.
+It supports the following directives:
+
+.. productionlist::
+   LineBegin: ^
+   LineEnd: "\n" | "\r" | EOF
+   WhiteSpace: " " | "\t"
+   CStyleComment: "/*" (.* - "*/") "*/"
+   BCPLComment: "//" (.* - `LineEnd`) `LineEnd`
+   WhiteSpaceOrCStyleComment: `WhiteSpace` | `CStyleComment`
+   WhiteSpaceOrAnyComment: `WhiteSpace` | `CStyleComment` | `BCPLComment`
+   MacroName: `ualpha` (`ualpha` | "0"..."9")*
+   PrepDefine: `LineBegin` (`WhiteSpaceOrCStyleComment`)*
+             : "#define" (`WhiteSpace`)+ `MacroName`
+             : (`WhiteSpaceOrAnyComment`)* `LineEnd`
+   PrepIfdef: `LineBegin` (`WhiteSpaceOrCStyleComment`)*
+            : "#ifdef" (`WhiteSpace`)+ `MacroName`
+            : (`WhiteSpaceOrAnyComment`)* `LineEnd`
+   PrepElse: `LineBegin` (`WhiteSpaceOrCStyleComment`)*
+           : "#else" (`WhiteSpaceOrAnyComment`)* `LineEnd`
+   PrepEndif: `LineBegin` (`WhiteSpaceOrCStyleComment`)*
+            : "#endif" (`WhiteSpaceOrAnyComment`)* `LineEnd`
+   PrepRegContentException: `PredIfdef` | `PredElse` | `PredEndif` | EOF
+   PrepRegion: .* - `PrepRegContentException`
+             :| `PrepIfDef`
+             :  (`PrepRegion`)*
+             :  [`PrepElse`]
+             :  (`PrepRegion`)*
+             :  `PrepEndif`
+
+:token:`PrepRegion` may occur anywhere in a TD file, as long as it matches
+the grammar specification.
+
+:token:`PrepDefine` allows defining a :token:`MacroName` so that any following
+:token:`PrepIfdef` - :token:`PrepElse` preprocessing region part and
+:token:`PrepIfdef` - :token:`PrepEndif` preprocessing region
+are enabled for TableGen tokens parsing.
+
+A preprocessing region, starting (i.e. having its :token:`PrepIfdef`) in a file,
+must end (i.e. have its :token:`PrepEndif`) in the same file.
+
+A :token:`MacroName` may be defined externally by using ``{ -D<NAME> }``
+option of TableGen.

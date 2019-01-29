@@ -1,9 +1,8 @@
 //===-- MCInstrDescView.cpp -------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -95,10 +94,10 @@ const llvm::MCOperandInfo &Operand::getExplicitOperandInfo() const {
   return *Info;
 }
 
-Instruction::Instruction(const LLVMState &State, unsigned Opcode)
-    : Description(&State.getInstrInfo().get(Opcode)),
-      Name(State.getInstrInfo().getName(Opcode)) {
-  const auto &RATC = State.getRATC();
+Instruction::Instruction(const llvm::MCInstrInfo &InstrInfo,
+                         const RegisterAliasingTrackerCache &RATC,
+                         unsigned Opcode)
+    : Description(&InstrInfo.get(Opcode)), Name(InstrInfo.getName(Opcode)) {
   unsigned OpIndex = 0;
   for (; OpIndex < Description->getNumOperands(); ++OpIndex) {
     const auto &OpInfo = Description->opInfo_begin()[OpIndex];
@@ -260,6 +259,17 @@ void Instruction::dump(const llvm::MCRegisterInfo &RegInfo,
     Stream << "- hasTiedRegisters (execution is always serial)\n";
   if (hasAliasingRegisters())
     Stream << "- hasAliasingRegisters\n";
+}
+
+InstructionsCache::InstructionsCache(const llvm::MCInstrInfo &InstrInfo,
+                                     const RegisterAliasingTrackerCache &RATC)
+    : InstrInfo(InstrInfo), RATC(RATC) {}
+
+const Instruction &InstructionsCache::getInstr(unsigned Opcode) const {
+  auto &Found = Instructions[Opcode];
+  if (!Found)
+    Found.reset(new Instruction(InstrInfo, RATC, Opcode));
+  return *Found;
 }
 
 bool RegisterOperandAssignment::

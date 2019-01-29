@@ -1,9 +1,8 @@
 //===- Win32/Process.cpp - Win32 Process Implementation ------- -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -459,4 +458,28 @@ unsigned Process::GetRandomNumber() {
                         reinterpret_cast<BYTE *>(&Ret)))
     ReportLastErrorFatal("Could not generate a random number");
   return Ret;
+}
+
+typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+#define STATUS_SUCCESS ((NTSTATUS)0x00000000L)
+
+llvm::VersionTuple llvm::GetWindowsOSVersion() {
+  HMODULE hMod = ::GetModuleHandleW(L"ntdll.dll");
+  if (hMod) {
+    auto getVer = (RtlGetVersionPtr)::GetProcAddress(hMod, "RtlGetVersion");
+    if (getVer) {
+      RTL_OSVERSIONINFOEXW info{};
+      info.dwOSVersionInfoSize = sizeof(info);
+      if (getVer((PRTL_OSVERSIONINFOW)&info) == STATUS_SUCCESS) {
+        return llvm::VersionTuple(info.dwMajorVersion, info.dwMinorVersion, 0,
+                                  info.dwBuildNumber);
+      }
+    }
+  }
+  return llvm::VersionTuple(0, 0, 0, 0);
+}
+
+bool llvm::RunningWindows8OrGreater() {
+  // Windows 8 is version 6.2, service pack 0.
+  return GetWindowsOSVersion() >= llvm::VersionTuple(6, 2, 0, 0);
 }

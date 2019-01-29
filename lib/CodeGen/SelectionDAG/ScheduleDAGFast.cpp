@@ -1,9 +1,8 @@
 //===----- ScheduleDAGFast.cpp - Fast poor list scheduler -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -776,11 +775,9 @@ ScheduleDAGLinearize::EmitSchedule(MachineBasicBlock::iterator &InsertPos) {
     if (N->getHasDebugValue()) {
       MachineBasicBlock::iterator InsertPos = Emitter.getInsertPos();
       for (auto DV : DAG->GetDbgValues(N)) {
-        if (DV->isInvalidated())
-          continue;
-        if (auto *DbgMI = Emitter.EmitDbgValue(DV, VRBaseMap))
-          BB->insert(InsertPos, DbgMI);
-        DV->setIsInvalidated();
+        if (!DV->isEmitted())
+          if (auto *DbgMI = Emitter.EmitDbgValue(DV, VRBaseMap))
+            BB->insert(InsertPos, DbgMI);
       }
     }
   }

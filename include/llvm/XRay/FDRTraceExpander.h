@@ -1,9 +1,8 @@
 //===- FDRTraceExpander.h - XRay FDR Mode Log Expander --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -27,10 +26,10 @@ class TraceExpander : public RecordVisitor {
   int32_t PID = 0;
   int32_t TID = 0;
   uint64_t BaseTSC = 0;
-  XRayRecord CurrentRecord{0, 0, RecordTypes::ENTER, 0, 0, 0, 0, {}};
+  XRayRecord CurrentRecord{0, 0, RecordTypes::ENTER, 0, 0, 0, 0, {}, {}};
   uint16_t CPUId = 0;
   uint16_t LogVersion = 0;
-  bool BuildingFunction = false;
+  bool BuildingRecord = false;
   bool IgnoringRecords = false;
 
   void resetCurrentRecord();
@@ -49,6 +48,8 @@ public:
   Error visit(NewBufferRecord &) override;
   Error visit(EndBufferRecord &) override;
   Error visit(FunctionRecord &) override;
+  Error visit(CustomEventRecordV5 &) override;
+  Error visit(TypedEventRecord &) override;
 
   // Must be called after all the records have been processed, to handle the
   // most recent record generated.

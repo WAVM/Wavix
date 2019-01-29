@@ -1,9 +1,8 @@
 //===-- Target.cpp ----------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 #include "../Target.h"
@@ -13,22 +12,6 @@
 
 namespace llvm {
 namespace exegesis {
-
-namespace {
-
-class AArch64LatencyBenchmarkRunner : public LatencyBenchmarkRunner {
-public:
-  AArch64LatencyBenchmarkRunner(const LLVMState &State)
-      : LatencyBenchmarkRunner(State) {}
-
-private:
-  const char *getCounterName() const override {
-    // All AArch64 subtargets have CPU_CYCLES as the cycle counter name
-    return "CPU_CYCLES";
-  }
-};
-
-namespace {
 
 static unsigned getLoadImmediateOpcode(unsigned RegBitWidth) {
   switch (RegBitWidth) {
@@ -50,9 +33,15 @@ static llvm::MCInst loadImmediate(unsigned Reg, unsigned RegBitWidth,
       .addImm(Value.getZExtValue());
 }
 
-} // namespace
+#include "AArch64GenExegesis.inc"
+
+namespace {
 
 class ExegesisAArch64Target : public ExegesisTarget {
+public:
+  ExegesisAArch64Target() : ExegesisTarget(AArch64CpuPfmCounters) {}
+
+private:
   std::vector<llvm::MCInst> setRegTo(const llvm::MCSubtargetInfo &STI,
                                      unsigned Reg,
                                      const llvm::APInt &Value) const override {
@@ -71,11 +60,6 @@ class ExegesisAArch64Target : public ExegesisTarget {
   void addTargetSpecificPasses(llvm::PassManagerBase &PM) const override {
     // Function return is a pseudo-instruction that needs to be expanded
     PM.add(llvm::createAArch64ExpandPseudoPass());
-  }
-
-  std::unique_ptr<BenchmarkRunner>
-  createLatencyBenchmarkRunner(const LLVMState &State) const override {
-    return llvm::make_unique<AArch64LatencyBenchmarkRunner>(State);
   }
 };
 

@@ -1,9 +1,8 @@
 //===-- ARMInstrThumb2.td - Thumb2 support for ARM ---------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1775,7 +1774,7 @@ multiclass thumb2_ld_mult<string asm, InstrItinClass itin,
 
 let hasSideEffects = 0 in {
 
-let mayLoad = 1, hasExtraDefRegAllocReq = 1 in
+let mayLoad = 1, hasExtraDefRegAllocReq = 1, variadicOpsAreDefs = 1 in
 defm t2LDM : thumb2_ld_mult<"ldm", IIC_iLoad_m, IIC_iLoad_mu, 1>;
 
 multiclass thumb2_st_mult<string asm, InstrItinClass itin,
@@ -2093,6 +2092,12 @@ defm t2SUB  : T2I_bin_ii12rs<0b101, "sub", sub>;
 // node's second value. We can then eliminate the implicit def of CPSR.
 defm t2ADDS : T2I_bin_s_irs <IIC_iALUi, IIC_iALUr, IIC_iALUsi, ARMaddc, 1>;
 defm t2SUBS : T2I_bin_s_irs <IIC_iALUi, IIC_iALUr, IIC_iALUsi, ARMsubc>;
+
+def : T2Pat<(ARMsubs GPRnopc:$Rn, t2_so_imm:$imm),
+            (t2SUBSri $Rn, t2_so_imm:$imm)>;
+def : T2Pat<(ARMsubs GPRnopc:$Rn, rGPR:$Rm), (t2SUBSrr $Rn, $Rm)>;
+def : T2Pat<(ARMsubs GPRnopc:$Rn, t2_so_reg:$ShiftedRm),
+            (t2SUBSrs $Rn, t2_so_reg:$ShiftedRm)>;
 
 let hasPostISelHook = 1 in {
 defm t2ADC  : T2I_adde_sube_irs<0b1010, "adc", ARMadde, 1>;
@@ -2726,28 +2731,25 @@ class T2ThreeRegSMUL<bits<3> op22_20, bits<2> op5_4, string opc,
 }
 
 def t2SMULBB : T2ThreeRegSMUL<0b001, 0b00, "smulbb",
-             [(set rGPR:$Rd, (mul (sext_inreg rGPR:$Rn, i16),
-                                   (sext_inreg rGPR:$Rm, i16)))]>;
+             [(set rGPR:$Rd, (bb_mul rGPR:$Rn, rGPR:$Rm))]>;
 def t2SMULBT : T2ThreeRegSMUL<0b001, 0b01, "smulbt",
-             [(set rGPR:$Rd, (mul (sext_inreg rGPR:$Rn, i16),
-                                   (sra rGPR:$Rm, (i32 16))))]>;
+             [(set rGPR:$Rd, (bt_mul rGPR:$Rn, rGPR:$Rm))]>;
 def t2SMULTB : T2ThreeRegSMUL<0b001, 0b10, "smultb",
-             [(set rGPR:$Rd, (mul (sra rGPR:$Rn, (i32 16)),
-                                   (sext_inreg rGPR:$Rm, i16)))]>;
+             [(set rGPR:$Rd, (tb_mul rGPR:$Rn, rGPR:$Rm))]>;
 def t2SMULTT : T2ThreeRegSMUL<0b001, 0b11, "smultt",
-             [(set rGPR:$Rd, (mul (sra rGPR:$Rn, (i32 16)),
-                                   (sra rGPR:$Rm, (i32 16))))]>;
+             [(set rGPR:$Rd, (tt_mul rGPR:$Rn, rGPR:$Rm))]>;
 def t2SMULWB : T2ThreeRegSMUL<0b011, 0b00, "smulwb",
              [(set rGPR:$Rd, (ARMsmulwb rGPR:$Rn, rGPR:$Rm))]>;
 def t2SMULWT : T2ThreeRegSMUL<0b011, 0b01, "smulwt",
              [(set rGPR:$Rd, (ARMsmulwt rGPR:$Rn, rGPR:$Rm))]>;
 
-def : Thumb2DSPPat<(mul sext_16_node:$Rm, sext_16_node:$Rn),
-                   (t2SMULBB rGPR:$Rm, rGPR:$Rn)>;
-def : Thumb2DSPPat<(mul sext_16_node:$Rn, (sra rGPR:$Rm, (i32 16))),
+def : Thumb2DSPPat<(mul sext_16_node:$Rn, (sext_bottom_16 rGPR:$Rm)),
+                   (t2SMULBB rGPR:$Rn, rGPR:$Rm)>;
+def : Thumb2DSPPat<(mul sext_16_node:$Rn, (sext_top_16 rGPR:$Rm)),
                    (t2SMULBT rGPR:$Rn, rGPR:$Rm)>;
-def : Thumb2DSPPat<(mul (sra rGPR:$Rn, (i32 16)), sext_16_node:$Rm),
+def : Thumb2DSPPat<(mul (sext_top_16 rGPR:$Rn), sext_16_node:$Rm),
                    (t2SMULTB rGPR:$Rn, rGPR:$Rm)>;
+
 def : Thumb2DSPPat<(int_arm_smulbb rGPR:$Rn, rGPR:$Rm),
                    (t2SMULBB rGPR:$Rn, rGPR:$Rm)>;
 def : Thumb2DSPPat<(int_arm_smulbt rGPR:$Rn, rGPR:$Rm),
@@ -2775,18 +2777,13 @@ class T2FourRegSMLA<bits<3> op22_20, bits<2> op5_4, string opc,
 }
 
 def t2SMLABB : T2FourRegSMLA<0b001, 0b00, "smlabb",
-             [(set rGPR:$Rd, (add rGPR:$Ra,
-                               (mul (sext_inreg rGPR:$Rn, i16),
-                                     (sext_inreg rGPR:$Rm, i16))))]>;
+             [(set rGPR:$Rd, (add rGPR:$Ra, (bb_mul rGPR:$Rn, rGPR:$Rm)))]>;
 def t2SMLABT : T2FourRegSMLA<0b001, 0b01, "smlabt",
-             [(set rGPR:$Rd, (add rGPR:$Ra, (mul (sext_inreg rGPR:$Rn, i16),
-                                                 (sra rGPR:$Rm, (i32 16)))))]>;
+             [(set rGPR:$Rd, (add rGPR:$Ra, (bt_mul rGPR:$Rn, rGPR:$Rm)))]>;
 def t2SMLATB : T2FourRegSMLA<0b001, 0b10, "smlatb",
-             [(set rGPR:$Rd, (add rGPR:$Ra, (mul (sra rGPR:$Rn, (i32 16)),
-                                                (sext_inreg rGPR:$Rm, i16))))]>;
+             [(set rGPR:$Rd, (add rGPR:$Ra, (tb_mul rGPR:$Rn, rGPR:$Rm)))]>;
 def t2SMLATT : T2FourRegSMLA<0b001, 0b11, "smlatt",
-             [(set rGPR:$Rd, (add rGPR:$Ra, (mul (sra rGPR:$Rn, (i32 16)),
-                                                 (sra rGPR:$Rm, (i32 16)))))]>;
+             [(set rGPR:$Rd, (add rGPR:$Ra, (tt_mul rGPR:$Rn, rGPR:$Rm)))]>;
 def t2SMLAWB : T2FourRegSMLA<0b011, 0b00, "smlawb",
              [(set rGPR:$Rd, (add rGPR:$Ra, (ARMsmulwb rGPR:$Rn, rGPR:$Rm)))]>;
 def t2SMLAWT : T2FourRegSMLA<0b011, 0b01, "smlawt",
@@ -2794,11 +2791,14 @@ def t2SMLAWT : T2FourRegSMLA<0b011, 0b01, "smlawt",
 
 def : Thumb2DSPMulPat<(add rGPR:$Ra, (mul sext_16_node:$Rn, sext_16_node:$Rm)),
                       (t2SMLABB rGPR:$Rn, rGPR:$Rm, rGPR:$Ra)>;
-def : Thumb2DSPMulPat<(add rGPR:$Ra,
-                        (mul sext_16_node:$Rn, (sra rGPR:$Rm, (i32 16)))),
+def : Thumb2DSPMulPat<(add rGPR:$Ra, (mul sext_16_node:$Rn, 
+                                          (sext_bottom_16 rGPR:$Rm))),
+                      (t2SMLABB rGPR:$Rn, rGPR:$Rm, rGPR:$Ra)>;
+def : Thumb2DSPMulPat<(add rGPR:$Ra, (mul sext_16_node:$Rn,
+                                          (sext_top_16 rGPR:$Rm))),
                       (t2SMLABT rGPR:$Rn, rGPR:$Rm, rGPR:$Ra)>;
-def : Thumb2DSPMulPat<(add rGPR:$Ra,
-                        (mul (sra rGPR:$Rn, (i32 16)), sext_16_node:$Rm)),
+def : Thumb2DSPMulPat<(add rGPR:$Ra, (mul (sext_top_16 rGPR:$Rn),
+                                          sext_16_node:$Rm)),
                       (t2SMLATB rGPR:$Rn, rGPR:$Rm, rGPR:$Ra)>;
 
 def : Thumb2DSPPat<(int_arm_smlabb GPR:$a, GPR:$b, GPR:$acc),
@@ -3233,7 +3233,7 @@ def t2TSB : T2I<(outs), (ins tsb_opt:$opt), NoItinerary,
 
 // Armv8.5-A speculation barrier
 def t2SB : Thumb2XI<(outs), (ins), AddrModeNone, 4, NoItinerary, "sb", "", []>,
-           Requires<[IsThumb2, HasSpecCtrl]>, Sched<[]> {
+           Requires<[IsThumb2, HasSB]>, Sched<[]> {
   let Inst{31-0} = 0xf3bf8f70;
   let Unpredictable = 0x000f2f0f;
   let hasSideEffects = 1;
@@ -4445,13 +4445,13 @@ def : T2Pat<(atomic_store_32 t2addrmode_negimm8:$addr, GPR:$val),
 def : T2Pat<(atomic_store_32 t2addrmode_so_reg:$addr, GPR:$val),
             (t2STRs     GPR:$val, t2addrmode_so_reg:$addr)>;
 
-let AddedComplexity = 8 in {
-  def : T2Pat<(atomic_load_acquire_8 addr_offset_none:$addr),  (t2LDAB addr_offset_none:$addr)>;
-  def : T2Pat<(atomic_load_acquire_16 addr_offset_none:$addr), (t2LDAH addr_offset_none:$addr)>;
-  def : T2Pat<(atomic_load_acquire_32 addr_offset_none:$addr), (t2LDA  addr_offset_none:$addr)>;
-  def : T2Pat<(atomic_store_release_8 addr_offset_none:$addr, GPR:$val),  (t2STLB GPR:$val, addr_offset_none:$addr)>;
-  def : T2Pat<(atomic_store_release_16 addr_offset_none:$addr, GPR:$val), (t2STLH GPR:$val, addr_offset_none:$addr)>;
-  def : T2Pat<(atomic_store_release_32 addr_offset_none:$addr, GPR:$val), (t2STL  GPR:$val, addr_offset_none:$addr)>;
+let AddedComplexity = 8, Predicates = [IsThumb, HasAcquireRelease, HasV7Clrex] in {
+  def : Pat<(atomic_load_acquire_8 addr_offset_none:$addr),  (t2LDAB addr_offset_none:$addr)>;
+  def : Pat<(atomic_load_acquire_16 addr_offset_none:$addr), (t2LDAH addr_offset_none:$addr)>;
+  def : Pat<(atomic_load_acquire_32 addr_offset_none:$addr), (t2LDA  addr_offset_none:$addr)>;
+  def : Pat<(atomic_store_release_8 addr_offset_none:$addr, GPR:$val),  (t2STLB GPR:$val, addr_offset_none:$addr)>;
+  def : Pat<(atomic_store_release_16 addr_offset_none:$addr, GPR:$val), (t2STLH GPR:$val, addr_offset_none:$addr)>;
+  def : Pat<(atomic_store_release_32 addr_offset_none:$addr, GPR:$val), (t2STL  GPR:$val, addr_offset_none:$addr)>;
 }
 
 

@@ -1,9 +1,8 @@
 //===- PowerPCInstrFormats.td - PowerPC Instruction Formats --*- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -2153,7 +2152,9 @@ class Z23Form_8<bits<6> opcode, bits<8> xo, dag OOL, dag IOL, string asmstr,
 }
 
 //===----------------------------------------------------------------------===//
-class Pseudo<dag OOL, dag IOL, string asmstr, list<dag> pattern>
+// EmitTimePseudo won't have encoding information for the [MC]CodeEmitter
+// stuff
+class PPCEmitTimePseudo<dag OOL, dag IOL, string asmstr, list<dag> pattern>
     : I<0, OOL, IOL, asmstr, NoItinerary> {
   let isCodeGenOnly = 1;
   let PPC64 = 0;
@@ -2162,6 +2163,21 @@ class Pseudo<dag OOL, dag IOL, string asmstr, list<dag> pattern>
   let hasNoSchedulingInfo = 1;
 }
 
+// Instruction that require custom insertion support
+// a.k.a. ISelPseudos, however, these won't have isPseudo set
+class PPCCustomInserterPseudo<dag OOL, dag IOL, string asmstr,
+                              list<dag> pattern>
+    : PPCEmitTimePseudo<OOL, IOL, asmstr, pattern> {
+  let usesCustomInserter = 1;
+}
+
+// PostRAPseudo will be expanded in expandPostRAPseudo, isPseudo flag in td
+// files is set only for PostRAPseudo
+class PPCPostRAExpPseudo<dag OOL, dag IOL, string asmstr, list<dag> pattern>
+    : PPCEmitTimePseudo<OOL, IOL, asmstr, pattern> {
+  let isPseudo = 1;
+}
+
 class PseudoXFormMemOp<dag OOL, dag IOL, string asmstr, list<dag> pattern>
-    : Pseudo<OOL, IOL, asmstr, pattern>, XFormMemOp;
+    : PPCPostRAExpPseudo<OOL, IOL, asmstr, pattern>, XFormMemOp;
 

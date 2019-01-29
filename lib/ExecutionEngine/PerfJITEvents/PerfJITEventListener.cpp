@@ -1,9 +1,8 @@
 //===-- PerfJITEventListener.cpp - Tell Linux's perf about JITted code ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -66,9 +65,9 @@ public:
       CloseMarker();
   }
 
-  void NotifyObjectEmitted(const ObjectFile &Obj,
-                           const RuntimeDyld::LoadedObjectInfo &L) override;
-  void NotifyFreeingObject(const ObjectFile &Obj) override;
+  void notifyObjectLoaded(ObjectKey K, const ObjectFile &Obj,
+                          const RuntimeDyld::LoadedObjectInfo &L) override;
+  void notifyFreeingObject(ObjectKey K) override;
 
 private:
   bool InitDebuggingDir();
@@ -227,8 +226,9 @@ PerfJITEventListener::PerfJITEventListener() : Pid(::getpid()) {
     SuccessfullyInitialized = true;
 }
 
-void PerfJITEventListener::NotifyObjectEmitted(
-    const ObjectFile &Obj, const RuntimeDyld::LoadedObjectInfo &L) {
+void PerfJITEventListener::notifyObjectLoaded(
+    ObjectKey K, const ObjectFile &Obj,
+    const RuntimeDyld::LoadedObjectInfo &L) {
 
   if (!SuccessfullyInitialized)
     return;
@@ -280,7 +280,7 @@ void PerfJITEventListener::NotifyObjectEmitted(
   Dumpstream->flush();
 }
 
-void PerfJITEventListener::NotifyFreeingObject(const ObjectFile &Obj) {
+void PerfJITEventListener::notifyFreeingObject(ObjectKey K) {
   // perf currently doesn't have an interface for unloading. But munmap()ing the
   // code section does, so that's ok.
 }

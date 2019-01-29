@@ -1,9 +1,8 @@
 //===- SIMemoryLegalizer.cpp ----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -812,6 +811,12 @@ bool SIGfx7CacheControl::insertCacheInvalidate(MachineBasicBlock::iterator &MI,
   MachineBasicBlock &MBB = *MI->getParent();
   DebugLoc DL = MI->getDebugLoc();
 
+  const GCNSubtarget &STM = MBB.getParent()->getSubtarget<GCNSubtarget>();
+
+  const unsigned Flush = STM.isAmdPalOS() || STM.isMesa3DOS()
+                             ? AMDGPU::BUFFER_WBINVL1
+                             : AMDGPU::BUFFER_WBINVL1_VOL;
+
   if (Pos == Position::AFTER)
     ++MI;
 
@@ -819,7 +824,7 @@ bool SIGfx7CacheControl::insertCacheInvalidate(MachineBasicBlock::iterator &MI,
     switch (Scope) {
     case SIAtomicScope::SYSTEM:
     case SIAtomicScope::AGENT:
-      BuildMI(MBB, MI, DL, TII->get(AMDGPU::BUFFER_WBINVL1_VOL));
+      BuildMI(MBB, MI, DL, TII->get(Flush));
       Changed = true;
       break;
     case SIAtomicScope::WORKGROUP:

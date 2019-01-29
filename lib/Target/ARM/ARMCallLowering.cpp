@@ -1,9 +1,8 @@
 //===- llvm/lib/Target/ARM/ARMCallLowering.cpp - Call lowering ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -429,7 +428,7 @@ bool ARMCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
   auto &TLI = *getTLI<ARMTargetLowering>();
   auto Subtarget = TLI.getSubtarget();
 
-  if (Subtarget->isThumb())
+  if (Subtarget->isThumb1Only())
     return false;
 
   // Quick exit if there aren't any args
@@ -500,6 +499,22 @@ struct CallReturnHandler : public IncomingValueHandler {
   MachineInstrBuilder MIB;
 };
 
+// FIXME: This should move to the ARMSubtarget when it supports all the opcodes.
+unsigned getCallOpcode(const ARMSubtarget &STI, bool isDirect) {
+  if (isDirect)
+    return STI.isThumb() ? ARM::tBL : ARM::BL;
+
+  if (STI.isThumb())
+    return ARM::tBLXr;
+
+  if (STI.hasV5TOps())
+    return ARM::BLX;
+
+  if (STI.hasV4TOps())
+    return ARM::BX_CALL;
+
+  return ARM::BMOVPCRX_CALL;
+}
 } // end anonymous namespace
 
 bool ARMCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
@@ -517,34 +532,42 @@ bool ARMCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   if (STI.genLongCalls())
     return false;
 
+  if (STI.isThumb1Only())
+    return false;
+
   auto CallSeqStart = MIRBuilder.buildInstr(ARM::ADJCALLSTACKDOWN);
 
   // Create the call instruction so we can add the implicit uses of arg
   // registers, but don't insert it yet.
-  bool isDirect = !Callee.isReg();
-  auto CallOpcode =
-      isDirect ? ARM::BL
-               : STI.hasV5TOps()
-                     ? ARM::BLX
-                     : STI.hasV4TOps() ? ARM::BX_CALL : ARM::BMOVPCRX_CALL;
-  auto MIB = MIRBuilder.buildInstrNoInsert(CallOpcode)
-                 .add(Callee)
-                 .addRegMask(TRI->getCallPreservedMask(MF, CallConv));
-  if (Callee.isReg()) {
+  bool IsDirect = !Callee.isReg();
+  auto CallOpcode = getCallOpcode(STI, IsDirect);
+  auto MIB = MIRBuilder.buildInstrNoInsert(CallOpcode);
+
+  bool IsThumb = STI.isThumb();
+  if (IsThumb)
+    MIB.add(predOps(ARMCC::AL));
+
+  MIB.add(Callee);
+  if (!IsDirect) {
     auto CalleeReg = Callee.getReg();
-    if (CalleeReg && !TRI->isPhysicalRegister(CalleeReg))
-      MIB->getOperand(0).setReg(constrainOperandRegClass(
+    if (CalleeReg && !TRI->isPhysicalRegister(CalleeReg)) {
+      unsigned CalleeIdx = IsThumb ? 2 : 0;
+      MIB->getOperand(CalleeIdx).setReg(constrainOperandRegClass(
           MF, *TRI, MRI, *STI.getInstrInfo(), *STI.getRegBankInfo(),
-          *MIB.getInstr(), MIB->getDesc(), Callee, 0));
+          *MIB.getInstr(), MIB->getDesc(), Callee, CalleeIdx));
+    }
   }
 
+  MIB.addRegMask(TRI->getCallPreservedMask(MF, CallConv));
+
+  bool IsVarArg = false;
   SmallVector<ArgInfo, 8> ArgInfos;
   for (auto Arg : OrigArgs) {
     if (!isSupportedType(DL, TLI, Arg.Ty))
       return false;
 
     if (!Arg.IsFixed)
-      return false;
+      IsVarArg = true;
 
     if (Arg.Flags.isByVal())
       return false;
@@ -558,7 +581,7 @@ bool ARMCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
       MIRBuilder.buildUnmerge(Regs, Arg.Reg);
   }
 
-  auto ArgAssignFn = TLI.CCAssignFnForCall(CallConv, /*IsVarArg=*/false);
+  auto ArgAssignFn = TLI.CCAssignFnForCall(CallConv, IsVarArg);
   OutgoingValueHandler ArgHandler(MIRBuilder, MRI, MIB, ArgAssignFn);
   if (!handleAssignments(MIRBuilder, ArgInfos, ArgHandler))
     return false;
@@ -577,7 +600,7 @@ bool ARMCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
                         SplitRegs.push_back(Reg);
                       });
 
-    auto RetAssignFn = TLI.CCAssignFnForReturn(CallConv, /*IsVarArg=*/false);
+    auto RetAssignFn = TLI.CCAssignFnForReturn(CallConv, IsVarArg);
     CallReturnHandler RetHandler(MIRBuilder, MRI, MIB, RetAssignFn);
     if (!handleAssignments(MIRBuilder, ArgInfos, RetHandler))
       return false;

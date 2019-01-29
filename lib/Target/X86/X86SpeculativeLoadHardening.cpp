@@ -1,9 +1,8 @@
 //====- X86SpeculativeLoadHardening.cpp - A Spectre v1 mitigation ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -118,12 +117,6 @@ static cl::opt<bool> HardenIndirectCallsAndJumps(
              "stored attacker controlled addresses. This is designed to "
              "mitigate Spectre v1.2 style attacks."),
     cl::init(true), cl::Hidden);
-
-namespace llvm {
-
-void initializeX86SpeculativeLoadHardeningPassPass(PassRegistry &);
-
-} // end namespace llvm
 
 namespace {
 
@@ -1147,7 +1140,9 @@ X86SpeculativeLoadHardeningPass::tracePredStateThroughIndirectBranches(
     unsigned TargetReg = TargetAddrSSA.GetValueInMiddleOfBlock(&MBB);
 
     // Insert a comparison of the incoming target register with this block's
-    // address.
+    // address. This also requires us to mark the block as having its address
+    // taken explicitly.
+    MBB.setHasAddressTaken();
     auto InsertPt = MBB.SkipPHIsLabelsAndDebug(MBB.begin());
     if (MF.getTarget().getCodeModel() == CodeModel::Small &&
         !Subtarget->isPositionIndependent()) {

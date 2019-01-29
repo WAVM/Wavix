@@ -1,9 +1,8 @@
 //===- CGSCCPassManager.h - Call graph pass management ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -441,7 +440,10 @@ public:
 
             PreservedAnalyses PassPA = Pass.run(*C, CGAM, CG, UR);
 
-            PI.runAfterPass<LazyCallGraph::SCC>(Pass, *C);
+            if (UR.InvalidatedSCCs.count(C))
+              PI.runAfterPassInvalidated<LazyCallGraph::SCC>(Pass);
+            else
+              PI.runAfterPass<LazyCallGraph::SCC>(Pass, *C);
 
             // Update the SCC and RefSCC if necessary.
             C = UR.UpdatedC ? UR.UpdatedC : C;
@@ -762,7 +764,10 @@ public:
 
       PreservedAnalyses PassPA = Pass.run(*C, AM, CG, UR);
 
-      PI.runAfterPass<LazyCallGraph::SCC>(Pass, *C);
+      if (UR.InvalidatedSCCs.count(C))
+        PI.runAfterPassInvalidated<LazyCallGraph::SCC>(Pass);
+      else
+        PI.runAfterPass<LazyCallGraph::SCC>(Pass, *C);
 
       // If the SCC structure has changed, bail immediately and let the outer
       // CGSCC layer handle any iteration to reflect the refined structure.

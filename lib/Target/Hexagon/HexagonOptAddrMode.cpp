@@ -1,9 +1,8 @@
 //===- HexagonOptAddrMode.cpp ---------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // This implements a Hexagon-specific pass to optimize addressing mode for
@@ -502,7 +501,8 @@ bool HexagonOptAddrMode::changeLoad(MachineInstr *OldMI, MachineOperand ImmOp,
       MIB.add(ImmOp);
       OpStart = 4;
       Changed = true;
-    } else if (HII->getAddrMode(*OldMI) == HexagonII::BaseImmOffset) {
+    } else if (HII->getAddrMode(*OldMI) == HexagonII::BaseImmOffset &&
+               OldMI->getOperand(2).isImm()) {
       short NewOpCode = HII->changeAddrMode_io_abs(*OldMI);
       assert(NewOpCode >= 0 && "Invalid New opcode\n");
       MIB = BuildMI(*BB, InsertPt, OldMI->getDebugLoc(), HII->get(NewOpCode))
@@ -518,17 +518,19 @@ bool HexagonOptAddrMode::changeLoad(MachineInstr *OldMI, MachineOperand ImmOp,
 
     LLVM_DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
     LLVM_DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
-  } else if (ImmOpNum == 2 && OldMI->getOperand(3).getImm() == 0) {
-    short NewOpCode = HII->changeAddrMode_rr_io(*OldMI);
-    assert(NewOpCode >= 0 && "Invalid New opcode\n");
-    MIB = BuildMI(*BB, InsertPt, OldMI->getDebugLoc(), HII->get(NewOpCode));
-    MIB.add(OldMI->getOperand(0));
-    MIB.add(OldMI->getOperand(1));
-    MIB.add(ImmOp);
-    OpStart = 4;
-    Changed = true;
-    LLVM_DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
-    LLVM_DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
+  } else if (ImmOpNum == 2) {
+    if (OldMI->getOperand(3).isImm() && OldMI->getOperand(3).getImm() == 0) {
+      short NewOpCode = HII->changeAddrMode_rr_io(*OldMI);
+      assert(NewOpCode >= 0 && "Invalid New opcode\n");
+      MIB = BuildMI(*BB, InsertPt, OldMI->getDebugLoc(), HII->get(NewOpCode));
+      MIB.add(OldMI->getOperand(0));
+      MIB.add(OldMI->getOperand(1));
+      MIB.add(ImmOp);
+      OpStart = 4;
+      Changed = true;
+      LLVM_DEBUG(dbgs() << "[Changing]: " << *OldMI << "\n");
+      LLVM_DEBUG(dbgs() << "[TO]: " << *MIB << "\n");
+    }
   }
 
   if (Changed)
@@ -758,11 +760,13 @@ bool HexagonOptAddrMode::processBlock(NodeAddr<BlockNode *> BA) {
       // This could happen, for example, when DefR = R4, but the used
       // register is D2.
 
+      // Change UseMI if replacement is possible. If any replacement failed,
+      // or wasn't attempted, make sure to keep the TFR.
+      bool Xformed = false;
       if (UseMOnum >= 0 && InstrEvalResult[UseMI])
-        // Change UseMI if replacement is possible.
-        Changed |= xformUseMI(MI, UseMI, UseN, UseMOnum);
-      else
-        KeepTfr = true;
+        Xformed = xformUseMI(MI, UseMI, UseN, UseMOnum);
+      Changed |=  Xformed;
+      KeepTfr |= !Xformed;
     }
     if (!KeepTfr)
       Deleted.insert(MI);

@@ -1,9 +1,8 @@
 //===- NewGVN.cpp - Global Value Numbering Pass ---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1086,9 +1085,13 @@ const Expression *NewGVN::checkSimplificationResults(Expression *E,
   CongruenceClass *CC = ValueToClass.lookup(V);
   if (CC) {
     if (CC->getLeader() && CC->getLeader() != I) {
-      // Don't add temporary instructions to the user lists.
-      if (!AllTempInstructions.count(I))
-        addAdditionalUsers(V, I);
+      // If we simplified to something else, we need to communicate
+      // that we're users of the value we simplified to.
+      if (I != V) {
+        // Don't add temporary instructions to the user lists.
+        if (!AllTempInstructions.count(I))
+          addAdditionalUsers(V, I);
+      }
       return createVariableOrConstant(CC->getLeader());
     }
     if (CC->getDefiningExpr()) {
@@ -1751,7 +1754,7 @@ NewGVN::performSymbolicPHIEvaluation(ArrayRef<ValPair> PHIOps,
     return true;
   });
   // If we are left with no operands, it's dead.
-  if (Filtered.begin() == Filtered.end()) {
+  if (empty(Filtered)) {
     // If it has undef at this point, it means there are no-non-undef arguments,
     // and thus, the value of the phi node must be undef.
     if (HasUndef) {
@@ -3171,8 +3174,7 @@ bool NewGVN::singleReachablePHIPath(
   auto FilteredPhiArgs =
       make_filter_range(MP->operands(), ReachableOperandPred);
   SmallVector<const Value *, 32> OperandList;
-  std::copy(FilteredPhiArgs.begin(), FilteredPhiArgs.end(),
-            std::back_inserter(OperandList));
+  llvm::copy(FilteredPhiArgs, std::back_inserter(OperandList));
   bool Okay = is_splat(OperandList);
   if (Okay)
     return singleReachablePHIPath(Visited, cast<MemoryAccess>(OperandList[0]),
@@ -4090,10 +4092,13 @@ bool NewGVN::eliminateInstructions(Function &F) {
           // It's about to be alive again.
           if (LeaderUseCount == 0 && isa<Instruction>(DominatingLeader))
             ProbablyDead.erase(cast<Instruction>(DominatingLeader));
-          // Copy instructions, however, are still dead because we use their
-          // operand as the leader.
-          if (LeaderUseCount == 0 && isSSACopy)
-            ProbablyDead.insert(II);
+          // For copy instructions, we use their operand as a leader,
+          // which means we remove a user of the copy and it may become dead.
+          if (isSSACopy) {
+            unsigned &IIUseCount = UseCounts[II];
+            if (--IIUseCount == 0)
+              ProbablyDead.insert(II);
+          }
           ++LeaderUseCount;
           AnythingReplaced = true;
         }

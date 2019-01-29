@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/MachineFunction.h ---------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -58,6 +57,7 @@ class DILocalVariable;
 class DILocation;
 class Function;
 class GlobalValue;
+class LLVMTargetMachine;
 class MachineConstantPool;
 class MachineFrameInfo;
 class MachineFunction;
@@ -70,7 +70,6 @@ class Pass;
 class PseudoSourceValueManager;
 class raw_ostream;
 class SlotIndexes;
-class TargetMachine;
 class TargetRegisterClass;
 class TargetSubtargetInfo;
 struct WasmEHFuncInfo;
@@ -86,7 +85,7 @@ template <> struct ilist_callback_traits<MachineBasicBlock> {
 
   template <class Iterator>
   void transferNodesFromList(ilist_callback_traits &OldList, Iterator, Iterator) {
-    llvm_unreachable("Never transfer between lists");
+    assert(this == &OldList && "never transfer MBBs between functions");
   }
 };
 
@@ -225,7 +224,7 @@ struct LandingPadInfo {
 
 class MachineFunction {
   const Function &F;
-  const TargetMachine &Target;
+  const LLVMTargetMachine &Target;
   const TargetSubtargetInfo *STI;
   MCContext &Ctx;
   MachineModuleInfo &MMI;
@@ -316,6 +315,9 @@ class MachineFunction {
   /// Map a landing pad's EH symbol to the call site indexes.
   DenseMap<MCSymbol*, SmallVector<unsigned, 4>> LPadToCallSiteMap;
 
+  /// Map a landing pad to its index.
+  DenseMap<const MachineBasicBlock *, unsigned> WasmLPadToIndexMap;
+
   /// Map of invoke call site index values to associated begin EH_LABEL.
   DenseMap<MCSymbol*, unsigned> CallSiteMap;
 
@@ -326,6 +328,7 @@ class MachineFunction {
   bool CallsUnwindInit = false;
   bool HasEHScopes = false;
   bool HasEHFunclets = false;
+  bool HasLocalEscape = false;
 
   /// List of C++ TypeInfo used.
   std::vector<const GlobalValue *> TypeInfos;
@@ -369,23 +372,25 @@ public:
 
   public:
     virtual ~Delegate() = default;
-    virtual void MF_HandleInsertion(const MachineInstr &MI) = 0;
-    virtual void MF_HandleRemoval(const MachineInstr &MI) = 0;
+    /// Callback after an insertion. This should not modify the MI directly.
+    virtual void MF_HandleInsertion(MachineInstr &MI) = 0;
+    /// Callback before a removal. This should not modify the MI directly.
+    virtual void MF_HandleRemoval(MachineInstr &MI) = 0;
   };
 
 private:
   Delegate *TheDelegate = nullptr;
 
   // Callbacks for insertion and removal.
-  void handleInsertion(const MachineInstr &MI);
-  void handleRemoval(const MachineInstr &MI);
+  void handleInsertion(MachineInstr &MI);
+  void handleRemoval(MachineInstr &MI);
   friend struct ilist_traits<MachineInstr>;
 
 public:
   using VariableDbgInfoMapTy = SmallVector<VariableDbgInfo, 4>;
   VariableDbgInfoMapTy VariableDbgInfos;
 
-  MachineFunction(const Function &F, const TargetMachine &Target,
+  MachineFunction(const Function &F, const LLVMTargetMachine &Target,
                   const TargetSubtargetInfo &STI, unsigned FunctionNum,
                   MachineModuleInfo &MMI);
   MachineFunction(const MachineFunction &) = delete;
@@ -433,7 +438,7 @@ public:
   unsigned getFunctionNumber() const { return FunctionNumber; }
 
   /// getTarget - Return the target machine this machine code is compiled with
-  const TargetMachine &getTarget() const { return Target; }
+  const LLVMTargetMachine &getTarget() const { return Target; }
 
   /// getSubtarget - Return the subtarget for which this machine code is being
   /// compiled.
@@ -806,11 +811,15 @@ public:
   bool hasEHFunclets() const { return HasEHFunclets; }
   void setHasEHFunclets(bool V) { HasEHFunclets = V; }
 
+  bool hasLocalEscape() const { return HasLocalEscape; }
+  void setHasLocalEscape(bool V) { HasLocalEscape = V; }
+
   /// Find or create an LandingPadInfo for the specified MachineBasicBlock.
   LandingPadInfo &getOrCreateLandingPadInfo(MachineBasicBlock *LandingPad);
 
   /// Remap landing pad labels and remove any deleted landing pads.
-  void tidyLandingPads(DenseMap<MCSymbol*, uintptr_t> *LPMap = nullptr);
+  void tidyLandingPads(DenseMap<MCSymbol *, uintptr_t> *LPMap = nullptr,
+                       bool TidyIfNoBeginLabels = true);
 
   /// Return a reference to the landing pad info for the current function.
   const std::vector<LandingPadInfo> &getLandingPads() const {
@@ -852,6 +861,22 @@ public:
 
   /// Map the landing pad's EH symbol to the call site indexes.
   void setCallSiteLandingPad(MCSymbol *Sym, ArrayRef<unsigned> Sites);
+
+  /// Map the landing pad to its index. Used for Wasm exception handling.
+  void setWasmLandingPadIndex(const MachineBasicBlock *LPad, unsigned Index) {
+    WasmLPadToIndexMap[LPad] = Index;
+  }
+
+  /// Returns true if the landing pad has an associate index in wasm EH.
+  bool hasWasmLandingPadIndex(const MachineBasicBlock *LPad) const {
+    return WasmLPadToIndexMap.count(LPad);
+  }
+
+  /// Get the index in wasm EH for a given landing pad.
+  unsigned getWasmLandingPadIndex(const MachineBasicBlock *LPad) const {
+    assert(hasWasmLandingPadIndex(LPad));
+    return WasmLPadToIndexMap.lookup(LPad);
+  }
 
   /// Get the call site indexes for a landing pad EH symbol.
   SmallVectorImpl<unsigned> &getCallSiteLandingPad(MCSymbol *Sym) {

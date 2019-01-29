@@ -103,24 +103,22 @@ define float @test_v8f32(float %a0, <8 x float> %a1) {
 ; AVX-LABEL: test_v8f32:
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vextractf128 $1, %ymm1, %xmm0
-; AVX-NEXT:    vmulps %ymm0, %ymm1, %ymm0
+; AVX-NEXT:    vmulps %xmm0, %xmm1, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; AVX512-LABEL: test_v8f32:
 ; AVX512:       # %bb.0:
 ; AVX512-NEXT:    vextractf128 $1, %ymm1, %xmm0
-; AVX512-NEXT:    vmulps %ymm0, %ymm1, %ymm0
+; AVX512-NEXT:    vmulps %xmm0, %xmm1, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX512-NEXT:    vmulps %ymm1, %ymm0, %ymm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast float @llvm.experimental.vector.reduce.fmul.f32.f32.v8f32(float %a0, <8 x float> %a1)
@@ -157,12 +155,11 @@ define float @test_v16f32(float %a0, <16 x float> %a1) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmulps %ymm2, %ymm1, %ymm0
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -171,12 +168,11 @@ define float @test_v16f32(float %a0, <16 x float> %a1) {
 ; AVX512-NEXT:    vextractf64x4 $1, %zmm1, %ymm0
 ; AVX512-NEXT:    vmulps %zmm0, %zmm1, %zmm0
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast float @llvm.experimental.vector.reduce.fmul.f32.f32.v16f32(float %a0, <16 x float> %a1)
@@ -283,24 +279,22 @@ define float @test_v8f32_zero(<8 x float> %a0) {
 ; AVX-LABEL: test_v8f32_zero:
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; AVX512-LABEL: test_v8f32_zero:
 ; AVX512:       # %bb.0:
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX512-NEXT:    vmulps %ymm1, %ymm0, %ymm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast float @llvm.experimental.vector.reduce.fmul.f32.f32.v8f32(float 1.0, <8 x float> %a0)
@@ -338,12 +332,11 @@ define float @test_v16f32_zero(<16 x float> %a0) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -352,12 +345,11 @@ define float @test_v16f32_zero(<16 x float> %a0) {
 ; AVX512-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
 ; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast float @llvm.experimental.vector.reduce.fmul.f32.f32.v16f32(float 1.0, <16 x float> %a0)
@@ -464,24 +456,22 @@ define float @test_v8f32_undef(<8 x float> %a0) {
 ; AVX-LABEL: test_v8f32_undef:
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; AVX512-LABEL: test_v8f32_undef:
 ; AVX512:       # %bb.0:
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX512-NEXT:    vmulps %ymm1, %ymm0, %ymm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast float @llvm.experimental.vector.reduce.fmul.f32.f32.v8f32(float undef, <8 x float> %a0)
@@ -519,12 +509,11 @@ define float @test_v16f32_undef(<16 x float> %a0) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX-NEXT:    vmulps %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -533,12 +522,11 @@ define float @test_v16f32_undef(<16 x float> %a0) {
 ; AVX512-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
 ; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vmovshdup {{.*#+}} xmm1 = xmm0[1,1,3,3]
-; AVX512-NEXT:    vmulps %zmm1, %zmm0, %zmm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; AVX512-NEXT:    vmulps %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast float @llvm.experimental.vector.reduce.fmul.f32.f32.v16f32(float undef, <16 x float> %a0)
@@ -584,20 +572,18 @@ define double @test_v4f64(double %a0, <4 x double> %a1) {
 ; AVX-LABEL: test_v4f64:
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vextractf128 $1, %ymm1, %xmm0
-; AVX-NEXT:    vmulpd %ymm0, %ymm1, %ymm0
+; AVX-NEXT:    vmulpd %xmm0, %xmm1, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; AVX512-LABEL: test_v4f64:
 ; AVX512:       # %bb.0:
 ; AVX512-NEXT:    vextractf128 $1, %ymm1, %xmm0
-; AVX512-NEXT:    vmulpd %ymm0, %ymm1, %ymm0
+; AVX512-NEXT:    vmulpd %xmm0, %xmm1, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast double @llvm.experimental.vector.reduce.fmul.f64.f64.v4f64(double %a0, <4 x double> %a1)
@@ -619,10 +605,9 @@ define double @test_v8f64(double %a0, <8 x double> %a1) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmulpd %ymm2, %ymm1, %ymm0
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -631,10 +616,9 @@ define double @test_v8f64(double %a0, <8 x double> %a1) {
 ; AVX512-NEXT:    vextractf64x4 $1, %zmm1, %ymm0
 ; AVX512-NEXT:    vmulpd %zmm0, %zmm1, %zmm0
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast double @llvm.experimental.vector.reduce.fmul.f64.f64.v8f64(double %a0, <8 x double> %a1)
@@ -662,10 +646,9 @@ define double @test_v16f64(double %a0, <16 x double> %a1) {
 ; AVX-NEXT:    vmulpd %ymm3, %ymm1, %ymm1
 ; AVX-NEXT:    vmulpd %ymm0, %ymm1, %ymm0
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -675,10 +658,9 @@ define double @test_v16f64(double %a0, <16 x double> %a1) {
 ; AVX512-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
 ; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast double @llvm.experimental.vector.reduce.fmul.f64.f64.v16f64(double %a0, <16 x double> %a1)
@@ -726,20 +708,18 @@ define double @test_v4f64_zero(<4 x double> %a0) {
 ; AVX-LABEL: test_v4f64_zero:
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; AVX512-LABEL: test_v4f64_zero:
 ; AVX512:       # %bb.0:
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast double @llvm.experimental.vector.reduce.fmul.f64.f64.v4f64(double 1.0, <4 x double> %a0)
@@ -762,10 +742,9 @@ define double @test_v8f64_zero(<8 x double> %a0) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -774,10 +753,9 @@ define double @test_v8f64_zero(<8 x double> %a0) {
 ; AVX512-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
 ; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast double @llvm.experimental.vector.reduce.fmul.f64.f64.v8f64(double 1.0, <8 x double> %a0)
@@ -805,10 +783,9 @@ define double @test_v16f64_zero(<16 x double> %a0) {
 ; AVX-NEXT:    vmulpd %ymm2, %ymm0, %ymm0
 ; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -818,10 +795,9 @@ define double @test_v16f64_zero(<16 x double> %a0) {
 ; AVX512-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
 ; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast double @llvm.experimental.vector.reduce.fmul.f64.f64.v16f64(double 1.0, <16 x double> %a0)
@@ -869,20 +845,18 @@ define double @test_v4f64_undef(<4 x double> %a0) {
 ; AVX-LABEL: test_v4f64_undef:
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
 ; AVX512-LABEL: test_v4f64_undef:
 ; AVX512:       # %bb.0:
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast double @llvm.experimental.vector.reduce.fmul.f64.f64.v4f64(double undef, <4 x double> %a0)
@@ -905,10 +879,9 @@ define double @test_v8f64_undef(<8 x double> %a0) {
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -917,10 +890,9 @@ define double @test_v8f64_undef(<8 x double> %a0) {
 ; AVX512-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
 ; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast double @llvm.experimental.vector.reduce.fmul.f64.f64.v8f64(double undef, <8 x double> %a0)
@@ -948,10 +920,9 @@ define double @test_v16f64_undef(<16 x double> %a0) {
 ; AVX-NEXT:    vmulpd %ymm2, %ymm0, %ymm0
 ; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX-NEXT:    vmulpd %ymm1, %ymm0, %ymm0
-; AVX-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; AVX-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -961,10 +932,9 @@ define double @test_v16f64_undef(<16 x double> %a0) {
 ; AVX512-NEXT:    vextractf64x4 $1, %zmm0, %ymm1
 ; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
 ; AVX512-NEXT:    vextractf128 $1, %ymm0, %xmm1
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vpermilpd {{.*#+}} xmm1 = xmm0[1,0]
-; AVX512-NEXT:    vmulpd %zmm1, %zmm0, %zmm0
-; AVX512-NEXT:    # kill: def $xmm0 killed $xmm0 killed $zmm0
+; AVX512-NEXT:    vmulpd %xmm1, %xmm0, %xmm0
 ; AVX512-NEXT:    vzeroupper
 ; AVX512-NEXT:    retq
   %1 = call fast double @llvm.experimental.vector.reduce.fmul.f64.f64.v16f64(double undef, <16 x double> %a0)

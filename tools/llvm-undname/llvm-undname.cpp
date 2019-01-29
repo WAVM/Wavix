@@ -1,10 +1,9 @@
 //===-- llvm-undname.cpp - Microsoft ABI name undecorator
 //------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,6 +17,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Process.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdio>
 #include <cstring>
@@ -32,7 +32,7 @@ cl::opt<bool> DumpBackReferences("backrefs", cl::Optional,
 cl::list<std::string> Symbols(cl::Positional, cl::desc("<input symbols>"),
                               cl::ZeroOrMore);
 
-static void demangle(const std::string &S) {
+static void msDemangle(const std::string &S) {
   int Status;
   MSDemangleFlags Flags = MSDF_None;
   if (DumpBackReferences)
@@ -44,7 +44,7 @@ static void demangle(const std::string &S) {
     outs() << ResultBuf << "\n";
     outs().flush();
   } else {
-    errs() << "Error: Invalid mangled name\n";
+    WithColor::error() << "Invalid mangled name\n";
   }
   std::free(ResultBuf);
 }
@@ -74,14 +74,14 @@ int main(int argc, char **argv) {
         outs() << Line << "\n";
         outs().flush();
       }
-      demangle(Line);
+      msDemangle(Line);
       outs() << "\n";
     }
   } else {
     for (StringRef S : Symbols) {
       outs() << S << "\n";
       outs().flush();
-      demangle(S);
+      msDemangle(S);
       outs() << "\n";
     }
   }

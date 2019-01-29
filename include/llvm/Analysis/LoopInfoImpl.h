@@ -1,9 +1,8 @@
 //===- llvm/Analysis/LoopInfoImpl.h - Natural Loop Calculator ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -392,7 +391,10 @@ void LoopBase<BlockT, LoopT>::verifyLoopNest(
 template <class BlockT, class LoopT>
 void LoopBase<BlockT, LoopT>::print(raw_ostream &OS, unsigned Depth,
                                     bool Verbose) const {
-  OS.indent(Depth * 2) << "Loop at depth " << getLoopDepth() << " containing: ";
+  OS.indent(Depth * 2);
+  if (static_cast<const LoopT *>(this)->isAnnotatedParallel())
+    OS << "Parallel ";
+  OS << "Loop at depth " << getLoopDepth() << " containing: ";
 
   BlockT *H = getHeader();
   for (unsigned i = 0; i < getBlocks().size(); ++i) {

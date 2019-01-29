@@ -1,4 +1,4 @@
-; RUN: llc < %s -asm-verbose=false -wasm-temporary-workarounds=false -wasm-keep-registers | FileCheck %s
+; RUN: llc < %s -asm-verbose=false -wasm-keep-registers | FileCheck %s
 
 ; Test that function pointer casts casting away varargs are replaced with
 ; wrappers.
@@ -23,9 +23,9 @@ declare void @specified(i32, i32)
 ; CHECK: call    	.Lspecified_bitcast@FUNCTION, $pop{{[0-9]+$}}
 
 ; CHECK: .Lunderspecified_bitcast:
-; CHECK-NEXT: .param  	i32, i32{{$}}
+; CHECK-NEXT: .functype .Lunderspecified_bitcast (i32, i32) -> (){{$}}
 ; CHECK: call    	underspecified@FUNCTION, $pop{{[0-9]+$}}
 
 ; CHECK: .Lspecified_bitcast:
-; CHECK-NEXT: .param  	i32{{$}}
+; CHECK-NEXT: .functype .Lspecified_bitcast (i32) -> (){{$}}
 ; CHECK: call    	specified@FUNCTION, $pop{{[0-9]+}}, $pop{{[0-9]+$}}

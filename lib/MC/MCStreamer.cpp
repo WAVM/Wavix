@@ -1,9 +1,8 @@
 //===- lib/MC/MCStreamer.cpp - Streaming Machine Code Output --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -70,6 +69,18 @@ void MCTargetStreamer::emitValue(const MCExpr *Value) {
 
   Value->print(OS, Streamer.getContext().getAsmInfo());
   Streamer.EmitRawText(OS.str());
+}
+
+void MCTargetStreamer::emitRawBytes(StringRef Data) {
+  const MCAsmInfo *MAI = Streamer.getContext().getAsmInfo();
+  const char *Directive = MAI->getData8bitsDirective();
+  for (const unsigned char C : Data.bytes()) {
+    SmallString<128> Str;
+    raw_svector_ostream OS(Str);
+
+    OS << Directive << (unsigned)C;
+    Streamer.EmitRawText(OS.str());
+  }
 }
 
 void MCTargetStreamer::emitAssignment(MCSymbol *Symbol, const MCExpr *Value) {}
@@ -207,6 +218,13 @@ void MCStreamer::emitDwarfFile0Directive(StringRef Directory,
                                          unsigned CUID) {
   getContext().setMCLineTableRootFile(CUID, Directory, Filename, Checksum,
                                       Source);
+}
+
+void MCStreamer::EmitCFIBKeyFrame() {
+  MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
+  if (!CurFrame)
+    return;
+  CurFrame->IsBKeyFrame = true;
 }
 
 void MCStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
@@ -565,6 +583,15 @@ void MCStreamer::EmitCFIWindowSave() {
   CurFrame->Instructions.push_back(Instruction);
 }
 
+void MCStreamer::EmitCFINegateRAState() {
+  MCSymbol *Label = EmitCFILabel();
+  MCCFIInstruction Instruction = MCCFIInstruction::createNegateRAState(Label);
+  MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
+  if (!CurFrame)
+    return;
+  CurFrame->Instructions.push_back(Instruction);
+}
+
 void MCStreamer::EmitCFIReturnColumn(int64_t Register) {
   MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
   if (!CurFrame)
@@ -613,6 +640,17 @@ void MCStreamer::EmitWinCFIEndProc(SMLoc Loc) {
 
   MCSymbol *Label = EmitCFILabel();
   CurFrame->End = Label;
+}
+
+void MCStreamer::EmitWinCFIFuncletOrFuncEnd(SMLoc Loc) {
+  WinEH::FrameInfo *CurFrame = EnsureValidWinFrameInfo(Loc);
+  if (!CurFrame)
+    return;
+  if (CurFrame->ChainedParent)
+    getContext().reportError(Loc, "Not all chained regions terminated!");
+
+  MCSymbol *Label = EmitCFILabel();
+  CurFrame->FuncletOrFuncEnd = Label;
 }
 
 void MCStreamer::EmitWinCFIStartChained(SMLoc Loc) {
@@ -826,13 +864,11 @@ void MCStreamer::EmitWinCFIEndProlog(SMLoc Loc) {
   CurFrame->PrologEnd = Label;
 }
 
-void MCStreamer::EmitCOFFSafeSEH(MCSymbol const *Symbol) {
-}
+void MCStreamer::EmitCOFFSafeSEH(MCSymbol const *Symbol) {}
 
 void MCStreamer::EmitCOFFSymbolIndex(MCSymbol const *Symbol) {}
 
-void MCStreamer::EmitCOFFSectionIndex(MCSymbol const *Symbol) {
-}
+void MCStreamer::EmitCOFFSectionIndex(MCSymbol const *Symbol) {}
 
 void MCStreamer::EmitCOFFSecRel32(MCSymbol const *Symbol, uint64_t Offset) {}
 
@@ -842,9 +878,12 @@ void MCStreamer::EmitCOFFImgRel32(MCSymbol const *Symbol, int64_t Offset) {}
 /// the specified string in the output .s file.  This capability is
 /// indicated by the hasRawTextSupport() predicate.
 void MCStreamer::EmitRawTextImpl(StringRef String) {
-  errs() << "EmitRawText called on an MCStreamer that doesn't support it, "
-  " something must not be fully mc'ized\n";
-  abort();
+  // This is not llvm_unreachable for the sake of out of tree backend
+  // developers who may not have assembly streamers and should serve as a
+  // reminder to not accidentally call EmitRawText in the absence of such.
+  report_fatal_error("EmitRawText called on an MCStreamer that doesn't support "
+                     "it (target backend is likely missing an AsmStreamer "
+                     "implementation)");
 }
 
 void MCStreamer::EmitRawText(const Twine &T) {
@@ -878,8 +917,9 @@ void MCStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {
     TS->emitAssignment(Symbol, Value);
 }
 
-void MCTargetStreamer::prettyPrintAsm(MCInstPrinter &InstPrinter, raw_ostream &OS,
-                              const MCInst &Inst, const MCSubtargetInfo &STI) {
+void MCTargetStreamer::prettyPrintAsm(MCInstPrinter &InstPrinter,
+                                      raw_ostream &OS, const MCInst &Inst,
+                                      const MCSubtargetInfo &STI) {
   InstPrinter.printInst(&Inst, OS, "", STI);
 }
 
@@ -1022,7 +1062,8 @@ MCSymbol *MCStreamer::endSection(MCSection *Section) {
   return Sym;
 }
 
-void MCStreamer::EmitVersionForTarget(const Triple &Target) {
+void MCStreamer::EmitVersionForTarget(const Triple &Target,
+                                      const VersionTuple &SDKVersion) {
   if (!Target.isOSBinFormatMachO() || !Target.isOSDarwin())
     return;
   // Do we even know the version?
@@ -1048,5 +1089,5 @@ void MCStreamer::EmitVersionForTarget(const Triple &Target) {
     Target.getiOSVersion(Major, Minor, Update);
   }
   if (Major != 0)
-    EmitVersionMin(VersionType, Major, Minor, Update);
+    EmitVersionMin(VersionType, Major, Minor, Update, SDKVersion);
 }

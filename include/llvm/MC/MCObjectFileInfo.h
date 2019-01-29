@@ -1,9 +1,8 @@
 //===-- llvm/MC/MCObjectFileInfo.h - Object File Info -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,6 +17,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/VersionTuple.h"
 
 namespace llvm {
 class MCContext;
@@ -117,6 +117,8 @@ protected:
   MCSection *DwarfAddrSection;
   /// The DWARF v5 range list section.
   MCSection *DwarfRnglistsSection;
+  /// The DWARF v5 locations list section.
+  MCSection *DwarfLoclistsSection;
 
   /// The DWARF v5 range list section for fission.
   MCSection *DwarfRnglistsDWOSection;
@@ -239,6 +241,9 @@ public:
   MCSection *getCompactUnwindSection() const { return CompactUnwindSection; }
   MCSection *getDwarfAbbrevSection() const { return DwarfAbbrevSection; }
   MCSection *getDwarfInfoSection() const { return DwarfInfoSection; }
+  MCSection *getDwarfInfoSection(uint64_t Hash) const {
+    return getDwarfComdatSection(".debug_info", Hash);
+  }
   MCSection *getDwarfLineSection() const { return DwarfLineSection; }
   MCSection *getDwarfLineStrSection() const { return DwarfLineStrSection; }
   MCSection *getDwarfFrameSection() const { return DwarfFrameSection; }
@@ -258,6 +263,7 @@ public:
   MCSection *getDwarfARangesSection() const { return DwarfARangesSection; }
   MCSection *getDwarfRangesSection() const { return DwarfRangesSection; }
   MCSection *getDwarfRnglistsSection() const { return DwarfRnglistsSection; }
+  MCSection *getDwarfLoclistsSection() const { return DwarfLoclistsSection; }
   MCSection *getDwarfMacinfoSection() const { return DwarfMacinfoSection; }
 
   MCSection *getDwarfDebugNamesSection() const {
@@ -274,7 +280,9 @@ public:
     return DwarfAccelTypesSection;
   }
   MCSection *getDwarfInfoDWOSection() const { return DwarfInfoDWOSection; }
-  MCSection *getDwarfTypesSection(uint64_t Hash) const;
+  MCSection *getDwarfTypesSection(uint64_t Hash) const {
+    return getDwarfComdatSection(".debug_types", Hash);
+  }
   MCSection *getDwarfTypesDWOSection() const { return DwarfTypesDWOSection; }
   MCSection *getDwarfAbbrevDWOSection() const { return DwarfAbbrevDWOSection; }
   MCSection *getDwarfStrDWOSection() const { return DwarfStrDWOSection; }
@@ -382,14 +390,22 @@ private:
   bool PositionIndependent;
   MCContext *Ctx;
   Triple TT;
+  VersionTuple SDKVersion;
 
   void initMachOMCObjectFileInfo(const Triple &T);
   void initELFMCObjectFileInfo(const Triple &T, bool Large);
   void initCOFFMCObjectFileInfo(const Triple &T);
   void initWasmMCObjectFileInfo(const Triple &T);
+  MCSection *getDwarfComdatSection(const char *Name, uint64_t Hash) const;
 
 public:
   const Triple &getTargetTriple() const { return TT; }
+
+  void setSDKVersion(const VersionTuple &TheSDKVersion) {
+    SDKVersion = TheSDKVersion;
+  }
+
+  const VersionTuple &getSDKVersion() const { return SDKVersion; }
 };
 
 } // end namespace llvm

@@ -1,9 +1,8 @@
 //===-- HexagonRegisterInfo.cpp - Hexagon Register Information ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -312,6 +311,7 @@ unsigned HexagonRegisterInfo::getHexagonSubRegIndex(
 
   static const unsigned ISub[] = { Hexagon::isub_lo, Hexagon::isub_hi };
   static const unsigned VSub[] = { Hexagon::vsub_lo, Hexagon::vsub_hi };
+  static const unsigned WSub[] = { Hexagon::wsub_lo, Hexagon::wsub_hi };
 
   switch (RC.getID()) {
     case Hexagon::CtrRegs64RegClassID:
@@ -319,6 +319,8 @@ unsigned HexagonRegisterInfo::getHexagonSubRegIndex(
       return ISub[GenIdx];
     case Hexagon::HvxWRRegClassID:
       return VSub[GenIdx];
+    case Hexagon::HvxVQRRegClassID:
+      return WSub[GenIdx];
   }
 
   if (const TargetRegisterClass *SuperRC = *RC.getSuperClasses())

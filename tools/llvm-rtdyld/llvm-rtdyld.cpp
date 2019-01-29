@@ -1,9 +1,8 @@
 //===-- llvm-rtdyld.cpp - MCJIT Testing Tool ------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -309,7 +308,7 @@ static int printLineInfoForInput(bool LoadObjects, bool UseDebugObj) {
     if (!MaybeObj) {
       std::string Buf;
       raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(MaybeObj.takeError(), OS, "");
+      logAllUnhandledErrors(MaybeObj.takeError(), OS);
       OS.flush();
       ErrorAndExit("unable to create object file: '" + Buf + "'");
     }
@@ -438,7 +437,7 @@ static int executeInput() {
     if (!MaybeObj) {
       std::string Buf;
       raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(MaybeObj.takeError(), OS, "");
+      logAllUnhandledErrors(MaybeObj.takeError(), OS);
       OS.flush();
       ErrorAndExit("unable to create object file: '" + Buf + "'");
     }
@@ -710,7 +709,7 @@ static int linkAndVerify() {
     if (!MaybeObj) {
       std::string Buf;
       raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(MaybeObj.takeError(), OS, "");
+      logAllUnhandledErrors(MaybeObj.takeError(), OS);
       OS.flush();
       ErrorAndExit("unable to create object file: '" + Buf + "'");
     }

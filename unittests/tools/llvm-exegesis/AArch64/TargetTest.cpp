@@ -1,3 +1,11 @@
+//===-- TargetTest.cpp ------------------------------------------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
 #include "Target.h"
 
 #include <cassert>
@@ -57,6 +65,13 @@ TEST_F(AArch64TargetTest, SetRegToConstant) {
   // The AArch64 target currently doesn't know how to set register values.
   const auto Insts = setRegTo(llvm::AArch64::X0, llvm::APInt());
   EXPECT_THAT(Insts, Not(IsEmpty()));
+}
+
+TEST_F(AArch64TargetTest, DefaultPfmCounters) {
+  const std::string Expected = "CPU_CYCLES";
+  EXPECT_EQ(ExegesisTarget_->getPfmCounters("").CycleCounter, Expected);
+  EXPECT_EQ(ExegesisTarget_->getPfmCounters("unknown_cpu").CycleCounter,
+            Expected);
 }
 
 } // namespace

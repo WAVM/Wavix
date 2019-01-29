@@ -1,9 +1,8 @@
 //===- PrologEpilogInserter.cpp - Insert Prolog/Epilog code in function ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -74,6 +73,10 @@ using namespace llvm;
 #define DEBUG_TYPE "prologepilog"
 
 using MBBVector = SmallVector<MachineBasicBlock *, 4>;
+
+STATISTIC(NumLeafFuncWithSpills, "Number of leaf functions with CSRs");
+STATISTIC(NumFuncSeen, "Number of functions seen in PEI");
+
 
 namespace {
 
@@ -168,6 +171,7 @@ using StackObjSet = SmallSetVector<int, 8>;
 /// runOnMachineFunction - Insert prolog/epilog code and replace abstract
 /// frame indexes with appropriate references.
 bool PEI::runOnMachineFunction(MachineFunction &MF) {
+  NumFuncSeen++;
   const Function &F = MF.getFunction();
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
@@ -357,6 +361,11 @@ static void assignCalleeSavedSpillSlots(MachineFunction &F,
     // Now that we know which registers need to be saved and restored, allocate
     // stack slots for them.
     for (auto &CS : CSI) {
+      // If the target has spilled this register to another register, we don't
+      // need to allocate a stack slot.
+      if (CS.isSpilledToReg())
+        continue;
+
       unsigned Reg = CS.getReg();
       const TargetRegisterClass *RC = RegInfo->getMinimalPhysRegClass(Reg);
 
@@ -454,7 +463,22 @@ static void updateLiveness(MachineFunction &MF) {
       if (!MRI.isReserved(Reg) && !MBB->isLiveIn(Reg))
         MBB->addLiveIn(Reg);
     }
+    // If callee-saved register is spilled to another register rather than
+    // spilling to stack, the destination register has to be marked as live for
+    // each MBB between the prologue and epilogue so that it is not clobbered
+    // before it is reloaded in the epilogue. The Visited set contains all
+    // blocks outside of the region delimited by prologue/epilogue.
+    if (CSI[i].isSpilledToReg()) {
+      for (MachineBasicBlock &MBB : MF) {
+        if (Visited.count(&MBB))
+          continue;
+        MCPhysReg DstReg = CSI[i].getDstReg();
+        if (!MBB.isLiveIn(DstReg))
+          MBB.addLiveIn(DstReg);
+      }
+    }
   }
+
 }
 
 /// Insert restore code for the callee-saved registers used in the function.
@@ -530,6 +554,9 @@ void PEI::spillCalleeSavedRegs(MachineFunction &MF) {
 
     std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
     if (!CSI.empty()) {
+      if (!MFI.hasCalls())
+        NumLeafFuncWithSpills++;
+
       for (MachineBasicBlock *SaveBlock : SaveBlocks) {
         insertCSRSaves(*SaveBlock, CSI);
         // Update the live-in information of all the blocks up to the save
@@ -1090,7 +1117,7 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &MF,
         MachineOperand &Offset = MI.getOperand(i + 1);
         int refOffset = TFI->getFrameIndexReferencePreferSP(
             MF, MI.getOperand(i).getIndex(), Reg, /*IgnoreSPUpdates*/ false);
-        Offset.setImm(Offset.getImm() + refOffset);
+        Offset.setImm(Offset.getImm() + refOffset + SPAdj);
         MI.getOperand(i).ChangeToRegister(Reg, false /*isDef*/);
         continue;
       }

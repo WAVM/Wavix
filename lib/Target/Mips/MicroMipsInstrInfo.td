@@ -1,9 +1,8 @@
 //===--- MicroMipsInstrFormats.td - microMIPS Inst Defs -*- tablegen -*----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -426,6 +425,7 @@ class JumpLinkRegMM16<string opstr, RegisterOperand RO> :
   let isCall = 1;
   let hasDelaySlot = 1;
   let Defs = [RA];
+  let hasPostISelHook = 1;
 }
 
 // 16-bit Jump Reg
@@ -1271,6 +1271,8 @@ let AddedComplexity = 40 in
 def : MipsPat<(bswap GPR32:$rt), (ROTR_MM (WSBH_MM GPR32:$rt), 16)>,
       ISA_MICROMIPS;
 
+def : MipsPat<(MipsJmpLink (i32 texternalsym:$dst)),
+              (JAL_MM texternalsym:$dst)>, ISA_MICROMIPS32_NOT_MIPS32R6;
 def : MipsPat<(MipsTailCall (iPTR tglobaladdr:$dst)),
               (TAILCALL_MM tglobaladdr:$dst)>, ISA_MICROMIPS32_NOT_MIPS32R6;
 def : MipsPat<(MipsTailCall (iPTR texternalsym:$dst)),

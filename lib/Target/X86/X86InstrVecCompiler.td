@@ -1,9 +1,8 @@
 //===- X86InstrVecCompiler.td - Vector Compiler Patterns ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,19 +15,39 @@
 //  Non-instruction patterns
 //===----------------------------------------------------------------------===//
 
-// A vector extract of the first f32/f64 position is a subregister copy
-def : Pat<(f32 (extractelt (v4f32 VR128:$src), (iPTR 0))),
-          (COPY_TO_REGCLASS (v4f32 VR128:$src), FR32)>;
-def : Pat<(f64 (extractelt (v2f64 VR128:$src), (iPTR 0))),
-          (COPY_TO_REGCLASS (v2f64 VR128:$src), FR64)>;
+let Predicates = [NoAVX512] in {
+  // A vector extract of the first f32/f64 position is a subregister copy
+  def : Pat<(f32 (extractelt (v4f32 VR128:$src), (iPTR 0))),
+            (COPY_TO_REGCLASS (v4f32 VR128:$src), FR32)>;
+  def : Pat<(f64 (extractelt (v2f64 VR128:$src), (iPTR 0))),
+            (COPY_TO_REGCLASS (v2f64 VR128:$src), FR64)>;
+}
 
-// Implicitly promote a 32-bit scalar to a vector.
-def : Pat<(v4f32 (scalar_to_vector FR32:$src)),
-          (COPY_TO_REGCLASS FR32:$src, VR128)>;
-// Implicitly promote a 64-bit scalar to a vector.
-def : Pat<(v2f64 (scalar_to_vector FR64:$src)),
-          (COPY_TO_REGCLASS FR64:$src, VR128)>;
+let Predicates = [HasAVX512] in {
+  // A vector extract of the first f32/f64 position is a subregister copy
+  def : Pat<(f32 (extractelt (v4f32 VR128X:$src), (iPTR 0))),
+            (COPY_TO_REGCLASS (v4f32 VR128X:$src), FR32X)>;
+  def : Pat<(f64 (extractelt (v2f64 VR128X:$src), (iPTR 0))),
+            (COPY_TO_REGCLASS (v2f64 VR128X:$src), FR64X)>;
+}
 
+let Predicates = [NoVLX] in {
+  // Implicitly promote a 32-bit scalar to a vector.
+  def : Pat<(v4f32 (scalar_to_vector FR32:$src)),
+            (COPY_TO_REGCLASS FR32:$src, VR128)>;
+  // Implicitly promote a 64-bit scalar to a vector.
+  def : Pat<(v2f64 (scalar_to_vector FR64:$src)),
+            (COPY_TO_REGCLASS FR64:$src, VR128)>;
+}
+
+let Predicates = [HasVLX] in {
+  // Implicitly promote a 32-bit scalar to a vector.
+  def : Pat<(v4f32 (scalar_to_vector FR32X:$src)),
+            (COPY_TO_REGCLASS FR32X:$src, VR128X)>;
+  // Implicitly promote a 64-bit scalar to a vector.
+  def : Pat<(v2f64 (scalar_to_vector FR64X:$src)),
+            (COPY_TO_REGCLASS FR64X:$src, VR128X)>;
+}
 
 //===----------------------------------------------------------------------===//
 // Subvector tricks
@@ -378,7 +397,7 @@ let Predicates = [HasBWI, HasDQI] in {
             (COPY_TO_REGCLASS (KMOVBkk VK8:$mask), VK64)>;
 }
 
-let Predicates = [HasBWI, HasVLX] in {
+let Predicates = [HasBWI] in {
   def : Pat<(v32i1 (insert_subvector (v32i1 immAllZerosV),
                                      (v1i1 VK1:$mask), (iPTR 0))),
             (KSHIFTRDri (KSHIFTLDri (COPY_TO_REGCLASS VK1:$mask, VK32),
@@ -446,8 +465,6 @@ def : Pat<(loadf128 addr:$src),
           (VMOVUPSZ128rm addr:$src)>;
 }
 
-// With SSE2 the DAG combiner converts fp logic ops to integer logic ops to
-// reduce patterns.
 let Predicates = [UseSSE1] in {
 // andps is shorter than andpd or pand. andps is SSE and andpd/pand are in SSE2
 def : Pat<(f128 (X86fand VR128:$src1, (memopf128 addr:$src2))),
@@ -469,4 +486,23 @@ def : Pat<(f128 (X86fxor VR128:$src1, VR128:$src2)),
           (XORPSrr VR128:$src1, VR128:$src2)>;
 }
 
+let Predicates = [HasAVX] in {
+// andps is shorter than andpd or pand. andps is SSE and andpd/pand are in SSE2
+def : Pat<(f128 (X86fand VR128:$src1, (loadf128 addr:$src2))),
+          (VANDPSrm VR128:$src1, f128mem:$src2)>;
 
+def : Pat<(f128 (X86fand VR128:$src1, VR128:$src2)),
+          (VANDPSrr VR128:$src1, VR128:$src2)>;
+
+def : Pat<(f128 (X86for VR128:$src1, (loadf128 addr:$src2))),
+          (VORPSrm VR128:$src1, f128mem:$src2)>;
+
+def : Pat<(f128 (X86for VR128:$src1, VR128:$src2)),
+          (VORPSrr VR128:$src1, VR128:$src2)>;
+
+def : Pat<(f128 (X86fxor VR128:$src1, (loadf128 addr:$src2))),
+          (VXORPSrm VR128:$src1, f128mem:$src2)>;
+
+def : Pat<(f128 (X86fxor VR128:$src1, VR128:$src2)),
+          (VXORPSrr VR128:$src1, VR128:$src2)>;
+}

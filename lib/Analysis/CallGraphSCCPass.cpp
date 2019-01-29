@@ -1,9 +1,8 @@
 //===- CallGraphSCCPass.cpp - Pass that operates BU on call graph ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -633,22 +632,39 @@ namespace {
 
     bool runOnSCC(CallGraphSCC &SCC) override {
       bool BannerPrinted = false;
-      auto PrintBannerOnce = [&] () {
+      auto PrintBannerOnce = [&]() {
         if (BannerPrinted)
           return;
         OS << Banner;
         BannerPrinted = true;
-        };
+      };
+
+      bool NeedModule = llvm::forcePrintModuleIR();
+      if (isFunctionInPrintList("*") && NeedModule) {
+        PrintBannerOnce();
+        OS << "\n";
+        SCC.getCallGraph().getModule().print(OS, nullptr);
+        return false;
+      }
+      bool FoundFunction = false;
       for (CallGraphNode *CGN : SCC) {
         if (Function *F = CGN->getFunction()) {
           if (!F->isDeclaration() && isFunctionInPrintList(F->getName())) {
-            PrintBannerOnce();
-            F->print(OS);
+            FoundFunction = true;
+            if (!NeedModule) {
+              PrintBannerOnce();
+              F->print(OS);
+            }
           }
         } else if (isFunctionInPrintList("*")) {
           PrintBannerOnce();
           OS << "\nPrinting <null> Function\n";
         }
+      }
+      if (NeedModule && FoundFunction) {
+        PrintBannerOnce();
+        OS << "\n";
+        SCC.getCallGraph().getModule().print(OS, nullptr);
       }
       return false;
     }

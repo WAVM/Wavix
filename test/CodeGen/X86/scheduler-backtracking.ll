@@ -3,7 +3,8 @@
 ; RUN: llc -mtriple=x86_64-- < %s -pre-RA-sched=list-hybrid | FileCheck %s --check-prefix=HYBRID
 ; RUN: llc -mtriple=x86_64-- < %s -pre-RA-sched=list-burr   | FileCheck %s --check-prefix=BURR
 ; RUN: llc -mtriple=x86_64-- < %s -pre-RA-sched=source      | FileCheck %s --check-prefix=SRC
-; RUN: llc -mtriple=x86_64-- < %s -pre-RA-sched=linearize   | FileCheck %s --check-prefix=LIN
+; FIXME: Fix machine verifier issues and remove -verify-machineinstrs=0. PR39452.
+; RUN: llc -mtriple=x86_64-- < %s -pre-RA-sched=linearize -verify-machineinstrs=0 | FileCheck %s --check-prefix=LIN
 
 ; PR22304 https://llvm.org/bugs/show_bug.cgi?id=22304
 ; Tests checking backtracking in source scheduler. llc used to crash on them.
@@ -11,450 +12,230 @@
 define i256 @test1(i256 %a) nounwind {
 ; ILP-LABEL: test1:
 ; ILP:       # %bb.0:
-; ILP-NEXT:    pushq %rbp
-; ILP-NEXT:    pushq %r15
 ; ILP-NEXT:    pushq %r14
-; ILP-NEXT:    pushq %r13
-; ILP-NEXT:    pushq %r12
 ; ILP-NEXT:    pushq %rbx
-; ILP-NEXT:    movq %rcx, %r9
-; ILP-NEXT:    movq %rdi, {{[-0-9]+}}(%r{{[sb]}}p) # 8-byte Spill
-; ILP-NEXT:    xorl %eax, %eax
-; ILP-NEXT:    addq $1, %rsi
-; ILP-NEXT:    adcq $0, %rdx
-; ILP-NEXT:    adcq $0, %r9
-; ILP-NEXT:    adcq $0, %r8
-; ILP-NEXT:    leal 1(%rsi,%rsi), %edi
-; ILP-NEXT:    movl $1, %ebp
+; ILP-NEXT:    movq %rdi, %rax
+; ILP-NEXT:    xorl %r8d, %r8d
+; ILP-NEXT:    addb %sil, %sil
+; ILP-NEXT:    addb $2, %sil
+; ILP-NEXT:    orb $1, %sil
+; ILP-NEXT:    movl $1, %r10d
 ; ILP-NEXT:    xorl %r14d, %r14d
-; ILP-NEXT:    movl %edi, %ecx
-; ILP-NEXT:    shldq %cl, %rbp, %r14
-; ILP-NEXT:    movl $1, %r11d
-; ILP-NEXT:    shlq %cl, %r11
-; ILP-NEXT:    movb $-128, %r10b
-; ILP-NEXT:    subb %dil, %r10b
-; ILP-NEXT:    movq %r9, %r13
-; ILP-NEXT:    movl %r10d, %ecx
-; ILP-NEXT:    shlq %cl, %r13
-; ILP-NEXT:    movl $1, %r12d
-; ILP-NEXT:    shrdq %cl, %rax, %r12
-; ILP-NEXT:    xorl %r15d, %r15d
-; ILP-NEXT:    movl %edi, %ecx
-; ILP-NEXT:    shldq %cl, %r15, %r15
-; ILP-NEXT:    movq %rsi, %rbx
-; ILP-NEXT:    shrdq %cl, %rdx, %rbx
-; ILP-NEXT:    shrq %cl, %rdx
-; ILP-NEXT:    addb $-128, %cl
-; ILP-NEXT:    shrdq %cl, %r8, %r9
-; ILP-NEXT:    testb $64, %dil
-; ILP-NEXT:    cmovneq %r11, %r14
-; ILP-NEXT:    cmoveq %rbx, %rdx
-; ILP-NEXT:    cmovneq %rax, %r15
-; ILP-NEXT:    cmovneq %rax, %r11
-; ILP-NEXT:    testb $64, %r10b
-; ILP-NEXT:    cmovneq %rax, %r12
-; ILP-NEXT:    cmovneq %rax, %r13
+; ILP-NEXT:    movl %esi, %ecx
+; ILP-NEXT:    shldq %cl, %r10, %r14
+; ILP-NEXT:    movl $1, %edx
+; ILP-NEXT:    shlq %cl, %rdx
+; ILP-NEXT:    movb $-128, %r11b
+; ILP-NEXT:    subb %sil, %r11b
+; ILP-NEXT:    leal -128(%rsi), %r9d
+; ILP-NEXT:    xorl %edi, %edi
+; ILP-NEXT:    movl %r9d, %ecx
+; ILP-NEXT:    shldq %cl, %r10, %rdi
 ; ILP-NEXT:    movl $1, %ebx
 ; ILP-NEXT:    shlq %cl, %rbx
-; ILP-NEXT:    orl %edx, %r13d
-; ILP-NEXT:    xorl %edx, %edx
-; ILP-NEXT:    movl $1, %ebp
-; ILP-NEXT:    shldq %cl, %rbp, %rdx
-; ILP-NEXT:    shrq %cl, %r8
-; ILP-NEXT:    testb $64, %cl
-; ILP-NEXT:    cmoveq %r9, %r8
-; ILP-NEXT:    cmovneq %rbx, %rdx
-; ILP-NEXT:    cmovneq %rax, %rbx
-; ILP-NEXT:    testb %dil, %dil
-; ILP-NEXT:    cmovsq %rax, %r14
-; ILP-NEXT:    cmovsq %rax, %r11
-; ILP-NEXT:    jns .LBB0_2
-; ILP-NEXT:  # %bb.1:
-; ILP-NEXT:    movl %r8d, %r13d
-; ILP-NEXT:  .LBB0_2:
-; ILP-NEXT:    je .LBB0_4
-; ILP-NEXT:  # %bb.3:
-; ILP-NEXT:    movl %r13d, %esi
-; ILP-NEXT:  .LBB0_4:
-; ILP-NEXT:    cmovnsq %r12, %rbx
-; ILP-NEXT:    cmoveq %rax, %rbx
-; ILP-NEXT:    cmovnsq %r15, %rdx
-; ILP-NEXT:    cmoveq %rax, %rdx
-; ILP-NEXT:    testb $1, %sil
-; ILP-NEXT:    cmovneq %rax, %rdx
-; ILP-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; ILP-NEXT:    movq %rdx, 24(%rax)
-; ILP-NEXT:    cmovneq %rax, %rbx
-; ILP-NEXT:    movq %rbx, 16(%rax)
-; ILP-NEXT:    cmovneq %rax, %r14
+; ILP-NEXT:    movl %r11d, %ecx
+; ILP-NEXT:    shrdq %cl, %r8, %r10
+; ILP-NEXT:    testb $64, %sil
+; ILP-NEXT:    cmovneq %rdx, %r14
+; ILP-NEXT:    cmovneq %r8, %rdx
+; ILP-NEXT:    testb $64, %r11b
+; ILP-NEXT:    cmovneq %r8, %r10
+; ILP-NEXT:    testb $64, %r9b
+; ILP-NEXT:    cmovneq %rbx, %rdi
+; ILP-NEXT:    cmovneq %r8, %rbx
+; ILP-NEXT:    testb %sil, %sil
+; ILP-NEXT:    cmovsq %r8, %r14
+; ILP-NEXT:    cmovsq %r8, %rdx
 ; ILP-NEXT:    movq %r14, 8(%rax)
-; ILP-NEXT:    cmovneq %rax, %r11
-; ILP-NEXT:    movq %r11, (%rax)
+; ILP-NEXT:    movq %rdx, (%rax)
+; ILP-NEXT:    cmovnsq %r8, %rdi
+; ILP-NEXT:    cmoveq %r8, %rdi
+; ILP-NEXT:    movq %rdi, 24(%rax)
+; ILP-NEXT:    cmovnsq %r10, %rbx
+; ILP-NEXT:    cmoveq %r8, %rbx
+; ILP-NEXT:    movq %rbx, 16(%rax)
 ; ILP-NEXT:    popq %rbx
-; ILP-NEXT:    popq %r12
-; ILP-NEXT:    popq %r13
 ; ILP-NEXT:    popq %r14
-; ILP-NEXT:    popq %r15
-; ILP-NEXT:    popq %rbp
 ; ILP-NEXT:    retq
 ;
 ; HYBRID-LABEL: test1:
 ; HYBRID:       # %bb.0:
-; HYBRID-NEXT:    pushq %rbp
-; HYBRID-NEXT:    pushq %r15
-; HYBRID-NEXT:    pushq %r14
-; HYBRID-NEXT:    pushq %r13
-; HYBRID-NEXT:    pushq %r12
-; HYBRID-NEXT:    pushq %rbx
-; HYBRID-NEXT:    movq %rcx, %r9
 ; HYBRID-NEXT:    movq %rdi, %rax
-; HYBRID-NEXT:    addq $1, %rsi
-; HYBRID-NEXT:    adcq $0, %rdx
-; HYBRID-NEXT:    adcq $0, %r9
-; HYBRID-NEXT:    adcq $0, %r8
-; HYBRID-NEXT:    xorl %r10d, %r10d
-; HYBRID-NEXT:    leal 1(%rsi,%rsi), %edi
-; HYBRID-NEXT:    xorl %r14d, %r14d
-; HYBRID-NEXT:    movl %edi, %ecx
-; HYBRID-NEXT:    shldq %cl, %r14, %r14
-; HYBRID-NEXT:    testb $64, %dil
-; HYBRID-NEXT:    cmovneq %r10, %r14
-; HYBRID-NEXT:    movl $1, %ebp
-; HYBRID-NEXT:    movl $1, %r12d
-; HYBRID-NEXT:    shlq %cl, %r12
-; HYBRID-NEXT:    testb $64, %dil
-; HYBRID-NEXT:    movq %r12, %r11
-; HYBRID-NEXT:    cmovneq %r10, %r11
-; HYBRID-NEXT:    movq %rsi, %rbx
-; HYBRID-NEXT:    shrdq %cl, %rdx, %rbx
-; HYBRID-NEXT:    shrq %cl, %rdx
-; HYBRID-NEXT:    testb $64, %dil
-; HYBRID-NEXT:    cmoveq %rbx, %rdx
-; HYBRID-NEXT:    xorl %r15d, %r15d
-; HYBRID-NEXT:    shldq %cl, %rbp, %r15
-; HYBRID-NEXT:    testb $64, %dil
-; HYBRID-NEXT:    cmovneq %r12, %r15
+; HYBRID-NEXT:    addb %sil, %sil
+; HYBRID-NEXT:    addb $2, %sil
+; HYBRID-NEXT:    orb $1, %sil
 ; HYBRID-NEXT:    movb $-128, %cl
-; HYBRID-NEXT:    subb %dil, %cl
-; HYBRID-NEXT:    movq %r9, %r13
-; HYBRID-NEXT:    shlq %cl, %r13
-; HYBRID-NEXT:    movl $1, %r12d
-; HYBRID-NEXT:    shrdq %cl, %r10, %r12
-; HYBRID-NEXT:    testb $64, %cl
-; HYBRID-NEXT:    cmovneq %r10, %r12
-; HYBRID-NEXT:    cmovneq %r10, %r13
-; HYBRID-NEXT:    orl %edx, %r13d
-; HYBRID-NEXT:    movl %edi, %ecx
-; HYBRID-NEXT:    addb $-128, %cl
+; HYBRID-NEXT:    subb %sil, %cl
+; HYBRID-NEXT:    xorl %r8d, %r8d
+; HYBRID-NEXT:    movl $1, %r11d
+; HYBRID-NEXT:    movl $1, %r9d
 ; HYBRID-NEXT:    shrdq %cl, %r8, %r9
-; HYBRID-NEXT:    shrq %cl, %r8
-; HYBRID-NEXT:    xorl %edx, %edx
-; HYBRID-NEXT:    shldq %cl, %rbp, %rdx
-; HYBRID-NEXT:    shlq %cl, %rbp
 ; HYBRID-NEXT:    testb $64, %cl
-; HYBRID-NEXT:    cmovneq %rbp, %rdx
-; HYBRID-NEXT:    cmoveq %r9, %r8
-; HYBRID-NEXT:    cmovneq %r10, %rbp
-; HYBRID-NEXT:    testb %dil, %dil
-; HYBRID-NEXT:    jns .LBB0_2
-; HYBRID-NEXT:  # %bb.1:
-; HYBRID-NEXT:    movl %r8d, %r13d
-; HYBRID-NEXT:  .LBB0_2:
-; HYBRID-NEXT:    je .LBB0_4
-; HYBRID-NEXT:  # %bb.3:
-; HYBRID-NEXT:    movl %r13d, %esi
-; HYBRID-NEXT:  .LBB0_4:
-; HYBRID-NEXT:    cmovsq %r10, %r15
-; HYBRID-NEXT:    cmovnsq %r12, %rbp
-; HYBRID-NEXT:    cmoveq %r10, %rbp
-; HYBRID-NEXT:    cmovnsq %r14, %rdx
-; HYBRID-NEXT:    cmoveq %r10, %rdx
-; HYBRID-NEXT:    cmovsq %r10, %r11
-; HYBRID-NEXT:    testb $1, %sil
-; HYBRID-NEXT:    cmovneq %rax, %rdx
-; HYBRID-NEXT:    movq %rdx, 24(%rax)
-; HYBRID-NEXT:    cmovneq %rax, %rbp
-; HYBRID-NEXT:    movq %rbp, 16(%rax)
-; HYBRID-NEXT:    cmovneq %rax, %r15
-; HYBRID-NEXT:    movq %r15, 8(%rax)
-; HYBRID-NEXT:    cmovneq %rax, %r11
+; HYBRID-NEXT:    cmovneq %r8, %r9
+; HYBRID-NEXT:    xorl %r10d, %r10d
+; HYBRID-NEXT:    movl %esi, %ecx
+; HYBRID-NEXT:    shldq %cl, %r11, %r10
+; HYBRID-NEXT:    leal -128(%rsi), %ecx
+; HYBRID-NEXT:    xorl %edi, %edi
+; HYBRID-NEXT:    shldq %cl, %r11, %rdi
+; HYBRID-NEXT:    movl $1, %edx
+; HYBRID-NEXT:    shlq %cl, %rdx
+; HYBRID-NEXT:    testb $64, %cl
+; HYBRID-NEXT:    cmovneq %rdx, %rdi
+; HYBRID-NEXT:    cmovneq %r8, %rdx
+; HYBRID-NEXT:    movl %esi, %ecx
+; HYBRID-NEXT:    shlq %cl, %r11
+; HYBRID-NEXT:    testb $64, %sil
+; HYBRID-NEXT:    cmovneq %r11, %r10
+; HYBRID-NEXT:    cmovneq %r8, %r11
+; HYBRID-NEXT:    testb %sil, %sil
+; HYBRID-NEXT:    cmovsq %r8, %r10
+; HYBRID-NEXT:    movq %r10, 8(%rax)
+; HYBRID-NEXT:    cmovsq %r8, %r11
 ; HYBRID-NEXT:    movq %r11, (%rax)
-; HYBRID-NEXT:    popq %rbx
-; HYBRID-NEXT:    popq %r12
-; HYBRID-NEXT:    popq %r13
-; HYBRID-NEXT:    popq %r14
-; HYBRID-NEXT:    popq %r15
-; HYBRID-NEXT:    popq %rbp
+; HYBRID-NEXT:    cmovnsq %r8, %rdi
+; HYBRID-NEXT:    cmoveq %r8, %rdi
+; HYBRID-NEXT:    movq %rdi, 24(%rax)
+; HYBRID-NEXT:    cmovnsq %r9, %rdx
+; HYBRID-NEXT:    cmoveq %r8, %rdx
+; HYBRID-NEXT:    movq %rdx, 16(%rax)
 ; HYBRID-NEXT:    retq
 ;
 ; BURR-LABEL: test1:
 ; BURR:       # %bb.0:
-; BURR-NEXT:    pushq %rbp
-; BURR-NEXT:    pushq %r15
-; BURR-NEXT:    pushq %r14
-; BURR-NEXT:    pushq %r13
-; BURR-NEXT:    pushq %r12
-; BURR-NEXT:    pushq %rbx
-; BURR-NEXT:    movq %rcx, %r9
 ; BURR-NEXT:    movq %rdi, %rax
-; BURR-NEXT:    addq $1, %rsi
-; BURR-NEXT:    adcq $0, %rdx
-; BURR-NEXT:    adcq $0, %r9
-; BURR-NEXT:    adcq $0, %r8
-; BURR-NEXT:    xorl %r10d, %r10d
-; BURR-NEXT:    leal 1(%rsi,%rsi), %edi
-; BURR-NEXT:    xorl %r14d, %r14d
-; BURR-NEXT:    movl %edi, %ecx
-; BURR-NEXT:    shldq %cl, %r14, %r14
-; BURR-NEXT:    testb $64, %dil
-; BURR-NEXT:    cmovneq %r10, %r14
-; BURR-NEXT:    movl $1, %ebp
-; BURR-NEXT:    movl $1, %r12d
-; BURR-NEXT:    shlq %cl, %r12
-; BURR-NEXT:    testb $64, %dil
-; BURR-NEXT:    movq %r12, %r11
-; BURR-NEXT:    cmovneq %r10, %r11
-; BURR-NEXT:    movq %rsi, %rbx
-; BURR-NEXT:    shrdq %cl, %rdx, %rbx
-; BURR-NEXT:    shrq %cl, %rdx
-; BURR-NEXT:    testb $64, %dil
-; BURR-NEXT:    cmoveq %rbx, %rdx
-; BURR-NEXT:    xorl %r15d, %r15d
-; BURR-NEXT:    shldq %cl, %rbp, %r15
-; BURR-NEXT:    testb $64, %dil
-; BURR-NEXT:    cmovneq %r12, %r15
+; BURR-NEXT:    addb %sil, %sil
+; BURR-NEXT:    addb $2, %sil
+; BURR-NEXT:    orb $1, %sil
 ; BURR-NEXT:    movb $-128, %cl
-; BURR-NEXT:    subb %dil, %cl
-; BURR-NEXT:    movq %r9, %r13
-; BURR-NEXT:    shlq %cl, %r13
-; BURR-NEXT:    movl $1, %r12d
-; BURR-NEXT:    shrdq %cl, %r10, %r12
-; BURR-NEXT:    testb $64, %cl
-; BURR-NEXT:    cmovneq %r10, %r12
-; BURR-NEXT:    cmovneq %r10, %r13
-; BURR-NEXT:    orl %edx, %r13d
-; BURR-NEXT:    movl %edi, %ecx
-; BURR-NEXT:    addb $-128, %cl
+; BURR-NEXT:    subb %sil, %cl
+; BURR-NEXT:    xorl %r8d, %r8d
+; BURR-NEXT:    movl $1, %r11d
+; BURR-NEXT:    movl $1, %r9d
 ; BURR-NEXT:    shrdq %cl, %r8, %r9
-; BURR-NEXT:    xorl %edx, %edx
-; BURR-NEXT:    shldq %cl, %rbp, %rdx
-; BURR-NEXT:    shrq %cl, %r8
-; BURR-NEXT:    shlq %cl, %rbp
 ; BURR-NEXT:    testb $64, %cl
-; BURR-NEXT:    cmovneq %rbp, %rdx
-; BURR-NEXT:    cmoveq %r9, %r8
-; BURR-NEXT:    cmovneq %r10, %rbp
-; BURR-NEXT:    testb %dil, %dil
-; BURR-NEXT:    jns .LBB0_2
-; BURR-NEXT:  # %bb.1:
-; BURR-NEXT:    movl %r8d, %r13d
-; BURR-NEXT:  .LBB0_2:
-; BURR-NEXT:    je .LBB0_4
-; BURR-NEXT:  # %bb.3:
-; BURR-NEXT:    movl %r13d, %esi
-; BURR-NEXT:  .LBB0_4:
-; BURR-NEXT:    cmovsq %r10, %r15
-; BURR-NEXT:    cmovnsq %r12, %rbp
-; BURR-NEXT:    cmoveq %r10, %rbp
-; BURR-NEXT:    cmovnsq %r14, %rdx
-; BURR-NEXT:    cmoveq %r10, %rdx
-; BURR-NEXT:    cmovsq %r10, %r11
-; BURR-NEXT:    testb $1, %sil
-; BURR-NEXT:    cmovneq %rax, %rdx
-; BURR-NEXT:    movq %rdx, 24(%rax)
-; BURR-NEXT:    cmovneq %rax, %rbp
-; BURR-NEXT:    movq %rbp, 16(%rax)
-; BURR-NEXT:    cmovneq %rax, %r15
-; BURR-NEXT:    movq %r15, 8(%rax)
-; BURR-NEXT:    cmovneq %rax, %r11
+; BURR-NEXT:    cmovneq %r8, %r9
+; BURR-NEXT:    xorl %r10d, %r10d
+; BURR-NEXT:    movl %esi, %ecx
+; BURR-NEXT:    shldq %cl, %r11, %r10
+; BURR-NEXT:    leal -128(%rsi), %ecx
+; BURR-NEXT:    xorl %edi, %edi
+; BURR-NEXT:    shldq %cl, %r11, %rdi
+; BURR-NEXT:    movl $1, %edx
+; BURR-NEXT:    shlq %cl, %rdx
+; BURR-NEXT:    testb $64, %cl
+; BURR-NEXT:    cmovneq %rdx, %rdi
+; BURR-NEXT:    cmovneq %r8, %rdx
+; BURR-NEXT:    movl %esi, %ecx
+; BURR-NEXT:    shlq %cl, %r11
+; BURR-NEXT:    testb $64, %sil
+; BURR-NEXT:    cmovneq %r11, %r10
+; BURR-NEXT:    cmovneq %r8, %r11
+; BURR-NEXT:    testb %sil, %sil
+; BURR-NEXT:    cmovsq %r8, %r10
+; BURR-NEXT:    movq %r10, 8(%rax)
+; BURR-NEXT:    cmovsq %r8, %r11
 ; BURR-NEXT:    movq %r11, (%rax)
-; BURR-NEXT:    popq %rbx
-; BURR-NEXT:    popq %r12
-; BURR-NEXT:    popq %r13
-; BURR-NEXT:    popq %r14
-; BURR-NEXT:    popq %r15
-; BURR-NEXT:    popq %rbp
+; BURR-NEXT:    cmovnsq %r8, %rdi
+; BURR-NEXT:    cmoveq %r8, %rdi
+; BURR-NEXT:    movq %rdi, 24(%rax)
+; BURR-NEXT:    cmovnsq %r9, %rdx
+; BURR-NEXT:    cmoveq %r8, %rdx
+; BURR-NEXT:    movq %rdx, 16(%rax)
 ; BURR-NEXT:    retq
 ;
 ; SRC-LABEL: test1:
 ; SRC:       # %bb.0:
-; SRC-NEXT:    pushq %rbp
-; SRC-NEXT:    pushq %r15
-; SRC-NEXT:    pushq %r14
-; SRC-NEXT:    pushq %r13
-; SRC-NEXT:    pushq %r12
 ; SRC-NEXT:    pushq %rbx
-; SRC-NEXT:    movq %rcx, %r9
 ; SRC-NEXT:    movq %rdi, %rax
-; SRC-NEXT:    addq $1, %rsi
-; SRC-NEXT:    adcq $0, %rdx
-; SRC-NEXT:    adcq $0, %r9
-; SRC-NEXT:    adcq $0, %r8
-; SRC-NEXT:    leal 1(%rsi,%rsi), %r11d
-; SRC-NEXT:    movb $-128, %r10b
-; SRC-NEXT:    subb %r11b, %r10b
-; SRC-NEXT:    movq %r9, %r12
-; SRC-NEXT:    movl %r10d, %ecx
-; SRC-NEXT:    shlq %cl, %r12
-; SRC-NEXT:    movq %rsi, %rbp
-; SRC-NEXT:    movl %r11d, %ecx
-; SRC-NEXT:    shrdq %cl, %rdx, %rbp
-; SRC-NEXT:    shrq %cl, %rdx
-; SRC-NEXT:    xorl %r15d, %r15d
+; SRC-NEXT:    addb %sil, %sil
+; SRC-NEXT:    addb $2, %sil
+; SRC-NEXT:    orb $1, %sil
+; SRC-NEXT:    movb $-128, %cl
+; SRC-NEXT:    subb %sil, %cl
+; SRC-NEXT:    xorl %r8d, %r8d
 ; SRC-NEXT:    movl $1, %edi
-; SRC-NEXT:    xorl %r14d, %r14d
-; SRC-NEXT:    shldq %cl, %rdi, %r14
-; SRC-NEXT:    xorl %r13d, %r13d
-; SRC-NEXT:    shldq %cl, %r13, %r13
+; SRC-NEXT:    movl $1, %r10d
+; SRC-NEXT:    shrdq %cl, %r8, %r10
+; SRC-NEXT:    testb $64, %cl
+; SRC-NEXT:    cmovneq %r8, %r10
+; SRC-NEXT:    leal -128(%rsi), %r9d
+; SRC-NEXT:    xorl %edx, %edx
+; SRC-NEXT:    movl %r9d, %ecx
+; SRC-NEXT:    shldq %cl, %rdi, %rdx
+; SRC-NEXT:    xorl %r11d, %r11d
+; SRC-NEXT:    movl %esi, %ecx
+; SRC-NEXT:    shldq %cl, %rdi, %r11
 ; SRC-NEXT:    movl $1, %ebx
 ; SRC-NEXT:    shlq %cl, %rbx
-; SRC-NEXT:    testb $64, %r11b
-; SRC-NEXT:    cmoveq %rbp, %rdx
-; SRC-NEXT:    cmovneq %rbx, %r14
-; SRC-NEXT:    cmovneq %r15, %rbx
-; SRC-NEXT:    cmovneq %r15, %r13
-; SRC-NEXT:    movl $1, %ebp
-; SRC-NEXT:    movl %r10d, %ecx
-; SRC-NEXT:    shrdq %cl, %r15, %rbp
-; SRC-NEXT:    testb $64, %r10b
-; SRC-NEXT:    cmovneq %r15, %r12
-; SRC-NEXT:    cmovneq %r15, %rbp
-; SRC-NEXT:    orl %edx, %r12d
-; SRC-NEXT:    movl %r11d, %ecx
-; SRC-NEXT:    addb $-128, %cl
-; SRC-NEXT:    shrdq %cl, %r8, %r9
-; SRC-NEXT:    shrq %cl, %r8
-; SRC-NEXT:    xorl %edx, %edx
-; SRC-NEXT:    shldq %cl, %rdi, %rdx
+; SRC-NEXT:    testb $64, %sil
+; SRC-NEXT:    cmovneq %rbx, %r11
+; SRC-NEXT:    cmovneq %r8, %rbx
+; SRC-NEXT:    movl %r9d, %ecx
 ; SRC-NEXT:    shlq %cl, %rdi
-; SRC-NEXT:    testb $64, %cl
-; SRC-NEXT:    cmoveq %r9, %r8
+; SRC-NEXT:    testb $64, %r9b
 ; SRC-NEXT:    cmovneq %rdi, %rdx
-; SRC-NEXT:    cmovneq %r15, %rdi
-; SRC-NEXT:    testb %r11b, %r11b
-; SRC-NEXT:    jns .LBB0_2
-; SRC-NEXT:  # %bb.1:
-; SRC-NEXT:    movl %r8d, %r12d
-; SRC-NEXT:  .LBB0_2:
-; SRC-NEXT:    je .LBB0_4
-; SRC-NEXT:  # %bb.3:
-; SRC-NEXT:    movl %r12d, %esi
-; SRC-NEXT:  .LBB0_4:
-; SRC-NEXT:    cmovnsq %r13, %rdx
-; SRC-NEXT:    cmoveq %r15, %rdx
-; SRC-NEXT:    cmovnsq %rbp, %rdi
-; SRC-NEXT:    cmoveq %r15, %rdi
-; SRC-NEXT:    cmovsq %r15, %r14
-; SRC-NEXT:    cmovsq %r15, %rbx
-; SRC-NEXT:    testb $1, %sil
-; SRC-NEXT:    cmovneq %rax, %rbx
-; SRC-NEXT:    cmovneq %rax, %r14
-; SRC-NEXT:    cmovneq %rax, %rdi
-; SRC-NEXT:    cmovneq %rax, %rdx
+; SRC-NEXT:    cmovneq %r8, %rdi
+; SRC-NEXT:    testb %sil, %sil
+; SRC-NEXT:    cmovnsq %r10, %rdi
+; SRC-NEXT:    cmoveq %r8, %rdi
+; SRC-NEXT:    cmovnsq %r8, %rdx
+; SRC-NEXT:    cmoveq %r8, %rdx
+; SRC-NEXT:    cmovsq %r8, %r11
+; SRC-NEXT:    cmovsq %r8, %rbx
+; SRC-NEXT:    movq %r11, 8(%rax)
+; SRC-NEXT:    movq %rbx, (%rax)
 ; SRC-NEXT:    movq %rdx, 24(%rax)
 ; SRC-NEXT:    movq %rdi, 16(%rax)
-; SRC-NEXT:    movq %r14, 8(%rax)
-; SRC-NEXT:    movq %rbx, (%rax)
 ; SRC-NEXT:    popq %rbx
-; SRC-NEXT:    popq %r12
-; SRC-NEXT:    popq %r13
-; SRC-NEXT:    popq %r14
-; SRC-NEXT:    popq %r15
-; SRC-NEXT:    popq %rbp
 ; SRC-NEXT:    retq
 ;
 ; LIN-LABEL: test1:
 ; LIN:       # %bb.0:
-; LIN-NEXT:    pushq %rbp
-; LIN-NEXT:    pushq %r15
-; LIN-NEXT:    pushq %r14
-; LIN-NEXT:    pushq %r12
-; LIN-NEXT:    pushq %rbx
-; LIN-NEXT:    movq %rcx, %r9
 ; LIN-NEXT:    movq %rdi, %rax
-; LIN-NEXT:    xorl %r15d, %r15d
-; LIN-NEXT:    movl $1, %r14d
-; LIN-NEXT:    addq $1, %rsi
-; LIN-NEXT:    leal 1(%rsi,%rsi), %ebp
-; LIN-NEXT:    movl $1, %r12d
-; LIN-NEXT:    movl %ebp, %ecx
-; LIN-NEXT:    shlq %cl, %r12
-; LIN-NEXT:    testb $64, %bpl
-; LIN-NEXT:    movq %r12, %rbx
-; LIN-NEXT:    cmovneq %r15, %rbx
-; LIN-NEXT:    testb %bpl, %bpl
-; LIN-NEXT:    cmovsq %r15, %rbx
-; LIN-NEXT:    adcq $0, %rdx
-; LIN-NEXT:    adcq $0, %r9
-; LIN-NEXT:    adcq $0, %r8
-; LIN-NEXT:    movl %ebp, %r10d
-; LIN-NEXT:    addb $-128, %r10b
-; LIN-NEXT:    movq %r9, %rdi
-; LIN-NEXT:    movl %r10d, %ecx
-; LIN-NEXT:    shrdq %cl, %r8, %rdi
-; LIN-NEXT:    shrq %cl, %r8
-; LIN-NEXT:    testb $64, %r10b
-; LIN-NEXT:    cmoveq %rdi, %r8
-; LIN-NEXT:    movq %rsi, %rdi
-; LIN-NEXT:    movl %ebp, %ecx
-; LIN-NEXT:    shrdq %cl, %rdx, %rdi
-; LIN-NEXT:    shrq %cl, %rdx
-; LIN-NEXT:    cmoveq %rdi, %rdx
-; LIN-NEXT:    movb $-128, %r11b
-; LIN-NEXT:    subb %bpl, %r11b
-; LIN-NEXT:    movl %r11d, %ecx
-; LIN-NEXT:    shlq %cl, %r9
-; LIN-NEXT:    testb $64, %r11b
-; LIN-NEXT:    cmovneq %r15, %r9
-; LIN-NEXT:    orl %edx, %r9d
-; LIN-NEXT:    jns .LBB0_2
-; LIN-NEXT:  # %bb.1:
-; LIN-NEXT:    movl %r8d, %r9d
-; LIN-NEXT:  .LBB0_2:
-; LIN-NEXT:    je .LBB0_4
-; LIN-NEXT:  # %bb.3:
-; LIN-NEXT:    movl %r9d, %esi
-; LIN-NEXT:  .LBB0_4:
-; LIN-NEXT:    testb $1, %sil
-; LIN-NEXT:    cmovneq %rax, %rbx
-; LIN-NEXT:    movq %rbx, (%rax)
-; LIN-NEXT:    xorl %edx, %edx
-; LIN-NEXT:    movl %ebp, %ecx
-; LIN-NEXT:    shldq %cl, %r14, %rdx
-; LIN-NEXT:    cmovneq %r12, %rdx
-; LIN-NEXT:    cmovsq %r15, %rdx
-; LIN-NEXT:    cmovneq %rax, %rdx
-; LIN-NEXT:    movq %rdx, 8(%rax)
+; LIN-NEXT:    xorl %r9d, %r9d
+; LIN-NEXT:    movl $1, %r8d
+; LIN-NEXT:    addb %sil, %sil
+; LIN-NEXT:    addb $2, %sil
+; LIN-NEXT:    orb $1, %sil
+; LIN-NEXT:    movl $1, %edx
+; LIN-NEXT:    movl %esi, %ecx
+; LIN-NEXT:    shlq %cl, %rdx
+; LIN-NEXT:    testb $64, %sil
+; LIN-NEXT:    movq %rdx, %rcx
+; LIN-NEXT:    cmovneq %r9, %rcx
+; LIN-NEXT:    testb %sil, %sil
+; LIN-NEXT:    cmovsq %r9, %rcx
+; LIN-NEXT:    movq %rcx, (%rdi)
+; LIN-NEXT:    xorl %edi, %edi
+; LIN-NEXT:    movl %esi, %ecx
+; LIN-NEXT:    shldq %cl, %r8, %rdi
+; LIN-NEXT:    cmovneq %rdx, %rdi
+; LIN-NEXT:    cmovsq %r9, %rdi
+; LIN-NEXT:    movq %rdi, 8(%rax)
+; LIN-NEXT:    leal -128(%rsi), %r10d
 ; LIN-NEXT:    movl $1, %edx
 ; LIN-NEXT:    movl %r10d, %ecx
 ; LIN-NEXT:    shlq %cl, %rdx
-; LIN-NEXT:    movq %rdx, %rsi
-; LIN-NEXT:    cmovneq %r15, %rsi
-; LIN-NEXT:    movl $1, %edi
-; LIN-NEXT:    movl %r11d, %ecx
-; LIN-NEXT:    shrdq %cl, %r15, %rdi
-; LIN-NEXT:    cmovneq %r15, %rdi
-; LIN-NEXT:    cmovsq %rsi, %rdi
-; LIN-NEXT:    cmoveq %r15, %rdi
-; LIN-NEXT:    cmovneq %rax, %rdi
-; LIN-NEXT:    movq %rdi, 16(%rax)
+; LIN-NEXT:    testb $64, %r10b
+; LIN-NEXT:    movq %rdx, %rdi
+; LIN-NEXT:    cmovneq %r9, %rdi
+; LIN-NEXT:    movb $-128, %cl
+; LIN-NEXT:    subb %sil, %cl
+; LIN-NEXT:    movl $1, %esi
+; LIN-NEXT:    shrdq %cl, %r9, %rsi
+; LIN-NEXT:    testb $64, %cl
+; LIN-NEXT:    cmovneq %r9, %rsi
+; LIN-NEXT:    cmovsq %rdi, %rsi
+; LIN-NEXT:    cmoveq %r9, %rsi
+; LIN-NEXT:    movq %rsi, 16(%rax)
 ; LIN-NEXT:    xorl %esi, %esi
 ; LIN-NEXT:    movl %r10d, %ecx
-; LIN-NEXT:    shldq %cl, %r14, %rsi
+; LIN-NEXT:    shldq %cl, %r8, %rsi
 ; LIN-NEXT:    cmovneq %rdx, %rsi
-; LIN-NEXT:    xorl %edx, %edx
-; LIN-NEXT:    movl %ebp, %ecx
-; LIN-NEXT:    shldq %cl, %rdx, %rdx
-; LIN-NEXT:    cmovneq %r15, %rdx
-; LIN-NEXT:    cmovsq %rsi, %rdx
-; LIN-NEXT:    cmoveq %r15, %rdx
-; LIN-NEXT:    cmovneq %rax, %rdx
-; LIN-NEXT:    movq %rdx, 24(%rax)
-; LIN-NEXT:    popq %rbx
-; LIN-NEXT:    popq %r12
-; LIN-NEXT:    popq %r14
-; LIN-NEXT:    popq %r15
-; LIN-NEXT:    popq %rbp
+; LIN-NEXT:    cmovnsq %r9, %rsi
+; LIN-NEXT:    cmoveq %r9, %rsi
+; LIN-NEXT:    movq %rsi, 24(%rax)
 ; LIN-NEXT:    retq
   %b = add i256 %a, 1
   %m = shl i256 %b, 1
@@ -916,8 +697,8 @@ define i64 @test4(i64 %a, i64 %b) nounwind {
 ; ILP-NEXT:    cmpq %rdi, %rsi
 ; ILP-NEXT:    sbbq $0, %rdx
 ; ILP-NEXT:    movl $0, %edx
-; ILP-NEXT:    sbbq $0, %rdx
-; ILP-NEXT:    sbbq $0, %rcx
+; ILP-NEXT:    sbbq %rdx, %rdx
+; ILP-NEXT:    sbbq %rcx, %rcx
 ; ILP-NEXT:    setae %cl
 ; ILP-NEXT:    movzbl %cl, %ecx
 ; ILP-NEXT:    subq %rcx, %rax
@@ -932,8 +713,8 @@ define i64 @test4(i64 %a, i64 %b) nounwind {
 ; HYBRID-NEXT:    cmpq %rdi, %rsi
 ; HYBRID-NEXT:    sbbq $0, %rcx
 ; HYBRID-NEXT:    movl $0, %ecx
-; HYBRID-NEXT:    sbbq $0, %rcx
-; HYBRID-NEXT:    sbbq $0, %rax
+; HYBRID-NEXT:    sbbq %rcx, %rcx
+; HYBRID-NEXT:    sbbq %rax, %rax
 ; HYBRID-NEXT:    setae %al
 ; HYBRID-NEXT:    movzbl %al, %ecx
 ; HYBRID-NEXT:    movl $2, %eax
@@ -949,8 +730,8 @@ define i64 @test4(i64 %a, i64 %b) nounwind {
 ; BURR-NEXT:    cmpq %rdi, %rsi
 ; BURR-NEXT:    sbbq $0, %rcx
 ; BURR-NEXT:    movl $0, %ecx
-; BURR-NEXT:    sbbq $0, %rcx
-; BURR-NEXT:    sbbq $0, %rax
+; BURR-NEXT:    sbbq %rcx, %rcx
+; BURR-NEXT:    sbbq %rax, %rax
 ; BURR-NEXT:    setae %al
 ; BURR-NEXT:    movzbl %al, %ecx
 ; BURR-NEXT:    movl $2, %eax
@@ -966,8 +747,8 @@ define i64 @test4(i64 %a, i64 %b) nounwind {
 ; SRC-NEXT:    cmpq %rdi, %rsi
 ; SRC-NEXT:    sbbq $0, %rax
 ; SRC-NEXT:    movl $0, %eax
-; SRC-NEXT:    sbbq $0, %rax
-; SRC-NEXT:    sbbq $0, %rcx
+; SRC-NEXT:    sbbq %rax, %rax
+; SRC-NEXT:    sbbq %rcx, %rcx
 ; SRC-NEXT:    setae %al
 ; SRC-NEXT:    movzbl %al, %ecx
 ; SRC-NEXT:    movl $2, %eax
@@ -984,8 +765,8 @@ define i64 @test4(i64 %a, i64 %b) nounwind {
 ; LIN-NEXT:    cmpq %rdi, %rsi
 ; LIN-NEXT:    sbbq $0, %rdx
 ; LIN-NEXT:    movl $0, %edx
-; LIN-NEXT:    sbbq $0, %rdx
-; LIN-NEXT:    sbbq $0, %rcx
+; LIN-NEXT:    sbbq %rdx, %rdx
+; LIN-NEXT:    sbbq %rcx, %rcx
 ; LIN-NEXT:    setae %cl
 ; LIN-NEXT:    movzbl %cl, %ecx
 ; LIN-NEXT:    subq %rcx, %rax

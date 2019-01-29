@@ -1,9 +1,8 @@
 //===- PartialInlining.cpp - Inline parts of functions --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -359,7 +358,7 @@ struct PartialInlinerLegacyPass : public ModulePass {
     TargetTransformInfoWrapperPass *TTIWP =
         &getAnalysis<TargetTransformInfoWrapperPass>();
     ProfileSummaryInfo *PSI =
-        getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
+        &getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
 
     std::function<AssumptionCache &(Function &)> GetAssumptionCache =
         [&ACT](Function &F) -> AssumptionCache & {
@@ -403,7 +402,7 @@ PartialInlinerImpl::computeOutliningColdRegionsInfo(Function *F,
 
   auto IsSingleEntry = [](SmallVectorImpl<BasicBlock *> &BlockList) {
     BasicBlock *Dom = BlockList.front();
-    return BlockList.size() > 1 && pred_size(Dom) == 1;
+    return BlockList.size() > 1 && Dom->hasNPredecessors(1);
   };
 
   auto IsSingleExit =
@@ -468,7 +467,7 @@ PartialInlinerImpl::computeOutliningColdRegionsInfo(Function *F,
     // Only consider regions with predecessor blocks that are considered
     // not-cold (default: part of the top 99.99% of all block counters)
     // AND greater than our minimum block execution count (default: 100).
-    if (PSI->isColdBB(thisBB, BFI) ||
+    if (PSI->isColdBlock(thisBB, BFI) ||
         BBProfileCount(thisBB) < MinBlockCounterExecution)
       continue;
     for (auto SI = succ_begin(thisBB); SI != succ_end(thisBB); ++SI) {
@@ -834,42 +833,37 @@ bool PartialInlinerImpl::shouldPartialInline(
 int PartialInlinerImpl::computeBBInlineCost(BasicBlock *BB) {
   int InlineCost = 0;
   const DataLayout &DL = BB->getParent()->getParent()->getDataLayout();
-  for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I) {
-    if (isa<DbgInfoIntrinsic>(I))
-      continue;
-
-    switch (I->getOpcode()) {
+  for (Instruction &I : BB->instructionsWithoutDebug()) {
+    // Skip free instructions.
+    switch (I.getOpcode()) {
     case Instruction::BitCast:
     case Instruction::PtrToInt:
     case Instruction::IntToPtr:
     case Instruction::Alloca:
+    case Instruction::PHI:
       continue;
     case Instruction::GetElementPtr:
-      if (cast<GetElementPtrInst>(I)->hasAllZeroIndices())
+      if (cast<GetElementPtrInst>(&I)->hasAllZeroIndices())
         continue;
       break;
     default:
       break;
     }
 
-    IntrinsicInst *IntrInst = dyn_cast<IntrinsicInst>(I);
-    if (IntrInst) {
-      if (IntrInst->getIntrinsicID() == Intrinsic::lifetime_start ||
-          IntrInst->getIntrinsicID() == Intrinsic::lifetime_end)
-        continue;
-    }
+    if (I.isLifetimeStartOrEnd())
+      continue;
 
-    if (CallInst *CI = dyn_cast<CallInst>(I)) {
+    if (CallInst *CI = dyn_cast<CallInst>(&I)) {
       InlineCost += getCallsiteCost(CallSite(CI), DL);
       continue;
     }
 
-    if (InvokeInst *II = dyn_cast<InvokeInst>(I)) {
+    if (InvokeInst *II = dyn_cast<InvokeInst>(&I)) {
       InlineCost += getCallsiteCost(CallSite(II), DL);
       continue;
     }
 
-    if (SwitchInst *SI = dyn_cast<SwitchInst>(I)) {
+    if (SwitchInst *SI = dyn_cast<SwitchInst>(&I)) {
       InlineCost += (SI->getNumCases() + 1) * InlineConstants::InstrCost;
       continue;
     }
@@ -1251,7 +1245,7 @@ std::pair<bool, Function *> PartialInlinerImpl::unswitchFunction(Function *F) {
   if (PSI->isFunctionEntryCold(F))
     return {false, nullptr};
 
-  if (F->user_begin() == F->user_end())
+  if (empty(F->users()))
     return {false, nullptr};
 
   OptimizationRemarkEmitter ORE(F);
@@ -1357,7 +1351,7 @@ bool PartialInlinerImpl::tryPartialInline(FunctionCloner &Cloner) {
     return false;
   }
 
-  assert(Cloner.OrigFunc->user_begin() == Cloner.OrigFunc->user_end() &&
+  assert(empty(Cloner.OrigFunc->users()) &&
          "F's users should all be replaced!");
 
   std::vector<User *> Users(Cloner.ClonedFunc->user_begin(),

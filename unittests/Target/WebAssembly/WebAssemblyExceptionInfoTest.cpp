@@ -1,9 +1,8 @@
 //=== WebAssemblyExceptionInfoTest.cpp - WebAssebmlyExceptionInfo unit tests =//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -22,7 +21,7 @@ using namespace llvm;
 
 namespace {
 
-std::unique_ptr<TargetMachine> createTargetMachine() {
+std::unique_ptr<LLVMTargetMachine> createTargetMachine() {
   auto TT(Triple::normalize("wasm32-unknown-unknown"));
   std::string CPU("");
   std::string FS("");
@@ -35,8 +34,9 @@ std::unique_ptr<TargetMachine> createTargetMachine() {
   const Target *TheTarget = TargetRegistry::lookupTarget(TT, Error);
   assert(TheTarget);
 
-  return std::unique_ptr<TargetMachine>(TheTarget->createTargetMachine(
-      TT, CPU, FS, TargetOptions(), None, None, CodeGenOpt::Default));
+  return std::unique_ptr<LLVMTargetMachine>(static_cast<LLVMTargetMachine*>(
+      TheTarget->createTargetMachine(TT, CPU, FS, TargetOptions(), None, None,
+                                     CodeGenOpt::Default)));
 }
 
 std::unique_ptr<Module> parseMIR(LLVMContext &Context,
@@ -64,7 +64,7 @@ std::unique_ptr<Module> parseMIR(LLVMContext &Context,
 } // namespace
 
 TEST(WebAssemblyExceptionInfoTest, TEST0) {
-  std::unique_ptr<TargetMachine> TM = createTargetMachine();
+  std::unique_ptr<LLVMTargetMachine> TM = createTargetMachine();
   ASSERT_TRUE(TM);
 
   StringRef MIRString = R"MIR(
@@ -227,7 +227,7 @@ body: |
 }
 
 TEST(WebAssemblyExceptionInfoTest, TEST1) {
-  std::unique_ptr<TargetMachine> TM = createTargetMachine();
+  std::unique_ptr<LLVMTargetMachine> TM = createTargetMachine();
   ASSERT_TRUE(TM);
 
   StringRef MIRString = R"MIR(
@@ -418,7 +418,7 @@ body: |
 
 // Terminate pad test
 TEST(WebAssemblyExceptionInfoTest, TEST2) {
-  std::unique_ptr<TargetMachine> TM = createTargetMachine();
+  std::unique_ptr<LLVMTargetMachine> TM = createTargetMachine();
   ASSERT_TRUE(TM);
 
   StringRef MIRString = R"MIR(

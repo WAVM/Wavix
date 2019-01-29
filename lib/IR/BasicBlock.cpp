@@ -1,9 +1,8 @@
 //===-- BasicBlock.cpp - Implement BasicBlock related methods -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -206,10 +205,8 @@ const Instruction* BasicBlock::getFirstNonPHIOrDbgOrLifetime() const {
     if (isa<PHINode>(I) || isa<DbgInfoIntrinsic>(I))
       continue;
 
-    if (auto *II = dyn_cast<IntrinsicInst>(&I))
-      if (II->getIntrinsicID() == Intrinsic::lifetime_start ||
-          II->getIntrinsicID() == Intrinsic::lifetime_end)
-        continue;
+    if (I.isLifetimeStartOrEnd())
+      continue;
 
     return &I;
   }
@@ -258,6 +255,14 @@ const BasicBlock *BasicBlock::getUniquePredecessor() const {
     // This is OK.
   }
   return PredBB;
+}
+
+bool BasicBlock::hasNPredecessors(unsigned N) const {
+  return hasNItems(pred_begin(this), pred_end(this), N);
+}
+
+bool BasicBlock::hasNPredecessorsOrMore(unsigned N) const {
+  return hasNItemsOrMore(pred_begin(this), pred_end(this), N);
 }
 
 const BasicBlock *BasicBlock::getSingleSuccessor() const {

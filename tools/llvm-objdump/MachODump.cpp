@@ -1,9 +1,8 @@
 //===-- MachODump.cpp - Object file dumping utility for llvm --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -44,6 +43,7 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstring>
@@ -166,7 +166,7 @@ static const Target *GetTarget(const MachOObjectFile *MachOObj,
   if (*ThumbTarget)
     return TheTarget;
 
-  errs() << "llvm-objdump: error: unable to get target for '";
+  WithColor::error(errs(), "llvm-objdump") << "unable to get target for '";
   if (!TheTarget)
     errs() << TripleName;
   else
@@ -341,6 +341,264 @@ static void getSectionsAndSymbols(MachOObjectFile *MachOObj,
   }
 }
 
+static void printRelocationTargetName(const MachOObjectFile *O,
+                                      const MachO::any_relocation_info &RE,
+                                      raw_string_ostream &Fmt) {
+  // Target of a scattered relocation is an address.  In the interest of
+  // generating pretty output, scan through the symbol table looking for a
+  // symbol that aligns with that address.  If we find one, print it.
+  // Otherwise, we just print the hex address of the target.
+  if (O->isRelocationScattered(RE)) {
+    uint32_t Val = O->getPlainRelocationSymbolNum(RE);
+
+    for (const SymbolRef &Symbol : O->symbols()) {
+      Expected<uint64_t> Addr = Symbol.getAddress();
+      if (!Addr)
+        report_error(O->getFileName(), Addr.takeError());
+      if (*Addr != Val)
+        continue;
+      Expected<StringRef> Name = Symbol.getName();
+      if (!Name)
+        report_error(O->getFileName(), Name.takeError());
+      Fmt << *Name;
+      return;
+    }
+
+    // If we couldn't find a symbol that this relocation refers to, try
+    // to find a section beginning instead.
+    for (const SectionRef &Section : ToolSectionFilter(*O)) {
+      std::error_code ec;
+
+      StringRef Name;
+      uint64_t Addr = Section.getAddress();
+      if (Addr != Val)
+        continue;
+      if ((ec = Section.getName(Name)))
+        report_error(O->getFileName(), ec);
+      Fmt << Name;
+      return;
+    }
+
+    Fmt << format("0x%x", Val);
+    return;
+  }
+
+  StringRef S;
+  bool isExtern = O->getPlainRelocationExternal(RE);
+  uint64_t Val = O->getPlainRelocationSymbolNum(RE);
+
+  if (O->getAnyRelocationType(RE) == MachO::ARM64_RELOC_ADDEND) {
+    Fmt << format("0x%0" PRIx64, Val);
+    return;
+  }
+
+  if (isExtern) {
+    symbol_iterator SI = O->symbol_begin();
+    advance(SI, Val);
+    Expected<StringRef> SOrErr = SI->getName();
+    if (!SOrErr)
+      report_error(O->getFileName(), SOrErr.takeError());
+    S = *SOrErr;
+  } else {
+    section_iterator SI = O->section_begin();
+    // Adjust for the fact that sections are 1-indexed.
+    if (Val == 0) {
+      Fmt << "0 (?,?)";
+      return;
+    }
+    uint32_t I = Val - 1;
+    while (I != 0 && SI != O->section_end()) {
+      --I;
+      advance(SI, 1);
+    }
+    if (SI == O->section_end())
+      Fmt << Val << " (?,?)";
+    else
+      SI->getName(S);
+  }
+
+  Fmt << S;
+}
+
+std::error_code
+llvm::getMachORelocationValueString(const MachOObjectFile *Obj,
+                                    const RelocationRef &RelRef,
+                                    SmallVectorImpl<char> &Result) {
+  DataRefImpl Rel = RelRef.getRawDataRefImpl();
+  MachO::any_relocation_info RE = Obj->getRelocation(Rel);
+
+  unsigned Arch = Obj->getArch();
+
+  std::string FmtBuf;
+  raw_string_ostream Fmt(FmtBuf);
+  unsigned Type = Obj->getAnyRelocationType(RE);
+  bool IsPCRel = Obj->getAnyRelocationPCRel(RE);
+
+  // Determine any addends that should be displayed with the relocation.
+  // These require decoding the relocation type, which is triple-specific.
+
+  // X86_64 has entirely custom relocation types.
+  if (Arch == Triple::x86_64) {
+    switch (Type) {
+    case MachO::X86_64_RELOC_GOT_LOAD:
+    case MachO::X86_64_RELOC_GOT: {
+      printRelocationTargetName(Obj, RE, Fmt);
+      Fmt << "@GOT";
+      if (IsPCRel)
+        Fmt << "PCREL";
+      break;
+    }
+    case MachO::X86_64_RELOC_SUBTRACTOR: {
+      DataRefImpl RelNext = Rel;
+      Obj->moveRelocationNext(RelNext);
+      MachO::any_relocation_info RENext = Obj->getRelocation(RelNext);
+
+      // X86_64_RELOC_SUBTRACTOR must be followed by a relocation of type
+      // X86_64_RELOC_UNSIGNED.
+      // NOTE: Scattered relocations don't exist on x86_64.
+      unsigned RType = Obj->getAnyRelocationType(RENext);
+      if (RType != MachO::X86_64_RELOC_UNSIGNED)
+        report_error(Obj->getFileName(), "Expected X86_64_RELOC_UNSIGNED after "
+                                         "X86_64_RELOC_SUBTRACTOR.");
+
+      // The X86_64_RELOC_UNSIGNED contains the minuend symbol;
+      // X86_64_RELOC_SUBTRACTOR contains the subtrahend.
+      printRelocationTargetName(Obj, RENext, Fmt);
+      Fmt << "-";
+      printRelocationTargetName(Obj, RE, Fmt);
+      break;
+    }
+    case MachO::X86_64_RELOC_TLV:
+      printRelocationTargetName(Obj, RE, Fmt);
+      Fmt << "@TLV";
+      if (IsPCRel)
+        Fmt << "P";
+      break;
+    case MachO::X86_64_RELOC_SIGNED_1:
+      printRelocationTargetName(Obj, RE, Fmt);
+      Fmt << "-1";
+      break;
+    case MachO::X86_64_RELOC_SIGNED_2:
+      printRelocationTargetName(Obj, RE, Fmt);
+      Fmt << "-2";
+      break;
+    case MachO::X86_64_RELOC_SIGNED_4:
+      printRelocationTargetName(Obj, RE, Fmt);
+      Fmt << "-4";
+      break;
+    default:
+      printRelocationTargetName(Obj, RE, Fmt);
+      break;
+    }
+    // X86 and ARM share some relocation types in common.
+  } else if (Arch == Triple::x86 || Arch == Triple::arm ||
+             Arch == Triple::ppc) {
+    // Generic relocation types...
+    switch (Type) {
+    case MachO::GENERIC_RELOC_PAIR: // prints no info
+      return std::error_code();
+    case MachO::GENERIC_RELOC_SECTDIFF: {
+      DataRefImpl RelNext = Rel;
+      Obj->moveRelocationNext(RelNext);
+      MachO::any_relocation_info RENext = Obj->getRelocation(RelNext);
+
+      // X86 sect diff's must be followed by a relocation of type
+      // GENERIC_RELOC_PAIR.
+      unsigned RType = Obj->getAnyRelocationType(RENext);
+
+      if (RType != MachO::GENERIC_RELOC_PAIR)
+        report_error(Obj->getFileName(), "Expected GENERIC_RELOC_PAIR after "
+                                         "GENERIC_RELOC_SECTDIFF.");
+
+      printRelocationTargetName(Obj, RE, Fmt);
+      Fmt << "-";
+      printRelocationTargetName(Obj, RENext, Fmt);
+      break;
+    }
+    }
+
+    if (Arch == Triple::x86 || Arch == Triple::ppc) {
+      switch (Type) {
+      case MachO::GENERIC_RELOC_LOCAL_SECTDIFF: {
+        DataRefImpl RelNext = Rel;
+        Obj->moveRelocationNext(RelNext);
+        MachO::any_relocation_info RENext = Obj->getRelocation(RelNext);
+
+        // X86 sect diff's must be followed by a relocation of type
+        // GENERIC_RELOC_PAIR.
+        unsigned RType = Obj->getAnyRelocationType(RENext);
+        if (RType != MachO::GENERIC_RELOC_PAIR)
+          report_error(Obj->getFileName(), "Expected GENERIC_RELOC_PAIR after "
+                                           "GENERIC_RELOC_LOCAL_SECTDIFF.");
+
+        printRelocationTargetName(Obj, RE, Fmt);
+        Fmt << "-";
+        printRelocationTargetName(Obj, RENext, Fmt);
+        break;
+      }
+      case MachO::GENERIC_RELOC_TLV: {
+        printRelocationTargetName(Obj, RE, Fmt);
+        Fmt << "@TLV";
+        if (IsPCRel)
+          Fmt << "P";
+        break;
+      }
+      default:
+        printRelocationTargetName(Obj, RE, Fmt);
+      }
+    } else { // ARM-specific relocations
+      switch (Type) {
+      case MachO::ARM_RELOC_HALF:
+      case MachO::ARM_RELOC_HALF_SECTDIFF: {
+        // Half relocations steal a bit from the length field to encode
+        // whether this is an upper16 or a lower16 relocation.
+        bool isUpper = (Obj->getAnyRelocationLength(RE) & 0x1) == 1;
+
+        if (isUpper)
+          Fmt << ":upper16:(";
+        else
+          Fmt << ":lower16:(";
+        printRelocationTargetName(Obj, RE, Fmt);
+
+        DataRefImpl RelNext = Rel;
+        Obj->moveRelocationNext(RelNext);
+        MachO::any_relocation_info RENext = Obj->getRelocation(RelNext);
+
+        // ARM half relocs must be followed by a relocation of type
+        // ARM_RELOC_PAIR.
+        unsigned RType = Obj->getAnyRelocationType(RENext);
+        if (RType != MachO::ARM_RELOC_PAIR)
+          report_error(Obj->getFileName(), "Expected ARM_RELOC_PAIR after "
+                                           "ARM_RELOC_HALF");
+
+        // NOTE: The half of the target virtual address is stashed in the
+        // address field of the secondary relocation, but we can't reverse
+        // engineer the constant offset from it without decoding the movw/movt
+        // instruction to find the other half in its immediate field.
+
+        // ARM_RELOC_HALF_SECTDIFF encodes the second section in the
+        // symbol/section pointer of the follow-on relocation.
+        if (Type == MachO::ARM_RELOC_HALF_SECTDIFF) {
+          Fmt << "-";
+          printRelocationTargetName(Obj, RENext, Fmt);
+        }
+
+        Fmt << ")";
+        break;
+      }
+      default: {
+        printRelocationTargetName(Obj, RE, Fmt);
+      }
+      }
+    }
+  } else
+    printRelocationTargetName(Obj, RE, Fmt);
+
+  Fmt.flush();
+  Result.append(FmtBuf.begin(), FmtBuf.end());
+  return std::error_code();
+}
+
 static void PrintIndirectSymbolTable(MachOObjectFile *O, bool verbose,
                                      uint32_t n, uint32_t count,
                                      uint32_t stride, uint64_t addr) {
@@ -483,7 +741,7 @@ static void PrintRType(const uint64_t cputype, const unsigned r_type) {
     "GOTLDP  ", "GOTLDPOF", "PTRTGOT ", "TLVLDP  ", "TLVLDPOF",
     "ADDEND  ", " 11 (?) ", " 12 (?) ", " 13 (?) ", " 14 (?) ", " 15 (?) "
   };
-  
+
   if (r_type > 0xf){
     outs() << format("%-7u", r_type) << " ";
     return;
@@ -552,7 +810,7 @@ static void PrintRelocationEntries(const MachOObjectFile *O,
   bool previous_arm_half = false;
   bool previous_sectdiff = false;
   uint32_t sectdiff_r_type = 0;
-  
+
   for (relocation_iterator Reloc = Begin; Reloc != End; ++Reloc) {
     const DataRefImpl Rel = Reloc->getRawDataRefImpl();
     const MachO::any_relocation_info RE = O->getRelocation(Rel);
@@ -567,7 +825,7 @@ static void PrintRelocationEntries(const MachOObjectFile *O,
                               O->getScatteredRelocationValue(RE) : 0);
     const unsigned r_symbolnum = (r_scattered ? 0 :
                                   O->getPlainRelocationSymbolNum(RE));
-    
+
     if (r_scattered && cputype != MachO::CPU_TYPE_X86_64) {
       if (verbose) {
         // scattered: address
@@ -578,20 +836,20 @@ static void PrintRelocationEntries(const MachOObjectFile *O,
           outs() << "         ";
         else
           outs() << format("%08x ", (unsigned int)r_address);
-        
+
         // scattered: pcrel
         if (r_pcrel)
           outs() << "True  ";
         else
           outs() << "False ";
-        
+
         // scattered: length
         PrintRLength(cputype, r_type, r_length, previous_arm_half);
-        
+
         // scattered: extern & type
         outs() << "n/a    ";
         PrintRType(cputype, r_type);
-        
+
         // scattered: scattered & value
         outs() << format("True      0x%08x", (unsigned int)r_value);
         if (previous_sectdiff == false) {
@@ -639,22 +897,22 @@ static void PrintRelocationEntries(const MachOObjectFile *O,
           outs() << "         ";
         else
           outs() << format("%08x ", (unsigned int)r_address);
-        
+
         // plain: pcrel
         if (r_pcrel)
           outs() << "True  ";
         else
           outs() << "False ";
-        
+
         // plain: length
         PrintRLength(cputype, r_type, r_length, previous_arm_half);
-        
+
         if (r_extern) {
           // plain: extern & type & scattered
           outs() << "True   ";
           PrintRType(cputype, r_type);
           outs() << "False     ";
-          
+
           // plain: symbolnum/value
           if (r_symbolnum > Symtab.nsyms)
             outs() << format("?(%d)\n", r_symbolnum);
@@ -675,7 +933,7 @@ static void PrintRelocationEntries(const MachOObjectFile *O,
           outs() << "False  ";
           PrintRType(cputype, r_type);
           outs() << "False     ";
-          
+
           // plain: symbolnum/value
           if (cputype == MachO::CPU_TYPE_ARM &&
                    r_type == llvm::MachO::ARM_RELOC_PAIR)
@@ -1411,7 +1669,7 @@ static void DumpSectionContents(StringRef Filename, MachOObjectFile *O,
     std::pair<StringRef, StringRef> DumpSegSectName;
     DumpSegSectName = DumpSection.split(',');
     StringRef DumpSegName, DumpSectName;
-    if (DumpSegSectName.second.size()) {
+    if (!DumpSegSectName.second.empty()) {
       DumpSegName = DumpSegSectName.first;
       DumpSectName = DumpSegSectName.second;
     } else {
@@ -1559,7 +1817,8 @@ static bool checkMachOAndArchFlags(ObjectFile *O, StringRef Filename) {
   if (none_of(ArchFlags, [&](const std::string &Name) {
         return Name == ArchFlagName;
       })) {
-    errs() << "llvm-objdump: " + Filename + ": No architecture specified.\n";
+    WithColor::error(errs(), "llvm-objdump")
+        << Filename << ": no architecture specified.\n";
     return false;
   }
   return true;
@@ -1580,7 +1839,7 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
   if (Disassemble || Relocations || PrivateHeaders || ExportsTrie || Rebase ||
       Bind || SymbolTable || LazyBind || WeakBind || IndirectSymbols ||
       DataInCode || LinkOptHints || DylibsUsed || DylibId || ObjcMetaData ||
-      (FilterSections.size() != 0)) {
+      (!FilterSections.empty())) {
     if (!NoLeadingHeaders) {
       outs() << Name;
       if (!ArchiveMemberName.empty())
@@ -1605,12 +1864,22 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
   // If we need the symbol table to do the operation then check it here to
   // produce a good error message as to where the Mach-O file comes from in
   // the error message.
-  if (Disassemble || IndirectSymbols || FilterSections.size() != 0 ||
-      UnwindInfo)
+  if (Disassemble || IndirectSymbols || !FilterSections.empty() || UnwindInfo)
     if (Error Err = MachOOF->checkSymbolTable())
       report_error(ArchiveName, FileName, std::move(Err), ArchitectureName);
-
-  if (Disassemble) {
+  
+  if (DisassembleAll) {
+    for (const SectionRef &Section : MachOOF->sections()) {
+      StringRef SectName;
+      Section.getName(SectName);
+      if (SectName.equals("__text")) {
+        DataRefImpl Ref = Section.getRawDataRefImpl();
+        StringRef SegName = MachOOF->getSectionFinalSegmentName(Ref);
+        DisassembleMachO(FileName, MachOOF, SegName, SectName);
+      }
+    }
+  }
+  else if (Disassemble) {
     if (MachOOF->getHeader().filetype == MachO::MH_KEXT_BUNDLE &&
         MachOOF->getHeader().cputype == MachO::CPU_TYPE_ARM64)
       DisassembleMachO(FileName, MachOOF, "__TEXT_EXEC", "__text");
@@ -1626,10 +1895,10 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
   if (Relocations)
     PrintRelocations(MachOOF, !NonVerbose);
   if (SectionHeaders)
-    PrintSectionHeaders(MachOOF);
+    printSectionHeaders(MachOOF);
   if (SectionContents)
-    PrintSectionContents(MachOOF);
-  if (FilterSections.size() != 0)
+    printSectionContents(MachOOF);
+  if (!FilterSections.empty())
     DumpSectionContents(FileName, MachOOF, !NonVerbose);
   if (InfoPlist)
     DumpInfoPlistSectionContents(FileName, MachOOF);
@@ -1638,7 +1907,7 @@ static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
   if (DylibId)
     PrintDylibs(MachOOF, true);
   if (SymbolTable)
-    PrintSymbolTable(MachOOF, ArchiveName, ArchitectureName);
+    printSymbolTable(MachOOF, ArchiveName, ArchitectureName);
   if (UnwindInfo)
     printMachOUnwindInfo(MachOOF);
   if (PrivateHeaders) {
@@ -1944,8 +2213,9 @@ static bool ValidateArchFlags() {
       ArchAll = true;
     } else {
       if (!MachOObjectFile::isValidArch(ArchFlags[i])) {
-        errs() << "llvm-objdump: Unknown architecture named '" + ArchFlags[i] +
-                      "'for the -arch option\n";
+        WithColor::error(errs(), "llvm-objdump")
+            << "unknown architecture named '" + ArchFlags[i] +
+                   "'for the -arch option\n";
         return false;
       }
     }
@@ -1957,7 +2227,7 @@ static bool ValidateArchFlags() {
 // -arch flags selecting just those slices as specified by them and also parses
 // archive files.  Then for each individual Mach-O file ProcessMachO() is
 // called to process the file based on the command line options.
-void llvm::ParseInputMachO(StringRef Filename) {
+void llvm::parseInputMachO(StringRef Filename) {
   if (!ValidateArchFlags())
     return;
 
@@ -1996,7 +2266,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
     return;
   }
   if (MachOUniversalBinary *UB = dyn_cast<MachOUniversalBinary>(&Bin)) {
-    ParseInputMachO(UB);
+    parseInputMachO(UB);
     return;
   }
   if (ObjectFile *O = dyn_cast<ObjectFile>(&Bin)) {
@@ -2005,14 +2275,15 @@ void llvm::ParseInputMachO(StringRef Filename) {
     if (MachOObjectFile *MachOOF = dyn_cast<MachOObjectFile>(&*O))
       ProcessMachO(Filename, MachOOF);
     else
-      errs() << "llvm-objdump: '" << Filename << "': "
-             << "Object is not a Mach-O file type.\n";
+      WithColor::error(errs(), "llvm-objdump")
+          << Filename << "': "
+          << "object is not a Mach-O file type.\n";
     return;
   }
   llvm_unreachable("Input object can't be invalid at this point");
 }
 
-void llvm::ParseInputMachO(MachOUniversalBinary *UB) {
+void llvm::parseInputMachO(MachOUniversalBinary *UB) {
   if (!ValidateArchFlags())
     return;
 
@@ -2022,7 +2293,7 @@ void llvm::ParseInputMachO(MachOUniversalBinary *UB) {
     printMachOUniversalHeaders(UB, !NonVerbose);
 
   // If we have a list of architecture flags specified dump only those.
-  if (!ArchAll && ArchFlags.size() != 0) {
+  if (!ArchAll && !ArchFlags.empty()) {
     // Look for a slice in the universal binary that matches each ArchFlag.
     bool ArchFound;
     for (unsigned i = 0; i < ArchFlags.size(); ++i) {
@@ -2079,8 +2350,9 @@ void llvm::ParseInputMachO(MachOUniversalBinary *UB) {
         }
       }
       if (!ArchFound) {
-        errs() << "llvm-objdump: file: " + Filename + " does not contain "
-                << "architecture: " + ArchFlags[i] + "\n";
+        WithColor::error(errs(), "llvm-objdump")
+            << "file: " + Filename + " does not contain "
+            << "architecture: " + ArchFlags[i] + "\n";
         return;
       }
     }
@@ -5621,7 +5893,9 @@ static void print_image_info64(SectionRef S, struct DisassembleInfo *info) {
     else if(swift_version == 5)
       outs() << " Swift 4.0";
     else if(swift_version == 6)
-      outs() << " Swift 4.1";
+      outs() << " Swift 4.1/Swift 4.2";
+    else if(swift_version == 7)
+      outs() << " Swift 5 or later";
     else
       outs() << " unknown future Swift version (" << swift_version << ")";
   }
@@ -5672,7 +5946,9 @@ static void print_image_info32(SectionRef S, struct DisassembleInfo *info) {
     else if(swift_version == 5)
       outs() << " Swift 4.0";
     else if(swift_version == 6)
-      outs() << " Swift 4.1";
+      outs() << " Swift 4.1/Swift 4.2";
+    else if(swift_version == 7)
+      outs() << " Swift 5 or later";
     else
       outs() << " unknown future Swift version (" << swift_version << ")";
   }
@@ -6184,8 +6460,9 @@ static void PrintXarFilesSummary(const char *XarFilename, xar_t xar) {
 
   ScopedXarIter xi;
   if (!xi) {
-    errs() << "Can't obtain an xar iterator for xar archive "
-           << XarFilename << "\n";
+    WithColor::error(errs(), "llvm-objdump")
+        << "can't obtain an xar iterator for xar archive " << XarFilename
+        << "\n";
     return;
   }
 
@@ -6193,8 +6470,9 @@ static void PrintXarFilesSummary(const char *XarFilename, xar_t xar) {
   for (xf = xar_file_first(xar, xi); xf; xf = xar_file_next(xi)) {
     ScopedXarIter xp;
     if(!xp){
-      errs() << "Can't obtain an xar iterator for xar archive "
-             << XarFilename << "\n";
+      WithColor::error(errs(), "llvm-objdump")
+          << "can't obtain an xar iterator for xar archive " << XarFilename
+          << "\n";
       return;
     }
     type = nullptr;
@@ -6318,7 +6596,7 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
   std::error_code XarEC =
       sys::fs::createTemporaryFile("llvm-objdump", "xar", FD, XarFilename);
   if (XarEC) {
-    errs() << XarEC.message() << "\n";
+    WithColor::error(errs(), "llvm-objdump") << XarEC.message() << "\n";
     return;
   }
   ToolOutputFile XarFile(XarFilename, FD);
@@ -6331,7 +6609,8 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
 
   ScopedXarFile xar(XarFilename.c_str(), READ);
   if (!xar) {
-    errs() << "Can't create temporary xar archive " << XarFilename << "\n";
+    WithColor::error(errs(), "llvm-objdump")
+        << "can't create temporary xar archive " << XarFilename << "\n";
     return;
   }
 
@@ -6339,7 +6618,7 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
   std::error_code TocEC =
       sys::fs::createTemporaryFile("llvm-objdump", "toc", TocFilename);
   if (TocEC) {
-    errs() << TocEC.message() << "\n";
+    WithColor::error(errs(), "llvm-objdump") << TocEC.message() << "\n";
     return;
   }
   xar_serialize(xar, TocFilename.c_str());
@@ -6356,7 +6635,7 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
     MemoryBuffer::getFileOrSTDIN(TocFilename.c_str());
   if (std::error_code EC = FileOrErr.getError()) {
-    errs() << EC.message() << "\n";
+    WithColor::error(errs(), "llvm-objdump") << EC.message() << "\n";
     return;
   }
   std::unique_ptr<MemoryBuffer> &Buffer = FileOrErr.get();
@@ -6371,8 +6650,9 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
   // TODO: Go through the xar's files.
   ScopedXarIter xi;
   if(!xi){
-    errs() << "Can't obtain an xar iterator for xar archive "
-           << XarFilename.c_str() << "\n";
+    WithColor::error(errs(), "llvm-objdump")
+        << "can't obtain an xar iterator for xar archive "
+        << XarFilename.c_str() << "\n";
     return;
   }
   for(xar_file_t xf = xar_file_first(xar, xi); xf; xf = xar_file_next(xi)){
@@ -6382,8 +6662,9 @@ static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
 
     ScopedXarIter xp;
     if(!xp){
-      errs() << "Can't obtain an xar iterator for xar archive "
-             << XarFilename.c_str() << "\n";
+      WithColor::error(errs(), "llvm-objdump")
+          << "can't obtain an xar iterator for xar archive "
+          << XarFilename.c_str() << "\n";
       return;
     }
     member_name = NULL;
@@ -6817,7 +7098,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
 
   // Package up features to be passed to target/subtarget
   std::string FeaturesStr;
-  if (MAttrs.size()) {
+  if (!MAttrs.empty()) {
     SubtargetFeatures Features;
     for (unsigned i = 0; i != MAttrs.size(); ++i)
       Features.AddFeature(MAttrs[i]);
@@ -6860,8 +7141,8 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
   // IP->setCommentStream(CommentStream);
 
   if (!AsmInfo || !STI || !DisAsm || !IP) {
-    errs() << "error: couldn't initialize disassembler for target "
-           << TripleName << '\n';
+    WithColor::error(errs(), "llvm-objdump")
+        << "couldn't initialize disassembler for target " << TripleName << '\n';
     return;
   }
 
@@ -6902,8 +7183,9 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
   }
 
   if (ThumbTarget && (!ThumbAsmInfo || !ThumbSTI || !ThumbDisAsm || !ThumbIP)) {
-    errs() << "error: couldn't initialize disassembler for target "
-           << ThumbTripleName << '\n';
+    WithColor::error(errs(), "llvm-objdump")
+        << "couldn't initialize disassembler for target " << ThumbTripleName
+        << '\n';
     return;
   }
 
@@ -6956,14 +7238,18 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
       ErrorOr<std::unique_ptr<MemoryBuffer>> BufOrErr =
           MemoryBuffer::getFileOrSTDIN(DSYMFile);
       if (std::error_code EC = BufOrErr.getError()) {
-        errs() << "llvm-objdump: " << Filename << ": " << EC.message() << '\n';
+        report_error(DSYMFile, errorCodeToError(EC));
         return;
       }
+
       Expected<std::unique_ptr<MachOObjectFile>> DbgObjCheck =
           ObjectFile::createMachOObjectFile(BufOrErr.get()->getMemBufferRef());
 
-      if (DbgObjCheck.takeError())
-        report_error(MachOOF->getFileName(), DbgObjCheck.takeError());
+      if (Error E = DbgObjCheck.takeError()) {
+        report_error(DSYMFile, std::move(E));
+        return;
+      }
+
       DbgObj = DbgObjCheck.get().release();
       // We need to keep the file alive, because we're replacing DbgObj with it.
       DSYMBuf = std::move(BufOrErr.get());
@@ -6973,7 +7259,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     diContext = DWARFContext::create(*DbgObj);
   }
 
-  if (FilterSections.size() == 0)
+  if (FilterSections.empty())
     outs() << "(" << DisSegName << "," << DisSectName << ") section\n";
 
   for (unsigned SectIdx = 0; SectIdx != Sections.size(); SectIdx++) {
@@ -7036,7 +7322,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     unsigned int Arch = MachOOF->getArch();
 
     // Skip all symbols if this is a stubs file.
-    if (Bytes.size() == 0)
+    if (Bytes.empty())
       return;
 
     // If the section has symbols but no symbol at the start of the section
@@ -7243,7 +7529,8 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
             outs() << format("\t.short\t0x%04x\n", opcode);
             Size = 2;
           } else{
-            errs() << "llvm-objdump: warning: invalid instruction encoding\n";
+            WithColor::warning(errs(), "llvm-objdump")
+                << "invalid instruction encoding\n";
             if (Size == 0)
               Size = 1; // skip illegible bytes
           }
@@ -7290,7 +7577,8 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
                              *(Bytes.data() + Index) & 0xff);
             InstSize = 1; // skip exactly one illegible byte and move on.
           } else {
-            errs() << "llvm-objdump: warning: invalid instruction encoding\n";
+            WithColor::warning(errs(), "llvm-objdump")
+                << "invalid instruction encoding\n";
             if (InstSize == 0)
               InstSize = 1; // skip illegible bytes
           }

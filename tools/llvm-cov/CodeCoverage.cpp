@@ -1,9 +1,8 @@
 //===- CodeCoverage.cpp - Coverage tool based on profiling instrumentation-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CoverageExporterJson.h"
+#include "CoverageExporterLcov.h"
 #include "CoverageFilters.h"
 #include "CoverageReport.h"
 #include "CoverageSummaryInfo.h"
@@ -566,7 +566,9 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
       cl::values(clEnumValN(CoverageViewOptions::OutputFormat::Text, "text",
                             "Text output"),
                  clEnumValN(CoverageViewOptions::OutputFormat::HTML, "html",
-                            "HTML output")),
+                            "HTML output"),
+                 clEnumValN(CoverageViewOptions::OutputFormat::Lcov, "lcov",
+                            "lcov tracefile output")),
       cl::init(CoverageViewOptions::OutputFormat::Text));
 
   cl::opt<std::string> PathRemap(
@@ -674,6 +676,11 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
         errs() << "Color output cannot be disabled when generating html.\n";
       ViewOpts.Colors = true;
       break;
+    case CoverageViewOptions::OutputFormat::Lcov:
+      if (UseColor == cl::BOU_TRUE)
+        errs() << "Color output cannot be enabled when generating lcov.\n";
+      ViewOpts.Colors = false;
+      break;
     }
 
     // If path-equivalence was given and is a comma seperated pair then set
@@ -683,7 +690,7 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
       PathRemapping = EquivPair;
 
     // If a demangler is supplied, check if it exists and register it.
-    if (DemanglerOpts.size()) {
+    if (!DemanglerOpts.empty()) {
       auto DemanglerPathOrErr = sys::findProgramByName(DemanglerOpts[0]);
       if (!DemanglerPathOrErr) {
         error("Could not find the demangler!",
@@ -833,6 +840,11 @@ int CodeCoverageTool::doShow(int argc, const char **argv,
   if (Err)
     return Err;
 
+  if (ViewOpts.Format == CoverageViewOptions::OutputFormat::Lcov) {
+    error("Lcov format should be used with 'llvm-cov export'.");
+    return 1;
+  }
+
   ViewOpts.ShowLineNumbers = true;
   ViewOpts.ShowLineStats = ShowLineExecutionCounts.getNumOccurrences() != 0 ||
                            !ShowRegions || ShowBestLineRegionsCounts;
@@ -964,6 +976,9 @@ int CodeCoverageTool::doReport(int argc, const char **argv,
   if (ViewOpts.Format == CoverageViewOptions::OutputFormat::HTML) {
     error("HTML output for summary reports is not yet supported.");
     return 1;
+  } else if (ViewOpts.Format == CoverageViewOptions::OutputFormat::Lcov) {
+    error("Lcov format should be used with 'llvm-cov export'.");
+    return 1;
   }
 
   auto Coverage = load();
@@ -995,8 +1010,10 @@ int CodeCoverageTool::doExport(int argc, const char **argv,
   if (Err)
     return Err;
 
-  if (ViewOpts.Format != CoverageViewOptions::OutputFormat::Text) {
-    error("Coverage data can only be exported as textual JSON.");
+  if (ViewOpts.Format != CoverageViewOptions::OutputFormat::Text &&
+      ViewOpts.Format != CoverageViewOptions::OutputFormat::Lcov) {
+    error("Coverage data can only be exported as textual JSON or an "
+          "lcov tracefile.");
     return 1;
   }
 
@@ -1006,12 +1023,27 @@ int CodeCoverageTool::doExport(int argc, const char **argv,
     return 1;
   }
 
-  auto Exporter = CoverageExporterJson(*Coverage.get(), ViewOpts, outs());
+  std::unique_ptr<CoverageExporter> Exporter;
+
+  switch (ViewOpts.Format) {
+  case CoverageViewOptions::OutputFormat::Text:
+    Exporter = llvm::make_unique<CoverageExporterJson>(*Coverage.get(),
+                                                       ViewOpts, outs());
+    break;
+  case CoverageViewOptions::OutputFormat::HTML:
+    // Unreachable because we should have gracefully terminated with an error
+    // above.
+    llvm_unreachable("Export in HTML is not supported!");
+  case CoverageViewOptions::OutputFormat::Lcov:
+    Exporter = llvm::make_unique<CoverageExporterLcov>(*Coverage.get(),
+                                                       ViewOpts, outs());
+    break;
+  }
 
   if (SourceFiles.empty())
-    Exporter.renderRoot(IgnoreFilenameFilters);
+    Exporter->renderRoot(IgnoreFilenameFilters);
   else
-    Exporter.renderRoot(SourceFiles);
+    Exporter->renderRoot(SourceFiles);
 
   return 0;
 }

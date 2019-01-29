@@ -1,9 +1,8 @@
 //===--------------------- PredicateExpander.h ----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -56,9 +55,16 @@ public:
   using RecVec = std::vector<Record *>;
   void expandTrue(raw_ostream &OS);
   void expandFalse(raw_ostream &OS);
-  void expandCheckImmOperand(raw_ostream &OS, int OpIndex, int ImmVal);
-  void expandCheckImmOperand(raw_ostream &OS, int OpIndex, StringRef ImmVal);
-  void expandCheckRegOperand(raw_ostream &OS, int OpIndex, const Record *Reg);
+  void expandCheckImmOperand(raw_ostream &OS, int OpIndex, int ImmVal,
+                             StringRef FunctionMapper);
+  void expandCheckImmOperand(raw_ostream &OS, int OpIndex, StringRef ImmVal,
+                             StringRef FunctionMapperer);
+  void expandCheckImmOperandSimple(raw_ostream &OS, int OpIndex,
+                                   StringRef FunctionMapper);
+  void expandCheckRegOperand(raw_ostream &OS, int OpIndex, const Record *Reg,
+                             StringRef FunctionMapper);
+  void expandCheckRegOperandSimple(raw_ostream &OS, int OpIndex,
+                                   StringRef FunctionMapper);
   void expandCheckSameRegOperand(raw_ostream &OS, int First, int Second);
   void expandCheckNumOperands(raw_ostream &OS, int NumOps);
   void expandCheckOpcode(raw_ostream &OS, const Record *Inst);

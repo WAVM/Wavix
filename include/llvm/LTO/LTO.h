@@ -1,9 +1,8 @@
 //===-LTO.h - LLVM Link Time Optimizer ------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -40,13 +39,13 @@ class Module;
 class Target;
 class raw_pwrite_stream;
 
-/// Resolve Weak and LinkOnce values in the \p Index. Linkage changes recorded
-/// in the index and the ThinLTO backends must apply the changes to the Module
-/// via thinLTOResolveWeakForLinkerModule.
+/// Resolve linkage for prevailing symbols in the \p Index. Linkage changes
+/// recorded in the index and the ThinLTO backends must apply the changes to
+/// the module via thinLTOResolvePrevailingInModule.
 ///
 /// This is done for correctness (if value exported, ensure we always
 /// emit a copy), and compile-time optimization (allow drop of duplicates).
-void thinLTOResolveWeakForLinkerInIndex(
+void thinLTOResolvePrevailingInIndex(
     ModuleSummaryIndex &Index,
     function_ref<bool(GlobalValue::GUID, const GlobalValueSummary *)>
         isPrevailing,
@@ -59,6 +58,19 @@ void thinLTOResolveWeakForLinkerInIndex(
 void thinLTOInternalizeAndPromoteInIndex(
     ModuleSummaryIndex &Index,
     function_ref<bool(StringRef, GlobalValue::GUID)> isExported);
+
+/// Computes a unique hash for the Module considering the current list of
+/// export/import and other global analysis results.
+/// The hash is produced in \p Key.
+void computeLTOCacheKey(
+    SmallString<40> &Key, const lto::Config &Conf,
+    const ModuleSummaryIndex &Index, StringRef ModuleID,
+    const FunctionImporter::ImportMapTy &ImportList,
+    const FunctionImporter::ExportSetTy &ExportList,
+    const std::map<GlobalValue::GUID, GlobalValue::LinkageTypes> &ResolvedODR,
+    const GVSummaryMapTy &DefinedGlobals,
+    const std::set<GlobalValue::GUID> &CfiFunctionDefs = {},
+    const std::set<GlobalValue::GUID> &CfiFunctionDecls = {});
 
 namespace lto {
 
@@ -387,6 +399,9 @@ private:
   Error runThinLTO(AddStreamFn AddStream, NativeObjectCache Cache);
 
   mutable bool CalledGetMaxTasks = false;
+
+  // Use Optional to distinguish false from not yet initialized.
+  Optional<bool> EnableSplitLTOUnit;
 };
 
 /// The resolution for a symbol. The linker must provide a SymbolResolution for

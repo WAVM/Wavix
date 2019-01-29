@@ -1,9 +1,8 @@
 //===- lib/CodeGen/GlobalISel/LegalizerPredicates.cpp - Predicates --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -45,7 +44,7 @@ LegalityPredicate LegalityPredicates::typePairAndMemSizeInSet(
   SmallVector<TypePairAndMemSize, 4> TypesAndMemSize = TypesAndMemSizeInit;
   return [=](const LegalityQuery &Query) {
     TypePairAndMemSize Match = {Query.Types[TypeIdx0], Query.Types[TypeIdx1],
-                                Query.MMODescrs[MMOIdx].Size};
+                                Query.MMODescrs[MMOIdx].SizeInBits};
     return std::find(TypesAndMemSize.begin(), TypesAndMemSize.end(), Match) !=
            TypesAndMemSize.end();
   };
@@ -54,6 +53,26 @@ LegalityPredicate LegalityPredicates::typePairAndMemSizeInSet(
 LegalityPredicate LegalityPredicates::isScalar(unsigned TypeIdx) {
   return [=](const LegalityQuery &Query) {
     return Query.Types[TypeIdx].isScalar();
+  };
+}
+
+LegalityPredicate LegalityPredicates::isVector(unsigned TypeIdx) {
+  return [=](const LegalityQuery &Query) {
+    return Query.Types[TypeIdx].isVector();
+  };
+}
+
+LegalityPredicate LegalityPredicates::isPointer(unsigned TypeIdx) {
+  return [=](const LegalityQuery &Query) {
+    return Query.Types[TypeIdx].isPointer();
+  };
+}
+
+LegalityPredicate LegalityPredicates::isPointer(unsigned TypeIdx,
+                                                unsigned AddrSpace) {
+  return [=](const LegalityQuery &Query) {
+    LLT Ty = Query.Types[TypeIdx];
+    return Ty.isPointer() && Ty.getAddressSpace() == AddrSpace;
   };
 }
 
@@ -82,7 +101,7 @@ LegalityPredicate LegalityPredicates::sizeNotPow2(unsigned TypeIdx) {
 
 LegalityPredicate LegalityPredicates::memSizeInBytesNotPow2(unsigned MMOIdx) {
   return [=](const LegalityQuery &Query) {
-    return !isPowerOf2_32(Query.MMODescrs[MMOIdx].Size /* In Bytes */);
+    return !isPowerOf2_32(Query.MMODescrs[MMOIdx].SizeInBits / 8);
   };
 }
 

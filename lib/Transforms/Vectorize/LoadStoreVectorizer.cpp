@@ -1,9 +1,8 @@
 //===- LoadStoreVectorizer.cpp - GPU Load & Store Vectorizer --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -79,6 +78,7 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Vectorize.h"
+#include "llvm/Transforms/Vectorize/LoadStoreVectorizer.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
@@ -205,12 +205,12 @@ private:
                           unsigned Alignment);
 };
 
-class LoadStoreVectorizer : public FunctionPass {
+class LoadStoreVectorizerLegacyPass : public FunctionPass {
 public:
   static char ID;
 
-  LoadStoreVectorizer() : FunctionPass(ID) {
-    initializeLoadStoreVectorizerPass(*PassRegistry::getPassRegistry());
+  LoadStoreVectorizerLegacyPass() : FunctionPass(ID) {
+    initializeLoadStoreVectorizerLegacyPassPass(*PassRegistry::getPassRegistry());
   }
 
   bool runOnFunction(Function &F) override;
@@ -230,30 +230,23 @@ public:
 
 } // end anonymous namespace
 
-char LoadStoreVectorizer::ID = 0;
+char LoadStoreVectorizerLegacyPass::ID = 0;
 
-INITIALIZE_PASS_BEGIN(LoadStoreVectorizer, DEBUG_TYPE,
+INITIALIZE_PASS_BEGIN(LoadStoreVectorizerLegacyPass, DEBUG_TYPE,
                       "Vectorize load and Store instructions", false, false)
 INITIALIZE_PASS_DEPENDENCY(SCEVAAWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
-INITIALIZE_PASS_END(LoadStoreVectorizer, DEBUG_TYPE,
+INITIALIZE_PASS_END(LoadStoreVectorizerLegacyPass, DEBUG_TYPE,
                     "Vectorize load and store instructions", false, false)
 
 Pass *llvm::createLoadStoreVectorizerPass() {
-  return new LoadStoreVectorizer();
+  return new LoadStoreVectorizerLegacyPass();
 }
 
-// The real propagateMetadata expects a SmallVector<Value*>, but we deal in
-// vectors of Instructions.
-static void propagateMetadata(Instruction *I, ArrayRef<Instruction *> IL) {
-  SmallVector<Value *, 8> VL(IL.begin(), IL.end());
-  propagateMetadata(I, VL);
-}
-
-bool LoadStoreVectorizer::runOnFunction(Function &F) {
+bool LoadStoreVectorizerLegacyPass::runOnFunction(Function &F) {
   // Don't vectorize when the attribute NoImplicitFloat is used.
   if (skipFunction(F) || F.hasFnAttribute(Attribute::NoImplicitFloat))
     return false;
@@ -266,6 +259,30 @@ bool LoadStoreVectorizer::runOnFunction(Function &F) {
 
   Vectorizer V(F, AA, DT, SE, TTI);
   return V.run();
+}
+
+PreservedAnalyses LoadStoreVectorizerPass::run(Function &F, FunctionAnalysisManager &AM) {
+  // Don't vectorize when the attribute NoImplicitFloat is used.
+  if (F.hasFnAttribute(Attribute::NoImplicitFloat))
+    return PreservedAnalyses::all();
+
+  AliasAnalysis &AA = AM.getResult<AAManager>(F);
+  DominatorTree &DT = AM.getResult<DominatorTreeAnalysis>(F);
+  ScalarEvolution &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
+  TargetTransformInfo &TTI = AM.getResult<TargetIRAnalysis>(F);
+
+  Vectorizer V(F, AA, DT, SE, TTI);
+  bool Changed = V.run();
+  PreservedAnalyses PA;
+  PA.preserveSet<CFGAnalyses>();
+  return Changed ? PA : PreservedAnalyses::all();
+}
+
+// The real propagateMetadata expects a SmallVector<Value*>, but we deal in
+// vectors of Instructions.
+static void propagateMetadata(Instruction *I, ArrayRef<Instruction *> IL) {
+  SmallVector<Value *, 8> VL(IL.begin(), IL.end());
+  propagateMetadata(I, VL);
 }
 
 // Vectorizer Implementation

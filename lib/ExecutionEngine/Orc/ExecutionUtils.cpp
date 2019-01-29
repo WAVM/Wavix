@@ -1,9 +1,8 @@
 //===---- ExecutionUtils.cpp - Utilities for executing functions in Orc ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -88,7 +87,7 @@ iterator_range<CtorDtorIterator> getDestructors(const Module &M) {
 }
 
 void CtorDtorRunner::add(iterator_range<CtorDtorIterator> CtorDtors) {
-  if (CtorDtors.begin() == CtorDtors.end())
+  if (empty(CtorDtors))
     return;
 
   MangleAndInterner Mangle(
@@ -130,8 +129,8 @@ Error CtorDtorRunner::run() {
 
   auto &ES = JD.getExecutionSession();
   if (auto CtorDtorMap =
-          ES.lookup({&JD}, std::move(Names), NoDependenciesToRegister, true,
-                    nullptr, true)) {
+          ES.lookup(JITDylibSearchList({{&JD, true}}), std::move(Names),
+                    NoDependenciesToRegister, true)) {
     for (auto &KV : CtorDtorsByPriority) {
       for (auto &Name : KV.second) {
         assert(CtorDtorMap->count(Name) && "No entry for Name");

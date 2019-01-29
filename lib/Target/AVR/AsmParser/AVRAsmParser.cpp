@@ -1,9 +1,8 @@
 //===---- AVRAsmParser.cpp - Parse AVR assembly to MCInst instructions ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -34,8 +33,9 @@
 
 #define DEBUG_TYPE "avr-asm-parser"
 
-namespace llvm {
+using namespace llvm;
 
+namespace {
 /// Parses AVR assembly from a stream.
 class AVRAsmParser : public MCTargetAsmParser {
   const MCSubtargetInfo &STI;
@@ -159,6 +159,22 @@ public:
     addExpr(Inst, getImm());
   }
 
+  void addImmCom8Operands(MCInst &Inst, unsigned N) const {
+    assert(N == 1 && "Invalid number of operands!");
+    // The operand is actually a imm8, but we have its bitwise
+    // negation in the assembly source, so twiddle it here.
+    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
+    Inst.addOperand(MCOperand::createImm(~(uint8_t)CE->getValue()));
+  }
+
+  bool isImmCom8() const {
+    if (!isImm()) return false;
+    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
+    if (!CE) return false;
+    int64_t Value = CE->getValue();
+    return isUInt<8>(Value);
+  }
+
   bool isReg() const { return Kind == k_Register; }
   bool isImm() const { return Kind == k_Immediate; }
   bool isToken() const { return Kind == k_Token; }
@@ -244,6 +260,8 @@ public:
     O << "\n";
   }
 };
+
+} // end anonymous namespace.
 
 // Auto-generated Match Functions
 
@@ -510,6 +528,7 @@ bool AVRAsmParser::parseOperand(OperandVector &Operands) {
     case AsmToken::Real:
       if (!tryParseExpression(Operands))
         return false;
+      break;
     default:
       break;
     }
@@ -708,5 +727,3 @@ unsigned AVRAsmParser::validateTargetOperandClass(MCParsedAsmOperand &AsmOp,
   }
   return Match_InvalidOperand;
 }
-
-} // end of namespace llvm

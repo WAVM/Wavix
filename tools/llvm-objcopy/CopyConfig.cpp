@@ -1,9 +1,8 @@
 //===- CopyConfig.cpp -----------------------------------------------------===//
 //
-//                      The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -61,7 +60,7 @@ static const opt::OptTable::Info ObjcopyInfoTable[] = {
 
 class ObjcopyOptTable : public opt::OptTable {
 public:
-  ObjcopyOptTable() : OptTable(ObjcopyInfoTable, true) {}
+  ObjcopyOptTable() : OptTable(ObjcopyInfoTable) {}
 };
 
 enum StripID {
@@ -90,7 +89,7 @@ static const opt::OptTable::Info StripInfoTable[] = {
 
 class StripOptTable : public opt::OptTable {
 public:
-  StripOptTable() : OptTable(StripInfoTable, true) {}
+  StripOptTable() : OptTable(StripInfoTable) {}
 };
 
 enum SectionFlag {
@@ -129,6 +128,32 @@ static SectionFlag parseSectionRenameFlag(StringRef SectionName) {
       .Default(SectionFlag::SecNone);
 }
 
+static uint64_t parseSectionFlagSet(ArrayRef<StringRef> SectionFlags) {
+  SectionFlag ParsedFlags = SectionFlag::SecNone;
+  for (StringRef Flag : SectionFlags) {
+    SectionFlag ParsedFlag = parseSectionRenameFlag(Flag);
+    if (ParsedFlag == SectionFlag::SecNone)
+      error("Unrecognized section flag '" + Flag +
+            "'. Flags supported for GNU compatibility: alloc, load, noload, "
+            "readonly, debug, code, data, rom, share, contents, merge, "
+            "strings.");
+    ParsedFlags |= ParsedFlag;
+  }
+
+  uint64_t NewFlags = 0;
+  if (ParsedFlags & SectionFlag::SecAlloc)
+    NewFlags |= ELF::SHF_ALLOC;
+  if (!(ParsedFlags & SectionFlag::SecReadonly))
+    NewFlags |= ELF::SHF_WRITE;
+  if (ParsedFlags & SectionFlag::SecCode)
+    NewFlags |= ELF::SHF_EXECINSTR;
+  if (ParsedFlags & SectionFlag::SecMerge)
+    NewFlags |= ELF::SHF_MERGE;
+  if (ParsedFlags & SectionFlag::SecStrings)
+    NewFlags |= ELF::SHF_STRINGS;
+  return NewFlags;
+}
+
 static SectionRename parseRenameSectionValue(StringRef FlagValue) {
   if (!FlagValue.contains('='))
     error("Bad format for --rename-section: missing '='");
@@ -143,32 +168,27 @@ static SectionRename parseRenameSectionValue(StringRef FlagValue) {
   Old2New.second.split(NameAndFlags, ',');
   SR.NewName = NameAndFlags[0];
 
-  if (NameAndFlags.size() > 1) {
-    SectionFlag Flags = SectionFlag::SecNone;
-    for (size_t I = 1, Size = NameAndFlags.size(); I < Size; ++I) {
-      SectionFlag Flag = parseSectionRenameFlag(NameAndFlags[I]);
-      if (Flag == SectionFlag::SecNone)
-        error("Unrecognized section flag '" + NameAndFlags[I] +
-              "'. Flags supported for GNU compatibility: alloc, load, noload, "
-              "readonly, debug, code, data, rom, share, contents, merge, "
-              "strings.");
-      Flags |= Flag;
-    }
-
-    SR.NewFlags = 0;
-    if (Flags & SectionFlag::SecAlloc)
-      *SR.NewFlags |= ELF::SHF_ALLOC;
-    if (!(Flags & SectionFlag::SecReadonly))
-      *SR.NewFlags |= ELF::SHF_WRITE;
-    if (Flags & SectionFlag::SecCode)
-      *SR.NewFlags |= ELF::SHF_EXECINSTR;
-    if (Flags & SectionFlag::SecMerge)
-      *SR.NewFlags |= ELF::SHF_MERGE;
-    if (Flags & SectionFlag::SecStrings)
-      *SR.NewFlags |= ELF::SHF_STRINGS;
-  }
+  if (NameAndFlags.size() > 1)
+    SR.NewFlags = parseSectionFlagSet(makeArrayRef(NameAndFlags).drop_front());
 
   return SR;
+}
+
+static SectionFlagsUpdate parseSetSectionFlagValue(StringRef FlagValue) {
+  if (!StringRef(FlagValue).contains('='))
+    error("Bad format for --set-section-flags: missing '='");
+
+  // Initial split: ".foo" = "f1,f2,..."
+  auto Section2Flags = StringRef(FlagValue).split('=');
+  SectionFlagsUpdate SFU;
+  SFU.Name = Section2Flags.first;
+
+  // Flags split: "f1" "f2" ...
+  SmallVector<StringRef, 6> SectionFlags;
+  Section2Flags.second.split(SectionFlags, ',');
+  SFU.NewFlags = parseSectionFlagSet(SectionFlags);
+
+  return SFU;
 }
 
 static const StringMap<MachineInfo> ArchMap{
@@ -186,6 +206,22 @@ static const MachineInfo &getMachineInfo(StringRef Arch) {
   auto Iter = ArchMap.find(Arch);
   if (Iter == std::end(ArchMap))
     error("Invalid architecture: '" + Arch + "'");
+  return Iter->getValue();
+}
+
+static const StringMap<MachineInfo> OutputFormatMap{
+    // Name, {EMachine, 64bit, LittleEndian}
+    {"elf32-i386", {ELF::EM_386, false, true}},
+    {"elf32-powerpcle", {ELF::EM_PPC, false, true}},
+    {"elf32-x86-64", {ELF::EM_X86_64, false, true}},
+    {"elf64-powerpcle", {ELF::EM_PPC64, true, true}},
+    {"elf64-x86-64", {ELF::EM_X86_64, true, true}},
+};
+
+static const MachineInfo &getOutputFormatMachineInfo(StringRef Format) {
+  auto Iter = OutputFormatMap.find(Format);
+  if (Iter == std::end(OutputFormatMap))
+    error("Invalid output format: '" + Format + "'");
   return Iter->getValue();
 }
 
@@ -226,6 +262,7 @@ DriverConfig parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
   }
 
   if (InputArgs.hasArg(OBJCOPY_version)) {
+    outs() << "llvm-objcopy, compatible with GNU objcopy\n";
     cl::PrintVersionMessage();
     exit(0);
   }
@@ -265,6 +302,8 @@ DriverConfig parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
       error("Specified binary input without specifiying an architecture");
     Config.BinaryArch = getMachineInfo(BinaryArch);
   }
+  if (!Config.OutputFormat.empty() && Config.OutputFormat != "binary")
+    Config.OutputArch = getOutputFormatMachineInfo(Config.OutputFormat);
 
   if (auto Arg = InputArgs.getLastArg(OBJCOPY_compress_debug_sections,
                                       OBJCOPY_compress_debug_sections_eq)) {
@@ -285,8 +324,15 @@ DriverConfig parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
     }
   }
 
-  Config.SplitDWO = InputArgs.getLastArgValue(OBJCOPY_split_dwo);
   Config.AddGnuDebugLink = InputArgs.getLastArgValue(OBJCOPY_add_gnu_debuglink);
+  Config.BuildIdLinkDir = InputArgs.getLastArgValue(OBJCOPY_build_id_link_dir);
+  if (InputArgs.hasArg(OBJCOPY_build_id_link_input))
+    Config.BuildIdLinkInput =
+        InputArgs.getLastArgValue(OBJCOPY_build_id_link_input);
+  if (InputArgs.hasArg(OBJCOPY_build_id_link_output))
+    Config.BuildIdLinkOutput =
+        InputArgs.getLastArgValue(OBJCOPY_build_id_link_output);
+  Config.SplitDWO = InputArgs.getLastArgValue(OBJCOPY_split_dwo);
   Config.SymbolsPrefix = InputArgs.getLastArgValue(OBJCOPY_prefix_symbols);
 
   for (auto Arg : InputArgs.filtered(OBJCOPY_redefine_symbol)) {
@@ -302,13 +348,31 @@ DriverConfig parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
     if (!Config.SectionsToRename.try_emplace(SR.OriginalName, SR).second)
       error("Multiple renames of section " + SR.OriginalName);
   }
+  for (auto Arg : InputArgs.filtered(OBJCOPY_set_section_flags)) {
+    SectionFlagsUpdate SFU = parseSetSectionFlagValue(Arg->getValue());
+    if (!Config.SetSectionFlags.try_emplace(SFU.Name, SFU).second)
+      error("--set-section-flags set multiple times for section " + SFU.Name);
+  }
+  // Prohibit combinations of --set-section-flags when the section name is used
+  // by --rename-section, either as a source or a destination.
+  for (const auto &E : Config.SectionsToRename) {
+    const SectionRename &SR = E.second;
+    if (Config.SetSectionFlags.count(SR.OriginalName))
+      error("--set-section-flags=" + SR.OriginalName +
+            " conflicts with --rename-section=" + SR.OriginalName + "=" +
+            SR.NewName);
+    if (Config.SetSectionFlags.count(SR.NewName))
+      error("--set-section-flags=" + SR.NewName +
+            " conflicts with --rename-section=" + SR.OriginalName + "=" +
+            SR.NewName);
+  }
 
   for (auto Arg : InputArgs.filtered(OBJCOPY_remove_section))
     Config.ToRemove.push_back(Arg->getValue());
-  for (auto Arg : InputArgs.filtered(OBJCOPY_keep))
-    Config.Keep.push_back(Arg->getValue());
-  for (auto Arg : InputArgs.filtered(OBJCOPY_only_keep))
-    Config.OnlyKeep.push_back(Arg->getValue());
+  for (auto Arg : InputArgs.filtered(OBJCOPY_keep_section))
+    Config.KeepSection.push_back(Arg->getValue());
+  for (auto Arg : InputArgs.filtered(OBJCOPY_only_section))
+    Config.OnlySection.push_back(Arg->getValue());
   for (auto Arg : InputArgs.filtered(OBJCOPY_add_section))
     Config.AddSection.push_back(Arg->getValue());
   for (auto Arg : InputArgs.filtered(OBJCOPY_dump_section))
@@ -343,10 +407,12 @@ DriverConfig parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
   for (auto Arg : InputArgs.filtered(OBJCOPY_keep_symbol))
     Config.SymbolsToKeep.push_back(Arg->getValue());
 
+  Config.DeterministicArchives = InputArgs.hasFlag(
+      OBJCOPY_enable_deterministic_archives,
+      OBJCOPY_disable_deterministic_archives, /*default=*/true);
+
   Config.PreserveDates = InputArgs.hasArg(OBJCOPY_preserve_dates);
 
-  DriverConfig DC;
-  DC.CopyConfigs.push_back(std::move(Config));
   if (Config.DecompressDebugSections &&
       Config.CompressionType != DebugCompressionType::None) {
     error("Cannot specify --compress-debug-sections at the same time as "
@@ -356,6 +422,8 @@ DriverConfig parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
   if (Config.DecompressDebugSections && !zlib::isAvailable())
     error("LLVM was not compiled with LLVM_ENABLE_ZLIB: cannot decompress.");
 
+  DriverConfig DC;
+  DC.CopyConfigs.push_back(std::move(Config));
   return DC;
 }
 
@@ -379,6 +447,7 @@ DriverConfig parseStripOptions(ArrayRef<const char *> ArgsArr) {
   }
 
   if (InputArgs.hasArg(STRIP_version)) {
+    outs() << "llvm-strip, compatible with GNU strip\n";
     cl::PrintVersionMessage();
     exit(0);
   }
@@ -401,15 +470,24 @@ DriverConfig parseStripOptions(ArrayRef<const char *> ArgsArr) {
   Config.DiscardAll = InputArgs.hasArg(STRIP_discard_all);
   Config.StripUnneeded = InputArgs.hasArg(STRIP_strip_unneeded);
   Config.StripAll = InputArgs.hasArg(STRIP_strip_all);
+  Config.StripAllGNU = InputArgs.hasArg(STRIP_strip_all_gnu);
 
-  if (!Config.StripDebug && !Config.StripUnneeded && !Config.DiscardAll)
+  if (!Config.StripDebug && !Config.StripUnneeded && !Config.DiscardAll &&
+      !Config.StripAllGNU)
     Config.StripAll = true;
+
+  for (auto Arg : InputArgs.filtered(STRIP_keep_section))
+    Config.KeepSection.push_back(Arg->getValue());
 
   for (auto Arg : InputArgs.filtered(STRIP_remove_section))
     Config.ToRemove.push_back(Arg->getValue());
 
   for (auto Arg : InputArgs.filtered(STRIP_keep_symbol))
     Config.SymbolsToKeep.push_back(Arg->getValue());
+
+  Config.DeterministicArchives =
+      InputArgs.hasFlag(STRIP_enable_deterministic_archives,
+                        STRIP_disable_deterministic_archives, /*default=*/true);
 
   Config.PreserveDates = InputArgs.hasArg(STRIP_preserve_dates);
 

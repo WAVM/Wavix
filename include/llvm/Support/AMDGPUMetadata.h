@@ -1,9 +1,8 @@
 //===--- AMDGPUMetadata.h ---------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -430,6 +429,21 @@ std::error_code fromString(std::string String, Metadata &HSAMetadata);
 
 /// Converts \p HSAMetadata to \p String.
 std::error_code toString(Metadata HSAMetadata, std::string &String);
+
+//===----------------------------------------------------------------------===//
+// HSA metadata for v3 code object.
+//===----------------------------------------------------------------------===//
+namespace V3 {
+/// HSA metadata major version.
+constexpr uint32_t VersionMajor = 1;
+/// HSA metadata minor version.
+constexpr uint32_t VersionMinor = 0;
+
+/// HSA metadata beginning assembler directive.
+constexpr char AssemblerDirectiveBegin[] = ".amdgpu_metadata";
+/// HSA metadata ending assembler directive.
+constexpr char AssemblerDirectiveEnd[] = ".end_amdgpu_metadata";
+} // end namespace V3
 
 } // end namespace HSAMD
 

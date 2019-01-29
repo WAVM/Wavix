@@ -1,9 +1,8 @@
 //===- FileHeaderReader.cpp - XRay File Header Reader  --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 #include "llvm/XRay/FileHeaderReader.h"
@@ -63,11 +62,6 @@ Expected<XRayFileHeader> readBinaryFormatHeader(DataExtractor &HeaderExtractor,
   // Manually advance the offset pointer 16 bytes, after getting a raw memcpy
   // from the underlying data.
   OffsetPtr += 16;
-  if (FileHeader.Version != 1 && FileHeader.Version != 2 &&
-      FileHeader.Version != 3)
-    return createStringError(std::make_error_code(std::errc::invalid_argument),
-                             "Unsupported XRay file version: %d at offset %d",
-                             FileHeader.Version, OffsetPtr);
   return std::move(FileHeader);
 }
 

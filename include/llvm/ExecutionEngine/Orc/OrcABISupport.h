@@ -1,9 +1,8 @@
 //===- OrcABISupport.h - ABI support code -----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -287,7 +286,7 @@ class OrcMips64 {
 public:
   static const unsigned PointerSize = 8;
   static const unsigned TrampolineSize = 40;
-  static const unsigned ResolverCodeSize = 0x11C;
+  static const unsigned ResolverCodeSize = 0x120;
 
   using IndirectStubsInfo = GenericIndirectStubsInfo<32>;
   using JITReentryFn = JITTargetAddress (*)(void *CallbackMgr,

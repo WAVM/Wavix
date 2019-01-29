@@ -1,9 +1,8 @@
 //===- ArchiveWriter.cpp - ar File Format implementation --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -250,6 +249,7 @@ static void addToStringTable(raw_ostream &Out, StringRef ArcName,
 
 static void printMemberHeader(raw_ostream &Out, uint64_t Pos,
                               raw_ostream &StringTable,
+                              StringMap<uint64_t> &MemberNames,
                               object::Archive::Kind Kind, bool Thin,
                               StringRef ArcName, const NewArchiveMember &M,
                               sys::TimePoint<std::chrono::seconds> ModTime,
@@ -262,8 +262,18 @@ static void printMemberHeader(raw_ostream &Out, uint64_t Pos,
     return printGNUSmallMemberHeader(Out, M.MemberName, ModTime, M.UID, M.GID,
                                      M.Perms, Size);
   Out << '/';
-  uint64_t NamePos = StringTable.tell();
-  addToStringTable(StringTable, ArcName, M, Thin);
+  uint64_t NamePos;
+  if (Thin) {
+    NamePos = StringTable.tell();
+    addToStringTable(StringTable, ArcName, M, Thin);
+  } else {
+    auto Insertion = MemberNames.insert({M.MemberName, uint64_t(0)});
+    if (Insertion.second) {
+      Insertion.first->second = StringTable.tell();
+      addToStringTable(StringTable, ArcName, M, Thin);
+    }
+    NamePos = Insertion.first->second;
+  }
   printWithSpacePadding(Out, NamePos, 15);
   printRestOfMemberHeader(Out, ModTime, M.UID, M.GID, M.Perms, Size);
 }
@@ -433,6 +443,11 @@ computeMemberData(raw_ostream &StringTable, raw_ostream &SymNames,
   std::vector<MemberData> Ret;
   bool HasObject = false;
 
+  // Deduplicate long member names in the string table and reuse earlier name
+  // offsets. This especially saves space for COFF Import libraries where all
+  // members have the same name.
+  StringMap<uint64_t> MemberNames;
+
   // UniqueTimestamps is a special case to improve debugging on Darwin:
   //
   // The Darwin linker does not link debug info into the final
@@ -505,8 +520,8 @@ computeMemberData(raw_ostream &StringTable, raw_ostream &SymNames,
       ModTime = sys::toTimePoint(FilenameCount[M.MemberName]++);
     else
       ModTime = M.ModTime;
-    printMemberHeader(Out, Pos, StringTable, Kind, Thin, ArcName, M, ModTime,
-                      Buf.getBufferSize() + MemberPadding);
+    printMemberHeader(Out, Pos, StringTable, MemberNames, Kind, Thin, ArcName,
+                      M, ModTime, Buf.getBufferSize() + MemberPadding);
     Out.flush();
 
     Expected<std::vector<unsigned>> Symbols =

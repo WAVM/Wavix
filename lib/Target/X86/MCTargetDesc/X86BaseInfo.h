@@ -1,9 +1,8 @@
 //===-- X86BaseInfo.h - Top level definitions for X86 -------- --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -266,12 +265,12 @@ namespace X86II {
     RawFrmSrc      = 4,
 
     /// RawFrmDst - This form is for instructions that use the destination index
-    /// register DI/EDI/ESI.
+    /// register DI/EDI/RDI.
     RawFrmDst      = 5,
 
-    /// RawFrmSrc - This form is for instructions that use the source index
-    /// register SI/ESI/ERI with a possible segment override, and also the
-    /// destination index register DI/ESI/RDI.
+    /// RawFrmDstSrc - This form is for instructions that use the source index
+    /// register SI/ESI/RSI with a possible segment override, and also the
+    /// destination index register DI/EDI/RDI.
     RawFrmDstSrc   = 6,
 
     /// RawFrmImm8 - This is used for the ENTER instruction, which has two

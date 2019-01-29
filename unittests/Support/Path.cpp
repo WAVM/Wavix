@@ -1,9 +1,8 @@
 //===- llvm/unittest/Support/Path.cpp - Path tests ------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -187,7 +186,7 @@ TEST(Support, Path) {
   }
 
   SmallString<32> Relative("foo.cpp");
-  ASSERT_NO_ERROR(sys::fs::make_absolute("/root", Relative));
+  sys::fs::make_absolute("/root", Relative);
   Relative[5] = '/'; // Fix up windows paths.
   ASSERT_EQ("/root/foo.cpp", Relative);
 }
@@ -516,6 +515,8 @@ TEST_F(FileSystemTest, RealPath) {
   EXPECT_EQ(Expected, Actual);
 
   SmallString<64> HomeDir;
+
+  // This can fail if $HOME is not set and getpwuid fails.
   bool Result = llvm::sys::path::home_directory(HomeDir);
   if (Result) {
     ASSERT_NO_ERROR(fs::real_path(HomeDir, Expected));
@@ -526,6 +527,31 @@ TEST_F(FileSystemTest, RealPath) {
   }
 
   ASSERT_NO_ERROR(fs::remove_directories(Twine(TestDirectory) + "/test1"));
+}
+
+TEST_F(FileSystemTest, ExpandTilde) {
+  SmallString<64> Expected;
+  SmallString<64> Actual;
+  SmallString<64> HomeDir;
+
+  // This can fail if $HOME is not set and getpwuid fails.
+  bool Result = llvm::sys::path::home_directory(HomeDir);
+  if (Result) {
+    fs::expand_tilde(HomeDir, Expected);
+
+    fs::expand_tilde("~", Actual);
+    EXPECT_EQ(Expected, Actual);
+
+#ifdef _WIN32
+    Expected += "\\foo";
+    fs::expand_tilde("~\\foo", Actual);
+#else
+    Expected += "/foo";
+    fs::expand_tilde("~/foo", Actual);
+#endif
+
+    EXPECT_EQ(Expected, Actual);
+  }
 }
 
 #ifdef LLVM_ON_UNIX
@@ -1638,7 +1664,9 @@ TEST_F(FileSystemTest, permissions) {
   EXPECT_TRUE(CheckPermissions(fs::set_gid_on_exe));
 
   // Modern BSDs require root to set the sticky bit on files.
-#if !defined(__FreeBSD__) && !defined(__NetBSD__) && !defined(__OpenBSD__)
+  // AIX without root will mask off (i.e., lose) the sticky bit on files.
+#if !defined(__FreeBSD__) && !defined(__NetBSD__) && !defined(__OpenBSD__) &&  \
+    !defined(_AIX)
   EXPECT_EQ(fs::setPermissions(TempPath, fs::sticky_bit), NoError);
   EXPECT_TRUE(CheckPermissions(fs::sticky_bit));
 
@@ -1658,7 +1686,7 @@ TEST_F(FileSystemTest, permissions) {
 
   EXPECT_EQ(fs::setPermissions(TempPath, fs::all_perms), NoError);
   EXPECT_TRUE(CheckPermissions(fs::all_perms));
-#endif // !FreeBSD && !NetBSD && !OpenBSD
+#endif // !FreeBSD && !NetBSD && !OpenBSD && !AIX
 
   EXPECT_EQ(fs::setPermissions(TempPath, fs::all_perms & ~fs::sticky_bit),
                                NoError);

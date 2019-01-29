@@ -1,9 +1,8 @@
 //===- LazyCallGraph.cpp - Analysis of a Module's call graph --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -619,7 +618,7 @@ LazyCallGraph::RefSCC::switchInternalEdgeToCall(
 
   // If the merge range is empty, then adding the edge didn't actually form any
   // new cycles. We're done.
-  if (MergeRange.begin() == MergeRange.end()) {
+  if (empty(MergeRange)) {
     // Now that the SCC structure is finalized, flip the kind to call.
     SourceN->setEdgeKind(TargetN, Edge::Call);
     return false; // No new cycle.

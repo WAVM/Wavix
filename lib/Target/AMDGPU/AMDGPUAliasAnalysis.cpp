@@ -1,9 +1,8 @@
 //===- AMDGPUAliasAnalysis ------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -34,12 +33,20 @@ using namespace llvm;
 
 // Register this pass...
 char AMDGPUAAWrapperPass::ID = 0;
+char AMDGPUExternalAAWrapper::ID = 0;
 
 INITIALIZE_PASS(AMDGPUAAWrapperPass, "amdgpu-aa",
                 "AMDGPU Address space based Alias Analysis", false, true)
 
+INITIALIZE_PASS(AMDGPUExternalAAWrapper, "amdgpu-aa-wrapper",
+                "AMDGPU Address space based Alias Analysis Wrapper", false, true)
+
 ImmutablePass *llvm::createAMDGPUAAWrapperPass() {
   return new AMDGPUAAWrapperPass();
+}
+
+ImmutablePass *llvm::createAMDGPUExternalAAWrapperPass() {
+  return new AMDGPUExternalAAWrapper();
 }
 
 void AMDGPUAAWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {

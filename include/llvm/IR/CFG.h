@@ -1,9 +1,8 @@
 //===- CFG.h ----------------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -117,6 +116,8 @@ inline const_pred_iterator pred_end(const BasicBlock *BB) {
 inline bool pred_empty(const BasicBlock *BB) {
   return pred_begin(BB) == pred_end(BB);
 }
+/// Get the number of predecessors of \p BB. This is a linear time operation.
+/// Use \ref BasicBlock::hasNPredecessors() or hasNPredecessorsOrMore if able.
 inline unsigned pred_size(const BasicBlock *BB) {
   return std::distance(pred_begin(BB), pred_end(BB));
 }
@@ -234,10 +235,6 @@ public:
     assert(Inst && "Source not available, if basic block was malformed");
     return Inst->getParent();
   }
-};
-
-template <typename T, typename U> struct isPodLike<SuccIterator<T, U>> {
-  static const bool value = isPodLike<T>::value;
 };
 
 using succ_iterator = SuccIterator<Instruction, BasicBlock>;

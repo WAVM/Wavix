@@ -1,9 +1,8 @@
 //===- Wasm.h - Wasm object file format -------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,13 +25,27 @@ const char WasmMagic[] = {'\0', 'a', 's', 'm'};
 // Wasm binary format version
 const uint32_t WasmVersion = 0x1;
 // Wasm linking metadata version
-const uint32_t WasmMetadataVersion = 0x1;
+const uint32_t WasmMetadataVersion = 0x2;
 // Wasm uses a 64k page size
 const uint32_t WasmPageSize = 65536;
 
 struct WasmObjectHeader {
   StringRef Magic;
   uint32_t Version;
+};
+
+struct WasmDylinkInfo {
+  uint32_t MemorySize; // Memory size in bytes
+  uint32_t MemoryAlignment;  // P2 alignment of memory
+  uint32_t TableSize;  // Table size in elements
+  uint32_t TableAlignment;  // P2 alignment of table
+  std::vector<StringRef> Needed; // Shared library depenedencies
+};
+
+struct WasmProducerInfo {
+  std::vector<std::pair<std::string, std::string>> Languages;
+  std::vector<std::pair<std::string, std::string>> Tools;
+  std::vector<std::pair<std::string, std::string>> SDKs;
 };
 
 struct WasmExport {
@@ -75,6 +88,18 @@ struct WasmGlobal {
   StringRef SymbolName; // from the "linking" section
 };
 
+struct WasmEventType {
+  // Kind of event. Currently only WASM_EVENT_ATTRIBUTE_EXCEPTION is possible.
+  uint32_t Attribute;
+  uint32_t SigIndex;
+};
+
+struct WasmEvent {
+  uint32_t Index;
+  WasmEventType Type;
+  StringRef SymbolName; // from the "linking" section
+};
+
 struct WasmImport {
   StringRef Module;
   StringRef Field;
@@ -84,6 +109,7 @@ struct WasmImport {
     WasmGlobalType Global;
     WasmTable Table;
     WasmLimits Memory;
+    WasmEventType Event;
   };
 };
 
@@ -167,18 +193,20 @@ struct WasmLinkingData {
 };
 
 enum : unsigned {
-  WASM_SEC_CUSTOM = 0,   // Custom / User-defined section
-  WASM_SEC_TYPE = 1,     // Function signature declarations
-  WASM_SEC_IMPORT = 2,   // Import declarations
-  WASM_SEC_FUNCTION = 3, // Function declarations
-  WASM_SEC_TABLE = 4,    // Indirect function table and other tables
-  WASM_SEC_MEMORY = 5,   // Memory attributes
-  WASM_SEC_GLOBAL = 6,   // Global declarations
-  WASM_SEC_EXPORT = 7,   // Exports
-  WASM_SEC_START = 8,    // Start function declaration
-  WASM_SEC_ELEM = 9,     // Elements section
-  WASM_SEC_CODE = 10,    // Function bodies (code)
-  WASM_SEC_DATA = 11     // Data segments
+  WASM_SEC_CUSTOM = 0,     // Custom / User-defined section
+  WASM_SEC_TYPE = 1,       // Function signature declarations
+  WASM_SEC_IMPORT = 2,     // Import declarations
+  WASM_SEC_FUNCTION = 3,   // Function declarations
+  WASM_SEC_TABLE = 4,      // Indirect function table and other tables
+  WASM_SEC_MEMORY = 5,     // Memory attributes
+  WASM_SEC_GLOBAL = 6,     // Global declarations
+  WASM_SEC_EXPORT = 7,     // Exports
+  WASM_SEC_START = 8,      // Start function declaration
+  WASM_SEC_ELEM = 9,       // Elements section
+  WASM_SEC_CODE = 10,      // Function bodies (code)
+  WASM_SEC_DATA = 11,      // Data segments
+  WASM_SEC_DATACOUNT = 12, // Data segment count
+  WASM_SEC_EVENT = 13      // Event declarations
 };
 
 // Type immediate encodings used in various contexts.
@@ -188,7 +216,7 @@ enum : unsigned {
   WASM_TYPE_F32 = 0x7D,
   WASM_TYPE_F64 = 0x7C,
   WASM_TYPE_V128 = 0x7B,
-  WASM_TYPE_ANYFUNC = 0x70,
+  WASM_TYPE_FUNCREF = 0x70,
   WASM_TYPE_EXCEPT_REF = 0x68,
   WASM_TYPE_FUNC = 0x60,
   WASM_TYPE_NORESULT = 0x40, // for blocks with no result values
@@ -200,12 +228,13 @@ enum : unsigned {
   WASM_EXTERNAL_TABLE = 0x1,
   WASM_EXTERNAL_MEMORY = 0x2,
   WASM_EXTERNAL_GLOBAL = 0x3,
+  WASM_EXTERNAL_EVENT = 0x4,
 };
 
 // Opcodes used in initializer expressions.
 enum : unsigned {
   WASM_OPCODE_END = 0x0b,
-  WASM_OPCODE_GET_GLOBAL = 0x23,
+  WASM_OPCODE_GLOBAL_GET = 0x23,
   WASM_OPCODE_I32_CONST = 0x41,
   WASM_OPCODE_I64_CONST = 0x42,
   WASM_OPCODE_F32_CONST = 0x43,
@@ -214,6 +243,7 @@ enum : unsigned {
 
 enum : unsigned {
   WASM_LIMITS_FLAG_HAS_MAX = 0x1,
+  WASM_LIMITS_FLAG_IS_SHARED = 0x2,
 };
 
 // Kind codes used in the custom "name" section
@@ -242,6 +272,12 @@ enum WasmSymbolType : unsigned {
   WASM_SYMBOL_TYPE_DATA = 0x1,
   WASM_SYMBOL_TYPE_GLOBAL = 0x2,
   WASM_SYMBOL_TYPE_SECTION = 0x3,
+  WASM_SYMBOL_TYPE_EVENT = 0x4,
+};
+
+// Kinds of event attributes.
+enum WasmEventAttribute : unsigned {
+  WASM_EVENT_ATTRIBUTE_EXCEPTION = 0x0,
 };
 
 const unsigned WASM_SYMBOL_BINDING_MASK = 0x3;

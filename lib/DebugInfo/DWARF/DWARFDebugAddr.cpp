@@ -1,9 +1,8 @@
 //===- DWARFDebugAddr.cpp -------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -148,7 +147,7 @@ void DWARFDebugAddrTable::dump(raw_ostream &OS, DIDumpOptions DumpOpts) const {
                HeaderData.Length, HeaderData.Version, HeaderData.AddrSize,
                HeaderData.SegSize);
 
-  static const char *Fmt32 = "0x%8.8" PRIx32;
+  static const char *Fmt32 = "0x%8.8" PRIx64;
   static const char *Fmt64 = "0x%16.16" PRIx64;
   std::string AddrFmt = "\n";
   std::string AddrFmtVerbose = " => ";

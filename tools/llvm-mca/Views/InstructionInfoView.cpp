@@ -1,9 +1,8 @@
 //===--------------------- InstructionInfoView.cpp --------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -14,15 +13,13 @@
 
 #include "Views/InstructionInfoView.h"
 
+namespace llvm {
 namespace mca {
-
-using namespace llvm;
 
 void InstructionInfoView::printView(raw_ostream &OS) const {
   std::string Buffer;
   raw_string_ostream TempStream(Buffer);
   const MCSchedModel &SM = STI.getSchedModel();
-  unsigned Instructions = Source.size();
 
   std::string Instruction;
   raw_string_ostream InstrStream(Instruction);
@@ -32,8 +29,7 @@ void InstructionInfoView::printView(raw_ostream &OS) const {
              << "[4]: MayLoad\n[5]: MayStore\n[6]: HasSideEffects (U)\n\n";
 
   TempStream << "[1]    [2]    [3]    [4]    [5]    [6]    Instructions:\n";
-  for (unsigned I = 0, E = Instructions; I < E; ++I) {
-    const MCInst &Inst = Source.getMCInstFromIndex(I);
+  for (const MCInst &Inst : Source) {
     const MCInstrDesc &MCDesc = MCII.get(Inst.getOpcode());
 
     // Obtain the scheduling class information from the instruction.
@@ -47,6 +43,9 @@ void InstructionInfoView::printView(raw_ostream &OS) const {
     const MCSchedClassDesc &SCDesc = *SM.getSchedClassDesc(SchedClassID);
     unsigned NumMicroOpcodes = SCDesc.NumMicroOps;
     unsigned Latency = MCSchedModel::computeInstrLatency(STI, SCDesc);
+    // Add extra latency due to delays in the forwarding data paths.
+    Latency += MCSchedModel::getForwardingDelayCycles(
+        STI.getReadAdvanceEntries(SCDesc));
     Optional<double> RThroughput =
         MCSchedModel::getReciprocalThroughput(STI, SCDesc);
 
@@ -89,3 +88,4 @@ void InstructionInfoView::printView(raw_ostream &OS) const {
   OS << Buffer;
 }
 } // namespace mca.
+} // namespace llvm

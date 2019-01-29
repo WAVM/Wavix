@@ -1,9 +1,8 @@
 //===- SampleProfReader.h - Read LLVM sample profile data -------*- C++ -*-===//
 //
-//                      The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -548,6 +547,9 @@ public:
       : SampleProfileReader(std::move(B), C, Underlying->getFormat()) {
     Profiles = std::move(Underlying->getProfiles());
     Summary = takeSummary(*Underlying);
+    // Keep the underlying reader alive; the profile data may contain
+    // StringRefs referencing names in its name table.
+    UnderlyingReader = std::move(Underlying);
   }
 
   /// Create a remapped sample profile from the given remapping file and
@@ -569,6 +571,7 @@ public:
 private:
   SymbolRemappingReader Remappings;
   DenseMap<SymbolRemappingReader::Key, FunctionSamples*> SampleMap;
+  std::unique_ptr<SampleProfileReader> UnderlyingReader;
 };
 
 } // end namespace sampleprof
