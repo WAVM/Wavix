@@ -1,9 +1,8 @@
 //===- HexagonInstrInfo.h - Hexagon Instruction Information -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -216,9 +215,9 @@ public:
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
   /// Get the base register and byte offset of a load/store instr.
-  bool getMemOpBaseRegImmOfs(MachineInstr &LdSt, unsigned &BaseReg,
-                             int64_t &Offset,
-                             const TargetRegisterInfo *TRI) const override;
+  bool getMemOperandWithOffset(MachineInstr &LdSt, MachineOperand *&BaseOp,
+                               int64_t &Offset,
+                               const TargetRegisterInfo *TRI) const override;
 
   /// Reverses the branch condition of the specified condition list,
   /// returning false on success and true if it cannot be reversed.
@@ -436,8 +435,8 @@ public:
   bool predOpcodeHasNot(ArrayRef<MachineOperand> Cond) const;
 
   unsigned getAddrMode(const MachineInstr &MI) const;
-  unsigned getBaseAndOffset(const MachineInstr &MI, int &Offset,
-                            unsigned &AccessSize) const;
+  MachineOperand *getBaseAndOffset(const MachineInstr &MI, int64_t &Offset,
+                                   unsigned &AccessSize) const;
   SmallVector<MachineInstr*,2> getBranchingInstrs(MachineBasicBlock& MBB) const;
   unsigned getCExtOpNum(const MachineInstr &MI) const;
   HexagonII::CompoundGroup

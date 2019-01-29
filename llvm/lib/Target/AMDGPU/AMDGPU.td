@@ -1,15 +1,18 @@
 //===-- AMDGPU.td - AMDGPU Tablegen files --------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===------------------------------------------------------------===//
 
 include "llvm/TableGen/SearchableTable.td"
 include "llvm/Target/Target.td"
 include "AMDGPUFeatures.td"
+
+class BoolToList<bit Value> {
+  list<int> ret = !if(Value, [1]<int>, []<int>);
+}
 
 //===------------------------------------------------------------===//
 // Subtarget Features (device properties)
@@ -263,16 +266,19 @@ def FeatureUnpackedD16VMem : SubtargetFeature<"unpacked-d16-vmem",
 def FeatureDLInsts : SubtargetFeature<"dl-insts",
   "HasDLInsts",
   "true",
-  "Has deep learning instructions"
+  "Has v_fmac_f32 and v_xnor_b32 instructions"
 >;
 
-def FeatureD16PreservesUnusedBits : SubtargetFeature<
-  "d16-preserves-unused-bits",
-  "D16PreservesUnusedBits",
+def FeatureDotInsts : SubtargetFeature<"dot-insts",
+  "HasDotInsts",
   "true",
-  "If present, then instructions defined by HasD16LoadStore predicate preserve "
-  "unused bits. Otherwise instructions defined by HasD16LoadStore predicate "
-  "zero unused bits."
+  "Has v_dot* instructions"
+>;
+
+def FeatureSRAMECC : SubtargetFeature<"sram-ecc",
+  "EnableSRAMECC",
+  "true",
+  "Enable SRAM ECC"
 >;
 
 //===------------------------------------------------------------===//
@@ -327,12 +333,6 @@ def FeatureEnableHugePrivateBuffer : SubtargetFeature<
   "Enable private/scratch buffer sizes greater than 128 GB"
 >;
 
-def FeatureVGPRSpilling : SubtargetFeature<"vgpr-spilling",
-  "EnableVGPRSpilling",
-  "true",
-  "Enable spilling of VGPRs to scratch memory"
->;
-
 def FeatureDumpCode : SubtargetFeature <"DumpCode",
   "DumpCode",
   "true",
@@ -374,6 +374,16 @@ def FeatureEnableDS128 : SubtargetFeature<"enable-ds128",
   "EnableDS128",
   "true",
   "Use ds_{read|write}_b128"
+>;
+
+// Sparse texture support requires that all result registers are zeroed when
+// PRTStrictNull is set to true. This feature is turned on for all architectures
+// but is enabled as a feature in case there are situations where PRTStrictNull
+// is disabled by the driver.
+def FeatureEnablePRTStrictNull : SubtargetFeature<"enable-prt-strict-null",
+  "EnablePRTStrictNull",
+  "true",
+  "Enable zeroing of result registers for sparse texture fetches"
 >;
 
 // Unless +-flat-for-global is specified, turn on FlatForGlobal for
@@ -474,34 +484,41 @@ def FeatureISAVersion6_0_0 : SubtargetFeatureISAVersion <6,0,0,
   [FeatureSouthernIslands,
    FeatureFastFMAF32,
    HalfRate64Ops,
-   FeatureLDSBankCount32]>;
+   FeatureLDSBankCount32,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion6_0_1 : SubtargetFeatureISAVersion <6,0,1,
   [FeatureSouthernIslands,
-   FeatureLDSBankCount32]>;
+   FeatureLDSBankCount32,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion7_0_0 : SubtargetFeatureISAVersion <7,0,0,
   [FeatureSeaIslands,
-   FeatureLDSBankCount32]>;
+   FeatureLDSBankCount32,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion7_0_1 : SubtargetFeatureISAVersion <7,0,1,
   [FeatureSeaIslands,
    HalfRate64Ops,
    FeatureLDSBankCount32,
-   FeatureFastFMAF32]>;
+   FeatureFastFMAF32,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion7_0_2 : SubtargetFeatureISAVersion <7,0,2,
   [FeatureSeaIslands,
    FeatureLDSBankCount16,
-   FeatureFastFMAF32]>;
+   FeatureFastFMAF32,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion7_0_3 : SubtargetFeatureISAVersion <7,0,3,
   [FeatureSeaIslands,
-   FeatureLDSBankCount16]>;
+   FeatureLDSBankCount16,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion7_0_4 : SubtargetFeatureISAVersion <7,0,4,
   [FeatureSeaIslands,
-   FeatureLDSBankCount32]>;
+   FeatureLDSBankCount32,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion8_0_1 : SubtargetFeatureISAVersion <8,0,1,
   [FeatureVolcanicIslands,
@@ -509,49 +526,63 @@ def FeatureISAVersion8_0_1 : SubtargetFeatureISAVersion <8,0,1,
    HalfRate64Ops,
    FeatureLDSBankCount32,
    FeatureXNACK,
-   FeatureUnpackedD16VMem]>;
+   FeatureUnpackedD16VMem,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion8_0_2 : SubtargetFeatureISAVersion <8,0,2,
   [FeatureVolcanicIslands,
    FeatureLDSBankCount32,
    FeatureSGPRInitBug,
-   FeatureUnpackedD16VMem]>;
+   FeatureUnpackedD16VMem,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion8_0_3 : SubtargetFeatureISAVersion <8,0,3,
   [FeatureVolcanicIslands,
    FeatureLDSBankCount32,
-   FeatureUnpackedD16VMem]>;
+   FeatureUnpackedD16VMem,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion8_1_0 : SubtargetFeatureISAVersion <8,1,0,
   [FeatureVolcanicIslands,
    FeatureLDSBankCount16,
-   FeatureXNACK]>;
+   FeatureXNACK,
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion9_0_0 : SubtargetFeatureISAVersion <9,0,0,
   [FeatureGFX9,
    FeatureMadMixInsts,
    FeatureLDSBankCount32,
-   FeatureD16PreservesUnusedBits]>;
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion9_0_2 : SubtargetFeatureISAVersion <9,0,2,
   [FeatureGFX9,
    FeatureMadMixInsts,
    FeatureLDSBankCount32,
    FeatureXNACK,
-   FeatureD16PreservesUnusedBits]>;
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion9_0_4 : SubtargetFeatureISAVersion <9,0,4,
   [FeatureGFX9,
    FeatureLDSBankCount32,
    FeatureFmaMixInsts,
-   FeatureD16PreservesUnusedBits]>;
+   FeatureCodeObjectV3]>;
 
 def FeatureISAVersion9_0_6 : SubtargetFeatureISAVersion <9,0,6,
   [FeatureGFX9,
    HalfRate64Ops,
    FeatureFmaMixInsts,
    FeatureLDSBankCount32,
-   FeatureDLInsts]>;
+   FeatureDLInsts,
+   FeatureDotInsts,
+   FeatureSRAMECC,
+   FeatureCodeObjectV3]>;
+
+def FeatureISAVersion9_0_9 : SubtargetFeatureISAVersion <9,0,9,
+  [FeatureGFX9,
+   FeatureMadMixInsts,
+   FeatureLDSBankCount32,
+   FeatureXNACK,
+   FeatureCodeObjectV3]>;
 
 //===----------------------------------------------------------------------===//
 // Debugger related subtarget features.
@@ -683,8 +714,9 @@ def HasUnpackedD16VMem : Predicate<"Subtarget->hasUnpackedD16VMem()">,
 def HasPackedD16VMem : Predicate<"!Subtarget->hasUnpackedD16VMem()">,
   AssemblerPredicate<"!FeatureUnpackedD16VMem">;
 
-def D16PreservesUnusedBits : Predicate<"Subtarget->d16PreservesUnusedBits()">,
-  AssemblerPredicate<"FeatureD16PreservesUnusedBits">;
+def D16PreservesUnusedBits :
+  Predicate<"Subtarget->hasD16LoadStore() && !Subtarget->isSRAMECCEnabled()">,
+  AssemblerPredicate<"FeatureGFX9Insts,!FeatureSRAMECC">;
 
 def LDSRequiresM0Init : Predicate<"Subtarget->ldsRequiresM0Init()">;
 def NotLDSRequiresM0Init : Predicate<"!Subtarget->ldsRequiresM0Init()">;
@@ -740,6 +772,9 @@ def HasFmaMixInsts : Predicate<"Subtarget->hasFmaMixInsts()">,
 def HasDLInsts : Predicate<"Subtarget->hasDLInsts()">,
   AssemblerPredicate<"FeatureDLInsts">;
 
+def HasDotInsts : Predicate<"Subtarget->hasDotInsts()">,
+  AssemblerPredicate<"FeatureDotInsts">;
+
 
 def EnableLateCFGStructurize : Predicate<
   "EnableLateStructurizeCFG">;
@@ -748,8 +783,6 @@ def EnableLateCFGStructurize : Predicate<
 include "SISchedule.td"
 include "GCNProcessors.td"
 include "AMDGPUInstrInfo.td"
-include "AMDGPUIntrinsics.td"
-include "SIIntrinsics.td"
 include "AMDGPURegisterInfo.td"
 include "AMDGPURegisterBanks.td"
 include "AMDGPUInstructions.td"

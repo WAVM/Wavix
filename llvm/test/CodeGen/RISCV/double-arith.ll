@@ -2,6 +2,10 @@
 ; RUN: llc -mtriple=riscv32 -mattr=+d -verify-machineinstrs < %s \
 ; RUN:   | FileCheck -check-prefix=RV32IFD %s
 
+; These tests are each targeted at a particular RISC-V FPU instruction. Most
+; other files in this folder exercise LLVM IR instructions that don't directly
+; match a RISC-V instruction.
+
 define double @fadd_d(double %a, double %b) nounwind {
 ; RV32IFD-LABEL: fadd_d:
 ; RV32IFD:       # %bb.0:
@@ -82,7 +86,7 @@ define double @fdiv_d(double %a, double %b) nounwind {
   ret double %1
 }
 
-declare double @llvm.sqrt.f32(double)
+declare double @llvm.sqrt.f64(double)
 
 define double @fsqrt_d(double %a) nounwind {
 ; RV32IFD-LABEL: fsqrt_d:
@@ -97,11 +101,11 @@ define double @fsqrt_d(double %a) nounwind {
 ; RV32IFD-NEXT:    lw a1, 12(sp)
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
-  %1 = call double @llvm.sqrt.f32(double %a)
+  %1 = call double @llvm.sqrt.f64(double %a)
   ret double %1
 }
 
-declare double @llvm.copysign.f32(double, double)
+declare double @llvm.copysign.f64(double, double)
 
 define double @fsgnj_d(double %a, double %b) nounwind {
 ; RV32IFD-LABEL: fsgnj_d:
@@ -119,25 +123,29 @@ define double @fsgnj_d(double %a, double %b) nounwind {
 ; RV32IFD-NEXT:    lw a1, 12(sp)
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
-  %1 = call double @llvm.copysign.f32(double %a, double %b)
+  %1 = call double @llvm.copysign.f64(double %a, double %b)
   ret double %1
 }
 
-define double @fneg_d(double %a) nounwind {
+; This function performs extra work to ensure that
+; DAGCombiner::visitBITCAST doesn't replace the fneg with an xor.
+define i32 @fneg_d(double %a, double %b) nounwind {
 ; RV32IFD-LABEL: fneg_d:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
 ; RV32IFD-NEXT:    sw a0, 8(sp)
 ; RV32IFD-NEXT:    sw a1, 12(sp)
 ; RV32IFD-NEXT:    fld ft0, 8(sp)
-; RV32IFD-NEXT:    fneg.d ft0, ft0
-; RV32IFD-NEXT:    fsd ft0, 8(sp)
-; RV32IFD-NEXT:    lw a0, 8(sp)
-; RV32IFD-NEXT:    lw a1, 12(sp)
+; RV32IFD-NEXT:    fadd.d ft0, ft0, ft0
+; RV32IFD-NEXT:    fneg.d ft1, ft0
+; RV32IFD-NEXT:    feq.d a0, ft0, ft1
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
-  %1 = fsub double -0.0, %a
-  ret double %1
+  %1 = fadd double %a, %a
+  %2 = fneg double %1
+  %3 = fcmp oeq double %1, %2
+  %4 = zext i1 %3 to i32
+  ret i32 %4
 }
 
 define double @fsgnjn_d(double %a, double %b) nounwind {
@@ -157,30 +165,39 @@ define double @fsgnjn_d(double %a, double %b) nounwind {
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
   %1 = fsub double -0.0, %b
-  %2 = call double @llvm.copysign.f32(double %a, double %1)
+  %2 = call double @llvm.copysign.f64(double %a, double %1)
   ret double %2
 }
 
-declare double @llvm.fabs.f32(double)
+declare double @llvm.fabs.f64(double)
 
-define double @fabs_d(double %a) nounwind {
+; This function performs extra work to ensure that
+; DAGCombiner::visitBITCAST doesn't replace the fabs with an and.
+define double @fabs_d(double %a, double %b) nounwind {
 ; RV32IFD-LABEL: fabs_d:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
+; RV32IFD-NEXT:    sw a2, 8(sp)
+; RV32IFD-NEXT:    sw a3, 12(sp)
+; RV32IFD-NEXT:    fld ft0, 8(sp)
 ; RV32IFD-NEXT:    sw a0, 8(sp)
 ; RV32IFD-NEXT:    sw a1, 12(sp)
-; RV32IFD-NEXT:    fld ft0, 8(sp)
-; RV32IFD-NEXT:    fabs.d ft0, ft0
+; RV32IFD-NEXT:    fld ft1, 8(sp)
+; RV32IFD-NEXT:    fadd.d ft0, ft1, ft0
+; RV32IFD-NEXT:    fabs.d ft1, ft0
+; RV32IFD-NEXT:    fadd.d ft0, ft1, ft0
 ; RV32IFD-NEXT:    fsd ft0, 8(sp)
 ; RV32IFD-NEXT:    lw a0, 8(sp)
 ; RV32IFD-NEXT:    lw a1, 12(sp)
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
-  %1 = call double @llvm.fabs.f32(double %a)
-  ret double %1
+  %1 = fadd double %a, %b
+  %2 = call double @llvm.fabs.f64(double %1)
+  %3 = fadd double %2, %1
+  ret double %3
 }
 
-declare double @llvm.minnum.f32(double, double)
+declare double @llvm.minnum.f64(double, double)
 
 define double @fmin_d(double %a, double %b) nounwind {
 ; RV32IFD-LABEL: fmin_d:
@@ -198,11 +215,11 @@ define double @fmin_d(double %a, double %b) nounwind {
 ; RV32IFD-NEXT:    lw a1, 12(sp)
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
-  %1 = call double @llvm.minnum.f32(double %a, double %b)
+  %1 = call double @llvm.minnum.f64(double %a, double %b)
   ret double %1
 }
 
-declare double @llvm.maxnum.f32(double, double)
+declare double @llvm.maxnum.f64(double, double)
 
 define double @fmax_d(double %a, double %b) nounwind {
 ; RV32IFD-LABEL: fmax_d:
@@ -220,7 +237,7 @@ define double @fmax_d(double %a, double %b) nounwind {
 ; RV32IFD-NEXT:    lw a1, 12(sp)
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
-  %1 = call double @llvm.maxnum.f32(double %a, double %b)
+  %1 = call double @llvm.maxnum.f64(double %a, double %b)
   ret double %1
 }
 
@@ -276,4 +293,119 @@ define i32 @fle_d(double %a, double %b) nounwind {
   %1 = fcmp ole double %a, %b
   %2 = zext i1 %1 to i32
   ret i32 %2
+}
+
+declare double @llvm.fma.f64(double, double, double)
+
+define double @fmadd_d(double %a, double %b, double %c) nounwind {
+; RV32IFD-LABEL: fmadd_d:
+; RV32IFD:       # %bb.0:
+; RV32IFD-NEXT:    addi sp, sp, -16
+; RV32IFD-NEXT:    sw a4, 8(sp)
+; RV32IFD-NEXT:    sw a5, 12(sp)
+; RV32IFD-NEXT:    fld ft0, 8(sp)
+; RV32IFD-NEXT:    sw a2, 8(sp)
+; RV32IFD-NEXT:    sw a3, 12(sp)
+; RV32IFD-NEXT:    fld ft1, 8(sp)
+; RV32IFD-NEXT:    sw a0, 8(sp)
+; RV32IFD-NEXT:    sw a1, 12(sp)
+; RV32IFD-NEXT:    fld ft2, 8(sp)
+; RV32IFD-NEXT:    fmadd.d ft0, ft2, ft1, ft0
+; RV32IFD-NEXT:    fsd ft0, 8(sp)
+; RV32IFD-NEXT:    lw a0, 8(sp)
+; RV32IFD-NEXT:    lw a1, 12(sp)
+; RV32IFD-NEXT:    addi sp, sp, 16
+; RV32IFD-NEXT:    ret
+  %1 = call double @llvm.fma.f64(double %a, double %b, double %c)
+  ret double %1
+}
+
+define double @fmsub_d(double %a, double %b, double %c) nounwind {
+; RV32IFD-LABEL: fmsub_d:
+; RV32IFD:       # %bb.0:
+; RV32IFD-NEXT:    addi sp, sp, -16
+; RV32IFD-NEXT:    sw a2, 8(sp)
+; RV32IFD-NEXT:    sw a3, 12(sp)
+; RV32IFD-NEXT:    fld ft0, 8(sp)
+; RV32IFD-NEXT:    sw a0, 8(sp)
+; RV32IFD-NEXT:    sw a1, 12(sp)
+; RV32IFD-NEXT:    fld ft1, 8(sp)
+; RV32IFD-NEXT:    sw a4, 8(sp)
+; RV32IFD-NEXT:    sw a5, 12(sp)
+; RV32IFD-NEXT:    fld ft2, 8(sp)
+; RV32IFD-NEXT:    lui a0, %hi(.LCPI15_0)
+; RV32IFD-NEXT:    addi a0, a0, %lo(.LCPI15_0)
+; RV32IFD-NEXT:    fld ft3, 0(a0)
+; RV32IFD-NEXT:    fadd.d ft2, ft2, ft3
+; RV32IFD-NEXT:    fmsub.d ft0, ft1, ft0, ft2
+; RV32IFD-NEXT:    fsd ft0, 8(sp)
+; RV32IFD-NEXT:    lw a0, 8(sp)
+; RV32IFD-NEXT:    lw a1, 12(sp)
+; RV32IFD-NEXT:    addi sp, sp, 16
+; RV32IFD-NEXT:    ret
+  %c_ = fadd double 0.0, %c ; avoid negation using xor
+  %negc = fsub double -0.0, %c_
+  %1 = call double @llvm.fma.f64(double %a, double %b, double %negc)
+  ret double %1
+}
+
+define double @fnmadd_d(double %a, double %b, double %c) nounwind {
+; RV32IFD-LABEL: fnmadd_d:
+; RV32IFD:       # %bb.0:
+; RV32IFD-NEXT:    addi sp, sp, -16
+; RV32IFD-NEXT:    sw a2, 8(sp)
+; RV32IFD-NEXT:    sw a3, 12(sp)
+; RV32IFD-NEXT:    fld ft0, 8(sp)
+; RV32IFD-NEXT:    sw a0, 8(sp)
+; RV32IFD-NEXT:    sw a1, 12(sp)
+; RV32IFD-NEXT:    fld ft1, 8(sp)
+; RV32IFD-NEXT:    sw a4, 8(sp)
+; RV32IFD-NEXT:    sw a5, 12(sp)
+; RV32IFD-NEXT:    fld ft2, 8(sp)
+; RV32IFD-NEXT:    lui a0, %hi(.LCPI16_0)
+; RV32IFD-NEXT:    addi a0, a0, %lo(.LCPI16_0)
+; RV32IFD-NEXT:    fld ft3, 0(a0)
+; RV32IFD-NEXT:    fadd.d ft2, ft2, ft3
+; RV32IFD-NEXT:    fadd.d ft1, ft1, ft3
+; RV32IFD-NEXT:    fnmadd.d ft0, ft1, ft0, ft2
+; RV32IFD-NEXT:    fsd ft0, 8(sp)
+; RV32IFD-NEXT:    lw a0, 8(sp)
+; RV32IFD-NEXT:    lw a1, 12(sp)
+; RV32IFD-NEXT:    addi sp, sp, 16
+; RV32IFD-NEXT:    ret
+  %a_ = fadd double 0.0, %a
+  %c_ = fadd double 0.0, %c
+  %nega = fsub double -0.0, %a_
+  %negc = fsub double -0.0, %c_
+  %1 = call double @llvm.fma.f64(double %nega, double %b, double %negc)
+  ret double %1
+}
+
+define double @fnmsub_d(double %a, double %b, double %c) nounwind {
+; RV32IFD-LABEL: fnmsub_d:
+; RV32IFD:       # %bb.0:
+; RV32IFD-NEXT:    addi sp, sp, -16
+; RV32IFD-NEXT:    sw a4, 8(sp)
+; RV32IFD-NEXT:    sw a5, 12(sp)
+; RV32IFD-NEXT:    fld ft0, 8(sp)
+; RV32IFD-NEXT:    sw a2, 8(sp)
+; RV32IFD-NEXT:    sw a3, 12(sp)
+; RV32IFD-NEXT:    fld ft1, 8(sp)
+; RV32IFD-NEXT:    sw a0, 8(sp)
+; RV32IFD-NEXT:    sw a1, 12(sp)
+; RV32IFD-NEXT:    fld ft2, 8(sp)
+; RV32IFD-NEXT:    lui a0, %hi(.LCPI17_0)
+; RV32IFD-NEXT:    addi a0, a0, %lo(.LCPI17_0)
+; RV32IFD-NEXT:    fld ft3, 0(a0)
+; RV32IFD-NEXT:    fadd.d ft2, ft2, ft3
+; RV32IFD-NEXT:    fnmsub.d ft0, ft2, ft1, ft0
+; RV32IFD-NEXT:    fsd ft0, 8(sp)
+; RV32IFD-NEXT:    lw a0, 8(sp)
+; RV32IFD-NEXT:    lw a1, 12(sp)
+; RV32IFD-NEXT:    addi sp, sp, 16
+; RV32IFD-NEXT:    ret
+  %a_ = fadd double 0.0, %a
+  %nega = fsub double -0.0, %a_
+  %1 = call double @llvm.fma.f64(double %nega, double %b, double %c)
+  ret double %1
 }

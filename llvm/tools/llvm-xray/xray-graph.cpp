@@ -1,9 +1,8 @@
 //===-- xray-graph.cpp: XRay Function Call Graph Renderer -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -246,6 +245,10 @@ Error GraphRenderer::accountRecord(const XRayRecord &Record) {
     updateStat(G[Record.FuncId].S, D);
     break;
   }
+  case RecordTypes::CUSTOM_EVENT:
+  case RecordTypes::TYPED_EVENT:
+    // TODO: Support custom and typed events in the graph processing?
+    break;
   }
 
   return Error::success();

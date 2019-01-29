@@ -1,9 +1,8 @@
 //===- FunctionAttrs.cpp - Pass which marks functions attributes ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -41,6 +40,7 @@
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Type.h"
@@ -129,16 +129,15 @@ static MemoryAccessKind checkFunctionMemoryAccess(Function &F, bool ThisBody,
 
     // Some instructions can be ignored even if they read or write memory.
     // Detect these now, skipping to the next instruction if one is found.
-    CallSite CS(cast<Value>(I));
-    if (CS) {
+    if (auto *Call = dyn_cast<CallBase>(I)) {
       // Ignore calls to functions in the same SCC, as long as the call sites
       // don't have operand bundles.  Calls with operand bundles are allowed to
       // have memory effects not described by the memory effects of the call
       // target.
-      if (!CS.hasOperandBundles() && CS.getCalledFunction() &&
-          SCCNodes.count(CS.getCalledFunction()))
+      if (!Call->hasOperandBundles() && Call->getCalledFunction() &&
+          SCCNodes.count(Call->getCalledFunction()))
         continue;
-      FunctionModRefBehavior MRB = AAR.getModRefBehavior(CS);
+      FunctionModRefBehavior MRB = AAR.getModRefBehavior(Call);
       ModRefInfo MRI = createModRefInfo(MRB);
 
       // If the call doesn't access memory, we're done.
@@ -157,7 +156,7 @@ static MemoryAccessKind checkFunctionMemoryAccess(Function &F, bool ThisBody,
 
       // Check whether all pointer arguments point to local memory, and
       // ignore calls that only access local memory.
-      for (CallSite::arg_iterator CI = CS.arg_begin(), CE = CS.arg_end();
+      for (CallSite::arg_iterator CI = Call->arg_begin(), CE = Call->arg_end();
            CI != CE; ++CI) {
         Value *Arg = *CI;
         if (!Arg->getType()->isPtrOrPtrVectorTy())
@@ -1307,13 +1306,14 @@ static bool addNoRecurseAttrs(const SCCNodeSet &SCCNodes) {
   // If all of the calls in F are identifiable and are to norecurse functions, F
   // is norecurse. This check also detects self-recursion as F is not currently
   // marked norecurse, so any called from F to F will not be marked norecurse.
-  for (Instruction &I : instructions(*F))
-    if (auto CS = CallSite(&I)) {
-      Function *Callee = CS.getCalledFunction();
-      if (!Callee || Callee == F || !Callee->doesNotRecurse())
-        // Function calls a potentially recursive function.
-        return false;
-    }
+  for (auto &BB : *F)
+    for (auto &I : BB.instructionsWithoutDebug())
+      if (auto CS = CallSite(&I)) {
+        Function *Callee = CS.getCalledFunction();
+        if (!Callee || Callee == F || !Callee->doesNotRecurse())
+          // Function calls a potentially recursive function.
+          return false;
+      }
 
   // Every call was to a non-recursive function other than this function, and
   // we have no indirect recursion as the SCC size is one. This function cannot

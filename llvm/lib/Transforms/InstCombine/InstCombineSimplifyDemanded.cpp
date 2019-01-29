@@ -1,9 +1,8 @@
 //===- InstCombineSimplifyDemanded.cpp ------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -690,6 +689,30 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
         // TODO: Could compute known zero/one bits based on the input.
         break;
       }
+      case Intrinsic::fshr:
+      case Intrinsic::fshl: {
+        const APInt *SA;
+        if (!match(I->getOperand(2), m_APInt(SA)))
+          break;
+
+        // Normalize to funnel shift left. APInt shifts of BitWidth are well-
+        // defined, so no need to special-case zero shifts here.
+        uint64_t ShiftAmt = SA->urem(BitWidth);
+        if (II->getIntrinsicID() == Intrinsic::fshr)
+          ShiftAmt = BitWidth - ShiftAmt;
+
+        APInt DemandedMaskLHS(DemandedMask.lshr(ShiftAmt));
+        APInt DemandedMaskRHS(DemandedMask.shl(BitWidth - ShiftAmt));
+        if (SimplifyDemandedBits(I, 0, DemandedMaskLHS, LHSKnown, Depth + 1) ||
+            SimplifyDemandedBits(I, 1, DemandedMaskRHS, RHSKnown, Depth + 1))
+          return I;
+
+        Known.Zero = LHSKnown.Zero.shl(ShiftAmt) |
+                     RHSKnown.Zero.lshr(BitWidth - ShiftAmt);
+        Known.One = LHSKnown.One.shl(ShiftAmt) |
+                    RHSKnown.One.lshr(BitWidth - ShiftAmt);
+        break;
+      }
       case Intrinsic::x86_mmx_pmovmskb:
       case Intrinsic::x86_sse_movmsk_ps:
       case Intrinsic::x86_sse2_movmsk_pd:
@@ -945,10 +968,23 @@ InstCombiner::simplifyShrShlDemandedBits(Instruction *Shr, const APInt &ShrOp1,
 /// Implement SimplifyDemandedVectorElts for amdgcn buffer and image intrinsics.
 Value *InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
                                                            APInt DemandedElts,
-                                                           int DMaskIdx) {
+                                                           int DMaskIdx,
+                                                           int TFCIdx) {
   unsigned VWidth = II->getType()->getVectorNumElements();
   if (VWidth == 1)
     return nullptr;
+
+  // Need to change to new instruction format
+  ConstantInt *TFC = nullptr;
+  bool TFELWEEnabled = false;
+  if (TFCIdx > 0) {
+    TFC = dyn_cast<ConstantInt>(II->getArgOperand(TFCIdx));
+    TFELWEEnabled =    TFC->getZExtValue() & 0x1  // TFE
+                    || TFC->getZExtValue() & 0x2; // LWE
+  }
+
+  if (TFELWEEnabled)
+    return nullptr; // TFE not yet supported
 
   ConstantInt *NewDMask = nullptr;
 
@@ -1147,6 +1183,18 @@ Value *InstCombiner::SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
   switch (I->getOpcode()) {
   default: break;
 
+  case Instruction::GetElementPtr: {
+    // Conservatively track the demanded elements back through any vector
+    // operands we may have.  We know there must be at least one, or we
+    // wouldn't have a vector result to get here. Note that we intentionally
+    // merge the undef bits here since gepping with either an undef base or
+    // index results in undef. 
+    for (unsigned i = 0; i < I->getNumOperands(); i++)
+      if (I->getOperand(i)->getType()->isVectorTy())
+        simplifyAndSetOp(I, i, DemandedElts, UndefElts);
+
+    break;
+  }
   case Instruction::InsertElement: {
     // If this is a variable index, we don't know which element it overwrites.
     // demand exactly the same input as we produce.
@@ -1595,10 +1643,15 @@ Value *InstCombiner::SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
       break;
     case Intrinsic::amdgcn_buffer_load:
     case Intrinsic::amdgcn_buffer_load_format:
+    case Intrinsic::amdgcn_raw_buffer_load:
+    case Intrinsic::amdgcn_raw_buffer_load_format:
+    case Intrinsic::amdgcn_struct_buffer_load:
+    case Intrinsic::amdgcn_struct_buffer_load_format:
       return simplifyAMDGCNMemoryIntrinsicDemanded(II, DemandedElts);
     default: {
       if (getAMDGPUImageDMaskIntrinsic(II->getIntrinsicID()))
-        return simplifyAMDGCNMemoryIntrinsicDemanded(II, DemandedElts, 0);
+        return simplifyAMDGCNMemoryIntrinsicDemanded(
+            II, DemandedElts, 0, II->getNumArgOperands() - 2);
 
       break;
     }

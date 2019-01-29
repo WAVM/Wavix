@@ -1,9 +1,8 @@
 //===-- RuntimeDyld.cpp - Run-time dynamic linker for MC-JIT ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -380,6 +379,25 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
     // section so that they can be verified.
     if (Checker)
       Checker->registerStubMap(Obj.getFileName(), SectionID, Stubs);
+  }
+
+  // Process remaining sections
+  if (ProcessAllSections) {
+    LLVM_DEBUG(dbgs() << "Process remaining sections:\n");
+    for (section_iterator SI = Obj.section_begin(), SE = Obj.section_end();
+         SI != SE; ++SI) {
+
+      /* Ignore already loaded sections */
+      if (LocalSections.find(*SI) != LocalSections.end())
+        continue;
+
+      bool IsCode = SI->isText();
+      if (auto SectionIDOrErr =
+              findOrEmitSection(Obj, *SI, IsCode, LocalSections))
+        LLVM_DEBUG(dbgs() << "\tSectionID: " << (*SectionIDOrErr) << "\n");
+      else
+        return SectionIDOrErr.takeError();
+    }
   }
 
   // Give the subclasses a chance to tie-up any loose ends.

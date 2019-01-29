@@ -1,9 +1,8 @@
 //===-- MemorySSAUpdater.cpp - Memory SSA Updater--------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------===//
 //
@@ -93,7 +92,7 @@ MemoryAccess *MemorySSAUpdater::getPreviousDefRecursive(
         // FIXME: Figure out whether this is dead code and if so remove it.
         if (!std::equal(Phi->op_begin(), Phi->op_end(), PhiOps.begin())) {
           // These will have been filled in by the recursive read we did above.
-          std::copy(PhiOps.begin(), PhiOps.end(), Phi->op_begin());
+          llvm::copy(PhiOps, Phi->op_begin());
           std::copy(pred_begin(BB), pred_end(BB), Phi->block_begin());
         }
       } else {
@@ -1022,7 +1021,7 @@ void MemorySSAUpdater::wireOldPredecessorsToNewImmediatePredecessor(
   MemoryPhi *Phi = MSSA->getMemoryAccess(Old);
   if (!Phi)
     return;
-  if (pred_size(Old) == 1) {
+  if (Old->hasNPredecessors(1)) {
     assert(pred_size(New) == Preds.size() &&
            "Should have moved all predecessors.");
     MSSA->moveTo(Phi, New, MemorySSA::Beginning);

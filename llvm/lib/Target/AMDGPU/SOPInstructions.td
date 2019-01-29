@@ -1,9 +1,8 @@
 //===-- SOPInstructions.td - SOP Instruction Defintions -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -302,6 +301,8 @@ class SOP2_Real<bits<7> op, SOP_Pseudo ps> :
   // copy relevant pseudo op flags
   let SubtargetPredicate = ps.SubtargetPredicate;
   let AsmMatchConverter  = ps.AsmMatchConverter;
+  let UseNamedOperandTable = ps.UseNamedOperandTable;
+  let TSFlags = ps.TSFlags;
 
   // encoding
   bits<7> sdst;
@@ -334,6 +335,12 @@ class SOP2_64_32 <string opName, list<dag> pattern=[]> : SOP2_Pseudo <
 class SOP2_64_32_32 <string opName, list<dag> pattern=[]> : SOP2_Pseudo <
   opName, (outs SReg_64:$sdst), (ins SSrc_b32:$src0, SSrc_b32:$src1),
   "$sdst, $src0, $src1", pattern
+>;
+
+class UniformUnaryFrag<SDPatternOperator Op> : PatFrag <
+  (ops node:$src0),
+  (Op $src0),
+  [{ return !N->isDivergent(); }]
 >;
 
 class UniformBinFrag<SDPatternOperator Op> : PatFrag <
@@ -421,16 +428,39 @@ def S_XNOR_B32 : SOP2_32 <"s_xnor_b32",
 def S_XNOR_B64 : SOP2_64 <"s_xnor_b64",
   [(set i64:$sdst, (not (xor_oneuse i64:$src0, i64:$src1)))]
 >;
+
+def S_NAND_B32 : SOP2_32 <"s_nand_b32",
+  [(set i32:$sdst, (not (and_oneuse i32:$src0, i32:$src1)))]
+>;
+
+def S_NAND_B64 : SOP2_64 <"s_nand_b64",
+  [(set i64:$sdst, (not (and_oneuse i64:$src0, i64:$src1)))]
+>;
+
+def S_NOR_B32 : SOP2_32 <"s_nor_b32",
+  [(set i32:$sdst, (not (or_oneuse i32:$src0, i32:$src1)))]
+>;
+
+def S_NOR_B64 : SOP2_64 <"s_nor_b64",
+  [(set i64:$sdst, (not (or_oneuse i64:$src0, i64:$src1)))]
+>;
 } // End isCommutable = 1
 
-def S_ANDN2_B32 : SOP2_32 <"s_andn2_b32">;
-def S_ANDN2_B64 : SOP2_64 <"s_andn2_b64">;
-def S_ORN2_B32 : SOP2_32 <"s_orn2_b32">;
-def S_ORN2_B64 : SOP2_64 <"s_orn2_b64">;
-def S_NAND_B32 : SOP2_32 <"s_nand_b32">;
-def S_NAND_B64 : SOP2_64 <"s_nand_b64">;
-def S_NOR_B32 : SOP2_32 <"s_nor_b32">;
-def S_NOR_B64 : SOP2_64 <"s_nor_b64">;
+def S_ANDN2_B32 : SOP2_32 <"s_andn2_b32",
+  [(set i32:$sdst, (UniformBinFrag<and> i32:$src0, (UniformUnaryFrag<not> i32:$src1)))]
+>;
+
+def S_ANDN2_B64 : SOP2_64 <"s_andn2_b64",
+  [(set i64:$sdst, (UniformBinFrag<and> i64:$src0, (UniformUnaryFrag<not> i64:$src1)))]
+>;
+
+def S_ORN2_B32 : SOP2_32 <"s_orn2_b32",
+  [(set i32:$sdst, (UniformBinFrag<or> i32:$src0, (UniformUnaryFrag<not> i32:$src1)))]
+>;
+
+def S_ORN2_B64 : SOP2_64 <"s_orn2_b64",
+  [(set i64:$sdst, (UniformBinFrag<or> i64:$src0, (UniformUnaryFrag<not> i64:$src1)))]
+>;
 } // End Defs = [SCC]
 
 // Use added complexity so these patterns are preferred to the VALU patterns.

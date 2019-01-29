@@ -1,9 +1,8 @@
 //===- X86RegisterInfo.td - Describe the X86 Register File --*- tablegen -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -436,11 +435,12 @@ def GR8_ABCD_H : RegisterClass<"X86", [i8], 8, (add AH, CH, DH, BH)>;
 def GR16_ABCD : RegisterClass<"X86", [i16], 16, (add AX, CX, DX, BX)>;
 def GR32_ABCD : RegisterClass<"X86", [i32], 32, (add EAX, ECX, EDX, EBX)>;
 def GR64_ABCD : RegisterClass<"X86", [i64], 64, (add RAX, RCX, RDX, RBX)>;
-def GR32_TC   : RegisterClass<"X86", [i32], 32, (add EAX, ECX, EDX)>;
+def GR32_TC   : RegisterClass<"X86", [i32], 32, (add EAX, ECX, EDX, ESP)>;
 def GR64_TC   : RegisterClass<"X86", [i64], 64, (add RAX, RCX, RDX, RSI, RDI,
-                                                     R8, R9, R11, RIP)>;
+                                                     R8, R9, R11, RIP, RSP)>;
 def GR64_TCW64 : RegisterClass<"X86", [i64], 64, (add RAX, RCX, RDX,
-                                                      R8, R9, R10, R11, RIP)>;
+                                                      R8, R9, R10, R11,
+                                                      RIP, RSP)>;
 
 // GR8_NOREX - GR8 registers which do not require a REX prefix.
 def GR8_NOREX : RegisterClass<"X86", [i8], 8,
@@ -521,9 +521,15 @@ def FR64 : RegisterClass<"X86", [f64], 64, (add FR32)>;
 // faster on common hardware.  In reality, this should be controlled by a
 // command line option or something.
 
+
 def RFP32 : RegisterClass<"X86",[f32], 32, (sequence "FP%u", 0, 6)>;
 def RFP64 : RegisterClass<"X86",[f64], 32, (add RFP32)>;
 def RFP80 : RegisterClass<"X86",[f80], 32, (add RFP32)>;
+
+// st(7) may be is not allocatable.
+def RFP80_7 : RegisterClass<"X86",[f80], 32, (add FP7)> {
+  let isAllocatable = 0;
+}
 
 // Floating point stack registers (these are not allocatable by the
 // register allocator - the floating point stackifier is responsible

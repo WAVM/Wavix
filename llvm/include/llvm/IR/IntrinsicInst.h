@@ -1,9 +1,8 @@
 //===-- llvm/IntrinsicInst.h - Intrinsic Instruction Wrappers ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -251,6 +250,12 @@ namespace llvm {
       case Intrinsic::experimental_constrained_log2:
       case Intrinsic::experimental_constrained_rint:
       case Intrinsic::experimental_constrained_nearbyint:
+      case Intrinsic::experimental_constrained_maxnum:
+      case Intrinsic::experimental_constrained_minnum:
+      case Intrinsic::experimental_constrained_ceil:
+      case Intrinsic::experimental_constrained_floor:
+      case Intrinsic::experimental_constrained_round:
+      case Intrinsic::experimental_constrained_trunc:
         return true;
       default: return false;
       }

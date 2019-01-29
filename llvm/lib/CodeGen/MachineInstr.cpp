@@ -1,9 +1,8 @@
 //===- lib/CodeGen/MachineInstr.cpp ---------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -225,12 +224,13 @@ void MachineInstr::addOperand(MachineFunction &MF, const MachineOperand &Op) {
   }
 
 #ifndef NDEBUG
-  bool isMetaDataOp = Op.getType() == MachineOperand::MO_Metadata;
+  bool isDebugOp = Op.getType() == MachineOperand::MO_Metadata ||
+                   Op.getType() == MachineOperand::MO_MCSymbol;
   // OpNo now points as the desired insertion point.  Unless this is a variadic
   // instruction, only implicit regs are allowed beyond MCID->getNumOperands().
   // RegMask operands go between the explicit and implicit operands.
   assert((isImpReg || Op.isRegMask() || MCID->isVariadic() ||
-          OpNo < MCID->getNumOperands() || isMetaDataOp) &&
+          OpNo < MCID->getNumOperands() || isDebugOp) &&
          "Trying to add an operand to a machine instr that is already done!");
 #endif
 
@@ -933,9 +933,7 @@ int MachineInstr::findRegisterUseOperandIdx(
     unsigned MOReg = MO.getReg();
     if (!MOReg)
       continue;
-    if (MOReg == Reg || (TRI && TargetRegisterInfo::isPhysicalRegister(MOReg) &&
-                         TargetRegisterInfo::isPhysicalRegister(Reg) &&
-                         TRI->isSubRegister(MOReg, Reg)))
+    if (MOReg == Reg || (TRI && Reg && MOReg && TRI->regsOverlap(MOReg, Reg)))
       if (!isKill || MO.isKill())
         return i;
   }

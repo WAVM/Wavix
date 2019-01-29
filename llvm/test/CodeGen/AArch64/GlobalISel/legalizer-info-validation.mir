@@ -7,7 +7,7 @@
 # REQUIRES: asserts
 
 # The main purpose of this test is to make sure we don't over-relax
-# LegalizerInfo validation and loose its ability to catch bugs.
+# LegalizerInfo validation and lose its ability to catch bugs.
 #
 # Watch out for every "SKIPPED: user-defined predicate detected" in the
 # check-lines below and keep each and every one of them justified.
@@ -46,7 +46,7 @@
 # DEBUG:      .. the first uncovered type index: 1, OK
 #
 # DEBUG-NEXT: G_IMPLICIT_DEF (opcode {{[0-9]+}}): 1 type index
-# DEBUG:      .. the first uncovered type index: 1, OK
+# DEBUG: .. type index coverage check SKIPPED: user-defined predicate detected
 #
 # DEBUG-NEXT: G_PHI (opcode {{[0-9]+}}): 1 type index
 # DEBUG:      .. the first uncovered type index: 1, OK
@@ -68,6 +68,15 @@
 #
 # DEBUG-NEXT: G_MERGE_VALUES (opcode {{[0-9]+}}): 2 type indices
 # DEBUG:      .. type index coverage check SKIPPED: user-defined predicate detected
+#
+# DEBUG-NEXT: G_BUILD_VECTOR (opcode {{[0-9]+}}): 2 type indices
+# DEBUG:      .. type index coverage check SKIPPED: user-defined predicate detected
+#
+# DEBUG-NEXT: G_BUILD_VECTOR_TRUNC (opcode {{[0-9]+}}): 2 type indices
+# DEBUG:      .. type index coverage check SKIPPED: no rules defined
+#
+# DEBUG-NEXT: G_CONCAT_VECTORS (opcode {{[0-9]+}}): 2 type indices
+# DEBUG:      .. type index coverage check SKIPPED: no rules defined
 #
 # DEBUG-NEXT: G_PTRTOINT (opcode {{[0-9]+}}): 2 type indices
 # DEBUG:      .. the first uncovered type index: 2, OK
@@ -171,14 +180,14 @@
 # DEBUG-NEXT: G_ZEXT (opcode {{[0-9]+}}): 2 type indices
 # DEBUG:      .. the first uncovered type index: 2, OK
 #
-# DEBUG-NEXT: G_SHL (opcode {{[0-9]+}}): 1 type index
-# DEBUG:      .. the first uncovered type index: 1, OK
+# DEBUG-NEXT: G_SHL (opcode {{[0-9]+}}): 2 type indices
+# DEBUG:.. type index coverage check SKIPPED: user-defined predicate detected
 #
-# DEBUG-NEXT: G_LSHR (opcode {{[0-9]+}}): 1 type index
-# DEBUG:      .. the first uncovered type index: 1, OK
+# DEBUG-NEXT: G_LSHR (opcode {{[0-9]+}}): 2 type indices
+# DEBUG: .. type index coverage check SKIPPED: user-defined predicate detected
 #
-# DEBUG-NEXT: G_ASHR (opcode {{[0-9]+}}): 1 type index
-# DEBUG:      .. the first uncovered type index: 1, OK
+# DEBUG-NEXT: G_ASHR (opcode {{[0-9]+}}): 2 type indices
+# DEBUG: .. type index coverage check SKIPPED: user-defined predicate detected
 #
 # DEBUG-NEXT: G_ICMP (opcode {{[0-9]+}}): 2 type indices
 # DEBUG:      .. the first uncovered type index: 2, OK
@@ -253,13 +262,16 @@
 # DEBUG:      .. type index coverage check SKIPPED: no rules defined
 #
 # DEBUG-NEXT: G_FLOG (opcode {{[0-9]+}}): 1 type index
-# DEBUG:      .. type index coverage check SKIPPED: no rules defined
+# DEBUG:      .. the first uncovered type index: 1, OK
 #
 # DEBUG-NEXT: G_FLOG2 (opcode {{[0-9]+}}): 1 type index
 # DEBUG:      .. type index coverage check SKIPPED: no rules defined
 #
+# DEBUG-NEXT: G_FLOG10 (opcode {{[0-9]+}}): 1 type index
+# DEBUG:      .. the first uncovered type index: 1, OK
+#
 # DEBUG-NEXT: G_FNEG (opcode {{[0-9]+}}): 1 type index
-# DEBUG:      .. type index coverage check SKIPPED: no rules defined
+# DEBUG:      .. the first uncovered type index: 1, OK
 #
 # DEBUG-NEXT: G_FPEXT (opcode {{[0-9]+}}): 2 type indices
 # DEBUG:      .. the first uncovered type index: 2, OK
@@ -295,7 +307,7 @@
 # DEBUG:      .. type index coverage check SKIPPED: no rules defined
 #
 # DEBUG-NEXT: G_EXTRACT_VECTOR_ELT (opcode {{[0-9]+}}): 3 type indices
-# DEBUG:      .. type index coverage check SKIPPED: no rules defined
+# DEBUG:      .. type index coverage check SKIPPED: user-defined predicate detected
 #
 # DEBUG-NEXT: G_SHUFFLE_VECTOR (opcode {{[0-9]+}}): 3 type indices
 # DEBUG:      .. type index coverage check SKIPPED: no rules defined
@@ -317,6 +329,15 @@
 #
 # DEBUG-NEXT: G_BSWAP (opcode {{[0-9]+}}): 1 type index
 # DEBUG:      .. the first uncovered type index: 1, OK
+#
+# DEBUG-NEXT: G_FCEIL (opcode {{[0-9]+}}): 1 type index
+# DEBUG: .. type index coverage check SKIPPED: user-defined predicate detected
+#
+# DEBUG-NEXT: G_FCOS (opcode {{[0-9]+}}): 1 type index
+# DEBUG: .. the first uncovered type index: 1, OK
+#
+# DEBUG-NEXT: G_FSIN (opcode {{[0-9]+}}): 1 type index
+# DEBUG: .. the first uncovered type index: 1, OK
 
 # CHECK-NOT: ill-defined
 

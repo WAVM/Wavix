@@ -1,9 +1,8 @@
 //===-- LoopSink.cpp - Loop Sink Pass -------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -202,6 +201,13 @@ static bool sinkInstruction(Loop &L, Instruction &I,
   if (BBsToSinkInto.empty())
     return false;
 
+  // Return if any of the candidate blocks to sink into is non-cold.
+  if (BBsToSinkInto.size() > 1) {
+    for (auto *BB : BBsToSinkInto)
+      if (!LoopBlockNumber.count(BB))
+        return false;
+  }
+
   // Copy the final BBs into a vector and sort them using the total ordering
   // of the loop block numbers as iterating the set doesn't give a useful
   // order. No need to stable sort as the block numbers are a total ordering.
@@ -273,6 +279,7 @@ static bool sinkLoopInvariantInstructions(Loop &L, AAResults &AA, LoopInfo &LI,
   // Compute alias set.
   for (BasicBlock *BB : L.blocks())
     CurAST.add(*BB);
+  CurAST.add(*Preheader);
 
   // Sort loop's basic blocks by frequency
   SmallVector<BasicBlock *, 10> ColdLoopBBs;
@@ -296,7 +303,7 @@ static bool sinkLoopInvariantInstructions(Loop &L, AAResults &AA, LoopInfo &LI,
     // No need to check for instruction's operands are loop invariant.
     assert(L.hasLoopInvariantOperands(I) &&
            "Insts in a loop's preheader should have loop invariant operands!");
-    if (!canSinkOrHoistInst(*I, &AA, &DT, &L, &CurAST, false))
+    if (!canSinkOrHoistInst(*I, &AA, &DT, &L, &CurAST, nullptr, false))
       continue;
     if (sinkInstruction(L, *I, ColdLoopBBs, LoopBlockNumber, LI, DT, BFI))
       Changed = true;

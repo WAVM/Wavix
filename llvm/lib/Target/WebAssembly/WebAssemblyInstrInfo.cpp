@@ -1,9 +1,8 @@
 //===-- WebAssemblyInstrInfo.cpp - WebAssembly Instruction Information ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -70,6 +69,8 @@ void WebAssemblyInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     CopyOpcode = WebAssembly::COPY_F32;
   else if (RC == &WebAssembly::F64RegClass)
     CopyOpcode = WebAssembly::COPY_F64;
+  else if (RC == &WebAssembly::V128RegClass)
+    CopyOpcode = WebAssembly::COPY_V128;
   else
     llvm_unreachable("Unexpected register class");
 

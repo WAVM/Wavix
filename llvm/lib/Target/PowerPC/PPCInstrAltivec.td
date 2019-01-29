@@ -1,9 +1,8 @@
 //===-- PPCInstrAltivec.td - The PowerPC Altivec Extension -*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1050,6 +1049,20 @@ def : Pat<(v4f32 (ftrunc v4f32:$vA)),
           (VRFIZ $vA)>;
 def : Pat<(v4f32 (fnearbyint v4f32:$vA)),
           (VRFIN $vA)>;
+
+// Vector selection
+def : Pat<(v16i8 (vselect v16i8:$vA, v16i8:$vB, v16i8:$vC)),
+          (VSEL $vC, $vB, $vA)>;
+def : Pat<(v8i16 (vselect v8i16:$vA, v8i16:$vB, v8i16:$vC)),
+          (VSEL $vC, $vB, $vA)>;
+def : Pat<(v4i32 (vselect v4i32:$vA, v4i32:$vB, v4i32:$vC)),
+          (VSEL $vC, $vB, $vA)>;
+def : Pat<(v2i64 (vselect v2i64:$vA, v2i64:$vB, v2i64:$vC)),
+          (VSEL $vC, $vB, $vA)>;
+def : Pat<(v4f32 (vselect v4i32:$vA, v4f32:$vB, v4f32:$vC)),
+          (VSEL $vC, $vB, $vA)>;
+def : Pat<(v2f64 (vselect v2i64:$vA, v2f64:$vB, v2f64:$vC)),
+          (VSEL $vC, $vB, $vA)>;
 
 } // end HasAltivec
 

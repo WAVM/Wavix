@@ -1,9 +1,8 @@
 //=- X86SchedBroadwell.td - X86 Broadwell Scheduling ---------*- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -81,6 +80,8 @@ def : ReadAdvance<ReadAfterLd, 5>;
 def : ReadAdvance<ReadAfterVecLd, 5>;
 def : ReadAdvance<ReadAfterVecXLd, 5>;
 def : ReadAdvance<ReadAfterVecYLd, 6>;
+
+def : ReadAdvance<ReadInt2Fpu, 0>;
 
 // Many SchedWrites are defined in pairs with and without a folded load.
 // Instructions with folded loads are usually micro-fused, so they only appear
@@ -878,10 +879,10 @@ def BWWriteResGroup45 : SchedWriteRes<[BWPort0156]> {
 }
 def: InstRW<[BWWriteResGroup45], (instrs FNCLEX)>;
 
-def BWWriteResGroup46 : SchedWriteRes<[BWPort015,BWPort0156]> {
-  let Latency = 4;
+def BWWriteResGroup46 : SchedWriteRes<[]> {
+  let Latency = 0;
   let NumMicroOps = 4;
-  let ResourceCycles = [1,3];
+  let ResourceCycles = [];
 }
 def: InstRW<[BWWriteResGroup46], (instrs VZEROUPPER)>;
 
@@ -1229,7 +1230,7 @@ def BWWriteResGroup112 : SchedWriteRes<[BWPort23,BWPort06,BWPort0156]> {
   let NumMicroOps = 5;
   let ResourceCycles = [1,1,3];
 }
-def: InstRW<[BWWriteResGroup112], (instregex "RDRAND(16|32|64)r")>;
+def: InstRW<[BWWriteResGroup112], (instrs RDRAND16r, RDRAND32r, RDRAND64r)>;
 
 def BWWriteResGroup113 : SchedWriteRes<[BWPort1,BWPort6,BWPort23,BWPort0156]> {
   let Latency = 9;

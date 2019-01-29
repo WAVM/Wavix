@@ -1,9 +1,8 @@
 //===-- llvm-exegesis.cpp ---------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -94,6 +93,13 @@ static cl::opt<std::string>
     AnalysisInconsistenciesOutputFile("analysis-inconsistencies-output-file",
                                       cl::desc(""), cl::init("-"));
 
+static cl::opt<std::string>
+    CpuName("mcpu",
+            cl::desc(
+                "cpu name to use for pfm counters, leave empty to autodetect"),
+            cl::init(""));
+
+
 static ExitOnError ExitOnErr;
 
 #ifdef LLVM_EXEGESIS_INITIALIZE_NATIVE_TARGET
@@ -147,7 +153,7 @@ getOpcodesOrDie(const llvm::MCInstrInfo &MCInstrInfo) {
 // Generates code snippets for opcode `Opcode`.
 static llvm::Expected<std::vector<BenchmarkCode>>
 generateSnippets(const LLVMState &State, unsigned Opcode) {
-  const Instruction Instr(State, Opcode);
+  const Instruction &Instr = State.getIC().getInstr(Opcode);
   const llvm::MCInstrDesc &InstrDesc = *Instr.Description;
   // Ignore instructions that we cannot run.
   if (InstrDesc.isPseudo())
@@ -321,7 +327,7 @@ void benchmarkMain() {
   LLVM_EXEGESIS_INITIALIZE_NATIVE_TARGET();
 #endif
 
-  const LLVMState State;
+  const LLVMState State(CpuName);
   const auto Opcodes = getOpcodesOrDie(State.getInstrInfo());
 
   std::vector<BenchmarkCode> Configurations;
@@ -399,7 +405,7 @@ static void analysisMain() {
   llvm::InitializeNativeTargetAsmPrinter();
   llvm::InitializeNativeTargetDisassembler();
   // Read benchmarks.
-  const LLVMState State;
+  const LLVMState State("");
   const std::vector<InstructionBenchmark> Points =
       ExitOnErr(InstructionBenchmark::readYamls(State, BenchmarkFile));
   llvm::outs() << "Parsed " << Points.size() << " benchmark points\n";

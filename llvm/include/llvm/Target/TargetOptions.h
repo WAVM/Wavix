@@ -1,9 +1,8 @@
 //===-- llvm/Target/TargetOptions.h - Target Options ------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -94,6 +93,14 @@ namespace llvm {
     GDB,      // Tune debug info for gdb.
     LLDB,     // Tune debug info for lldb.
     SCE       // Tune debug info for SCE targets (e.g. PS4).
+  };
+
+  /// Enable abort calls when global instruction selection fails to lower/select
+  /// an instruction.
+  enum class GlobalISelAbortMode {
+    Disable,        // Disable the abort.
+    Enable,         // Enable the abort.
+    DisableWithDiag // Disable the abort but emit a diagnostic on failure.
   };
 
   class TargetOptions {
@@ -191,6 +198,10 @@ namespace llvm {
 
     /// EnableGlobalISel - This flag enables global instruction selection.
     unsigned EnableGlobalISel : 1;
+
+    /// EnableGlobalISelAbort - Control abort behaviour when global instruction
+    /// selection fails to lower/select an instruction.
+    GlobalISelAbortMode GlobalISelAbort = GlobalISelAbortMode::Enable;
 
     /// UseInitArray - Use .init_array instead of .ctors for static
     /// constructors.

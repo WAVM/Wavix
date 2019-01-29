@@ -1,9 +1,8 @@
 //===- CallPromotionUtils.cpp - Utilities for call promotion ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -393,6 +392,13 @@ Instruction *llvm::promoteCall(CallSite CS, Function *Callee,
   // to the correct type.
   auto CalleeType = Callee->getFunctionType();
   auto CalleeParamNum = CalleeType->getNumParams();
+
+  LLVMContext &Ctx = Callee->getContext();
+  const AttributeList &CallerPAL = CS.getAttributes();
+  // The new list of argument attributes.
+  SmallVector<AttributeSet, 4> NewArgAttrs;
+  bool AttributeChanged = false;
+
   for (unsigned ArgNo = 0; ArgNo < CalleeParamNum; ++ArgNo) {
     auto *Arg = CS.getArgument(ArgNo);
     Type *FormalTy = CalleeType->getParamType(ArgNo);
@@ -401,13 +407,31 @@ Instruction *llvm::promoteCall(CallSite CS, Function *Callee,
       auto *Cast = CastInst::CreateBitOrPointerCast(Arg, FormalTy, "",
                                                     CS.getInstruction());
       CS.setArgument(ArgNo, Cast);
-    }
+
+      // Remove any incompatible attributes for the argument.
+      AttrBuilder ArgAttrs(CallerPAL.getParamAttributes(ArgNo));
+      ArgAttrs.remove(AttributeFuncs::typeIncompatible(FormalTy));
+      NewArgAttrs.push_back(AttributeSet::get(Ctx, ArgAttrs));
+      AttributeChanged = true;
+    } else
+      NewArgAttrs.push_back(CallerPAL.getParamAttributes(ArgNo));
   }
 
   // If the return type of the call site doesn't match that of the callee, cast
   // the returned value to the appropriate type.
-  if (!CallSiteRetTy->isVoidTy() && CallSiteRetTy != CalleeRetTy)
+  // Remove any incompatible return value attribute.
+  AttrBuilder RAttrs(CallerPAL, AttributeList::ReturnIndex);
+  if (!CallSiteRetTy->isVoidTy() && CallSiteRetTy != CalleeRetTy) {
     createRetBitCast(CS, CallSiteRetTy, RetBitCast);
+    RAttrs.remove(AttributeFuncs::typeIncompatible(CalleeRetTy));
+    AttributeChanged = true;
+  }
+
+  // Set the new callsite attribute.
+  if (AttributeChanged)
+    CS.setAttributes(AttributeList::get(Ctx, CallerPAL.getFnAttributes(),
+                                        AttributeSet::get(Ctx, RAttrs),
+                                        NewArgAttrs));
 
   return CS.getInstruction();
 }

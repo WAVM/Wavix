@@ -1,9 +1,8 @@
 //===- ARMISelLowering.h - ARM DAG Lowering Interface -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -85,6 +84,7 @@ class VectorType;
       FMSTAT,       // ARM fmstat instruction.
 
       CMOV,         // ARM conditional move instructions.
+      SUBS,         // Flag-setting subtraction.
 
       SSAT,         // Signed saturation
       USAT,         // Unsigned saturation
@@ -592,6 +592,8 @@ class VectorType;
     bool isDesirableToCommuteWithShift(const SDNode *N,
                                        CombineLevel Level) const override;
 
+    bool shouldFoldShiftPairToMask(const SDNode *N,
+                                   CombineLevel Level) const override;
   protected:
     std::pair<const TargetRegisterClass *, uint8_t>
     findRepresentativeClass(const TargetRegisterInfo *TRI,
@@ -693,6 +695,9 @@ class VectorType;
 
     unsigned getRegisterByName(const char* RegName, EVT VT,
                                SelectionDAG &DAG) const override;
+
+    SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
+                          SmallVectorImpl<SDNode *> &Created) const override;
 
     /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
     /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be

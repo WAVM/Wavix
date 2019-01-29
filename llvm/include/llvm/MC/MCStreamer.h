@@ -1,9 +1,8 @@
 //===- MCStreamer.h - High-level Streaming Machine Code Output --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -28,6 +27,7 @@
 #include "llvm/Support/MD5.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/TargetParser.h"
+#include "llvm/Support/VersionTuple.h"
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -108,6 +108,11 @@ public:
                              const MCExpr *SubSection, raw_ostream &OS);
 
   virtual void emitValue(const MCExpr *Value);
+
+  /// Emit the bytes in \p Data into the output.
+  ///
+  /// This is used to emit bytes in \p Data as sequence of .byte directives.
+  virtual void emitRawBytes(StringRef Data);
 
   virtual void finish();
 };
@@ -193,10 +198,6 @@ class MCStreamer {
 
   WinEH::FrameInfo *CurrentWinFrameInfo;
 
-  /// Retreive the current frame info if one is available and it is not yet
-  /// closed. Otherwise, issue an error and return null.
-  WinEH::FrameInfo *EnsureValidWinFrameInfo(SMLoc Loc);
-
   /// Tracks an index to represent the order a symbol was emitted in.
   /// Zero means we did not emit that symbol.
   DenseMap<const MCSymbol *, unsigned> SymbolOrdering;
@@ -218,10 +219,6 @@ protected:
 
   virtual void EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame);
   virtual void EmitCFIEndProcImpl(MCDwarfFrameInfo &CurFrame);
-
-  /// When emitting an object file, create and emit a real label. When emitting
-  /// textual assembly, this should do nothing to avoid polluting our output.
-  virtual MCSymbol *EmitCFILabel();
 
   WinEH::FrameInfo *getCurrentWinFrameInfo() {
     return CurrentWinFrameInfo;
@@ -260,6 +257,14 @@ public:
   MCTargetStreamer *getTargetStreamer() {
     return TargetStreamer.get();
   }
+
+  /// When emitting an object file, create and emit a real label. When emitting
+  /// textual assembly, this should do nothing to avoid polluting our output.
+  virtual MCSymbol *EmitCFILabel();
+
+  /// Retreive the current frame info if one is available and it is not yet
+  /// closed. Otherwise, issue an error and return null.
+  WinEH::FrameInfo *EnsureValidWinFrameInfo(SMLoc Loc);
 
   unsigned getNumFrameInfos() { return DwarfFrameInfos.size(); }
   ArrayRef<MCDwarfFrameInfo> getDwarfFrameInfos() const {
@@ -447,14 +452,17 @@ public:
 
   /// Specify the Mach-O minimum deployment target version.
   virtual void EmitVersionMin(MCVersionMinType Type, unsigned Major,
-                              unsigned Minor, unsigned Update) {}
+                              unsigned Minor, unsigned Update,
+                              VersionTuple SDKVersion) {}
 
   /// Emit/Specify Mach-O build version command.
   /// \p Platform should be one of MachO::PlatformType.
   virtual void EmitBuildVersion(unsigned Platform, unsigned Major,
-                                unsigned Minor, unsigned Update) {}
+                                unsigned Minor, unsigned Update,
+                                VersionTuple SDKVersion) {}
 
-  void EmitVersionForTarget(const Triple &Target);
+  void EmitVersionForTarget(const Triple &Target,
+                            const VersionTuple &SDKVersion);
 
   /// Note in the output that the specified \p Func is a Thumb mode
   /// function (ARM target only).
@@ -797,6 +805,8 @@ public:
                                        Optional<StringRef> Source,
                                        unsigned CUID = 0);
 
+  virtual void EmitCFIBKeyFrame();
+
   /// This implements the DWARF2 '.loc fileno lineno ...' assembler
   /// directive.
   virtual void EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
@@ -891,9 +901,15 @@ public:
   virtual void EmitCFIUndefined(int64_t Register);
   virtual void EmitCFIRegister(int64_t Register1, int64_t Register2);
   virtual void EmitCFIWindowSave();
+  virtual void EmitCFINegateRAState();
 
   virtual void EmitWinCFIStartProc(const MCSymbol *Symbol, SMLoc Loc = SMLoc());
   virtual void EmitWinCFIEndProc(SMLoc Loc = SMLoc());
+  /// This is used on platforms, such as Windows on ARM64, that require function
+  /// or funclet sizes to be emitted in .xdata before the End marker is emitted
+  /// for the frame.  We cannot use the End marker, as it is not set at the
+  /// point of emitting .xdata, in order to indicate that the frame is active.
+  virtual void EmitWinCFIFuncletOrFuncEnd(SMLoc Loc = SMLoc());
   virtual void EmitWinCFIStartChained(SMLoc Loc = SMLoc());
   virtual void EmitWinCFIEndChained(SMLoc Loc = SMLoc());
   virtual void EmitWinCFIPushReg(unsigned Register, SMLoc Loc = SMLoc());

@@ -1,9 +1,8 @@
 //===- StackMaps.h - StackMaps ----------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -236,25 +235,6 @@ public:
     FnInfos.clear();
   }
 
-  /// Generate a stackmap record for a stackmap instruction.
-  ///
-  /// MI must be a raw STACKMAP, not a PATCHPOINT.
-  void recordStackMap(const MachineInstr &MI);
-
-  /// Generate a stackmap record for a patchpoint instruction.
-  void recordPatchPoint(const MachineInstr &MI);
-
-  /// Generate a stackmap record for a statepoint instruction.
-  void recordStatepoint(const MachineInstr &MI);
-
-  /// If there is any stack map data, create a stack map section and serialize
-  /// the map info into it. This clears the stack map data structures
-  /// afterwards.
-  void serializeToStackMapSection();
-
-private:
-  static const char *WSMP;
-
   using LocationVec = SmallVector<Location, 8>;
   using LiveOutVec = SmallVector<LiveOutReg, 8>;
   using ConstantPool = MapVector<uint64_t, uint64_t>;
@@ -282,6 +262,31 @@ private:
 
   using FnInfoMap = MapVector<const MCSymbol *, FunctionInfo>;
   using CallsiteInfoList = std::vector<CallsiteInfo>;
+
+  /// Generate a stackmap record for a stackmap instruction.
+  ///
+  /// MI must be a raw STACKMAP, not a PATCHPOINT.
+  void recordStackMap(const MachineInstr &MI);
+
+  /// Generate a stackmap record for a patchpoint instruction.
+  void recordPatchPoint(const MachineInstr &MI);
+
+  /// Generate a stackmap record for a statepoint instruction.
+  void recordStatepoint(const MachineInstr &MI);
+
+  /// If there is any stack map data, create a stack map section and serialize
+  /// the map info into it. This clears the stack map data structures
+  /// afterwards.
+  void serializeToStackMapSection();
+
+  /// Get call site info.
+  CallsiteInfoList &getCSInfos() { return CSInfos; }
+
+  /// Get function info.
+  FnInfoMap &getFnInfos() { return FnInfos; }
+
+private:
+  static const char *WSMP;
 
   AsmPrinter &AP;
   CallsiteInfoList CSInfos;

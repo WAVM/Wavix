@@ -1,9 +1,8 @@
 //===----- lib/Support/Error.cpp - Error and associated utilities ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -54,6 +53,7 @@ namespace llvm {
 void ErrorInfoBase::anchor() {}
 char ErrorInfoBase::ID = 0;
 char ErrorList::ID = 0;
+void ECError::anchor() {}
 char ECError::ID = 0;
 char StringError::ID = 0;
 char FileError::ID = 0;
@@ -141,7 +141,7 @@ void report_fatal_error(Error Err, bool GenCrashDiag) {
   std::string ErrMsg;
   {
     raw_string_ostream ErrStream(ErrMsg);
-    logAllUnhandledErrors(std::move(Err), ErrStream, "");
+    logAllUnhandledErrors(std::move(Err), ErrStream);
   }
   report_fatal_error(ErrMsg);
 }

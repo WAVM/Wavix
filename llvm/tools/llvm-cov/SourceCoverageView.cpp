@@ -1,9 +1,8 @@
 //===- SourceCoverageView.cpp - Code coverage view for source code --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -31,7 +30,7 @@ void CoveragePrinter::StreamDestructor::operator()(raw_ostream *OS) const {
 std::string CoveragePrinter::getOutputPath(StringRef Path, StringRef Extension,
                                            bool InToplevel,
                                            bool Relative) const {
-  assert(Extension.size() && "The file extension may not be empty");
+  assert(!Extension.empty() && "The file extension may not be empty");
 
   SmallString<256> FullPath;
 
@@ -80,6 +79,10 @@ CoveragePrinter::create(const CoverageViewOptions &Opts) {
     return llvm::make_unique<CoveragePrinterText>(Opts);
   case CoverageViewOptions::OutputFormat::HTML:
     return llvm::make_unique<CoveragePrinterHTML>(Opts);
+  case CoverageViewOptions::OutputFormat::Lcov:
+    // Unreachable because CodeCoverage.cpp should terminate with an error
+    // before we get here.
+    llvm_unreachable("Lcov format is not supported!");
   }
   llvm_unreachable("Unknown coverage output format!");
 }
@@ -143,6 +146,10 @@ SourceCoverageView::create(StringRef SourceName, const MemoryBuffer &File,
   case CoverageViewOptions::OutputFormat::HTML:
     return llvm::make_unique<SourceCoverageViewHTML>(
         SourceName, File, Options, std::move(CoverageInfo));
+  case CoverageViewOptions::OutputFormat::Lcov:
+    // Unreachable because CodeCoverage.cpp should terminate with an error
+    // before we get here.
+    llvm_unreachable("Lcov format is not supported!");
   }
   llvm_unreachable("Unknown coverage output format!");
 }

@@ -1,9 +1,8 @@
 //===- ObjCARCContract.cpp - ObjC ARC Optimization ------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -522,7 +521,7 @@ bool ObjCARCContract::tryToPeepholeInstruction(
         TailOkForStoreStrongs = false;
       return true;
     case ARCInstKind::IntrinsicUser:
-      // Remove calls to @clang.arc.use(...).
+      // Remove calls to @llvm.objc.clang.arc.use(...).
       Inst->eraseFromParent();
       return true;
     default:

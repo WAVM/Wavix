@@ -27,6 +27,19 @@ define amdgpu_kernel void @lds_atomic_xchg_ret_i64_offset(i64 addrspace(1)* %out
   ret void
 }
 
+; GCN-LABEL: {{^}}lds_atomic_xchg_ret_f64_offset:
+; SICIVI: s_mov_b32 m0
+; GFX9-NOT: m0
+
+; GCN: ds_wrxchg_rtn_b64 {{.*}} offset:32
+; GCN: s_endpgm
+define amdgpu_kernel void @lds_atomic_xchg_ret_f64_offset(double addrspace(1)* %out, double addrspace(3)* %ptr) nounwind {
+  %gep = getelementptr double, double addrspace(3)* %ptr, i32 4
+  %result = atomicrmw xchg double addrspace(3)* %gep, double 4.0 seq_cst
+  store double %result, double addrspace(1)* %out, align 8
+  ret void
+}
+
 ; GCN-LABEL: {{^}}lds_atomic_add_ret_i64:
 ; SICIVI: s_mov_b32 m0
 ; GFX9-NOT: m0
@@ -364,7 +377,7 @@ define amdgpu_kernel void @lds_atomic_add_noret_i64(i64 addrspace(3)* %ptr) noun
 ; GFX89-DAG: s_load_dword [[PTR:s[0-9]+]], s{{\[[0-9]+:[0-9]+\]}}, 0x24
 ; GCN-DAG: v_mov_b32_e32 v[[LOVDATA:[0-9]+]], 9
 ; GCN-DAG: v_mov_b32_e32 v[[HIVDATA:[0-9]+]], 0
-; GCN: v_mov_b32_e32 [[VPTR:v[0-9]+]], [[PTR]]
+; GCN-DAG: v_mov_b32_e32 [[VPTR:v[0-9]+]], [[PTR]]
 ; GCN: ds_add_u64 {{v[0-9]+}}, v{{\[}}[[LOVDATA]]:[[HIVDATA]]{{\]}} offset:32
 ; GCN: s_endpgm
 define amdgpu_kernel void @lds_atomic_add_noret_i64_offset(i64 addrspace(3)* %ptr) nounwind {

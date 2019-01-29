@@ -1,9 +1,8 @@
 //===- lib/CodeGen/MachineTraceMetrics.cpp --------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -218,8 +217,7 @@ computeHeightResources(const MachineBasicBlock *MBB) {
   // The trace tail is done.
   if (!TBI->Succ) {
     TBI->Tail = MBB->getNumber();
-    std::copy(PRCycles.begin(), PRCycles.end(),
-              ProcResourceHeights.begin() + PROffset);
+    llvm::copy(PRCycles, ProcResourceHeights.begin() + PROffset);
     return;
   }
 

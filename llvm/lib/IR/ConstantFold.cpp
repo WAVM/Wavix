@@ -1,9 +1,8 @@
 //===- ConstantFold.cpp - LLVM constant folder ----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -2052,7 +2051,7 @@ static bool isInBoundsIndices(ArrayRef<IndexTy> Idxs) {
 static bool isIndexInRangeOfArrayType(uint64_t NumElements,
                                       const ConstantInt *CI) {
   // We cannot bounds check the index if it doesn't fit in an int64_t.
-  if (CI->getValue().getActiveBits() > 64)
+  if (CI->getValue().getMinSignedBits() > 64)
     return false;
 
   // A negative index or an index past the end of our sequential type is

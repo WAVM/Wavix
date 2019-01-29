@@ -1,9 +1,8 @@
 //===- ScalarEvolution.cpp - Scalar Evolution Analysis --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -112,6 +111,7 @@
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -161,6 +161,11 @@ static cl::opt<bool>
     VerifySCEVMap("verify-scev-maps", cl::Hidden,
                   cl::desc("Verify no dangling value in ScalarEvolution's "
                            "ExprValueMap (slow)"));
+
+static cl::opt<bool> VerifyIR(
+    "scev-verify-ir", cl::Hidden,
+    cl::desc("Verify IR correctness when making sensitive SCEV queries (slow)"),
+    cl::init(false));
 
 static cl::opt<unsigned> MulOpsInlineThreshold(
     "scev-mulops-inline-threshold", cl::Hidden,
@@ -387,7 +392,7 @@ bool SCEV::isNonConstantNegative() const {
 }
 
 SCEVCouldNotCompute::SCEVCouldNotCompute() :
-  SCEV(FoldingSetNodeIDRef(), scCouldNotCompute) {}
+  SCEV(FoldingSetNodeIDRef(), scCouldNotCompute, 0) {}
 
 bool SCEVCouldNotCompute::classof(const SCEV *S) {
   return S->getSCEVType() == scCouldNotCompute;
@@ -416,7 +421,7 @@ ScalarEvolution::getConstant(Type *Ty, uint64_t V, bool isSigned) {
 
 SCEVCastExpr::SCEVCastExpr(const FoldingSetNodeIDRef ID,
                            unsigned SCEVTy, const SCEV *op, Type *ty)
-  : SCEV(ID, SCEVTy), Op(op), Ty(ty) {}
+  : SCEV(ID, SCEVTy, computeExpressionSize(op)), Op(op), Ty(ty) {}
 
 SCEVTruncateExpr::SCEVTruncateExpr(const FoldingSetNodeIDRef ID,
                                    const SCEV *op, Type *ty)
@@ -2289,7 +2294,7 @@ CollectAddOperandsWithScales(DenseMap<const SCEV *, APInt> &M,
 // can't-overflow flags for the operation if possible.
 static SCEV::NoWrapFlags
 StrengthenNoWrapFlags(ScalarEvolution *SE, SCEVTypes Type,
-                      const SmallVectorImpl<const SCEV *> &Ops,
+                      const ArrayRef<const SCEV *> Ops,
                       SCEV::NoWrapFlags Flags) {
   using namespace std::placeholders;
 
@@ -2737,7 +2742,7 @@ const SCEV *ScalarEvolution::getAddExpr(SmallVectorImpl<const SCEV *> &Ops,
 }
 
 const SCEV *
-ScalarEvolution::getOrCreateAddExpr(SmallVectorImpl<const SCEV *> &Ops,
+ScalarEvolution::getOrCreateAddExpr(ArrayRef<const SCEV *> Ops,
                                     SCEV::NoWrapFlags Flags) {
   FoldingSetNodeID ID;
   ID.AddInteger(scAddExpr);
@@ -2759,7 +2764,7 @@ ScalarEvolution::getOrCreateAddExpr(SmallVectorImpl<const SCEV *> &Ops,
 }
 
 const SCEV *
-ScalarEvolution::getOrCreateAddRecExpr(SmallVectorImpl<const SCEV *> &Ops,
+ScalarEvolution::getOrCreateAddRecExpr(ArrayRef<const SCEV *> Ops,
                                        const Loop *L, SCEV::NoWrapFlags Flags) {
   FoldingSetNodeID ID;
   ID.AddInteger(scAddRecExpr);
@@ -2782,7 +2787,7 @@ ScalarEvolution::getOrCreateAddRecExpr(SmallVectorImpl<const SCEV *> &Ops,
 }
 
 const SCEV *
-ScalarEvolution::getOrCreateMulExpr(SmallVectorImpl<const SCEV *> &Ops,
+ScalarEvolution::getOrCreateMulExpr(ArrayRef<const SCEV *> Ops,
                                     SCEV::NoWrapFlags Flags) {
   FoldingSetNodeID ID;
   ID.AddInteger(scMulExpr);
@@ -3060,7 +3065,7 @@ const SCEV *ScalarEvolution::getMulExpr(SmallVectorImpl<const SCEV *> &Ops,
       SmallVector<const SCEV*, 7> AddRecOps;
       for (int x = 0, xe = AddRec->getNumOperands() +
              OtherAddRec->getNumOperands() - 1; x != xe && !Overflow; ++x) {
-        const SCEV *Term = getZero(Ty);
+        SmallVector <const SCEV *, 7> SumOps;
         for (int y = x, ye = 2*x+1; y != ye && !Overflow; ++y) {
           uint64_t Coeff1 = Choose(x, 2*x - y, Overflow);
           for (int z = std::max(y-x, y-(int)AddRec->getNumOperands()+1),
@@ -3075,15 +3080,16 @@ const SCEV *ScalarEvolution::getMulExpr(SmallVectorImpl<const SCEV *> &Ops,
             const SCEV *CoeffTerm = getConstant(Ty, Coeff);
             const SCEV *Term1 = AddRec->getOperand(y-z);
             const SCEV *Term2 = OtherAddRec->getOperand(z);
-            Term = getAddExpr(Term, getMulExpr(CoeffTerm, Term1, Term2,
-                                               SCEV::FlagAnyWrap, Depth + 1),
-                              SCEV::FlagAnyWrap, Depth + 1);
+            SumOps.push_back(getMulExpr(CoeffTerm, Term1, Term2,
+                                        SCEV::FlagAnyWrap, Depth + 1));
           }
         }
-        AddRecOps.push_back(Term);
+        if (SumOps.empty())
+          SumOps.push_back(getZero(Ty));
+        AddRecOps.push_back(getAddExpr(SumOps, SCEV::FlagAnyWrap, Depth + 1));
       }
       if (!Overflow) {
-        const SCEV *NewAddRec = getAddRecExpr(AddRecOps, AddRec->getLoop(),
+        const SCEV *NewAddRec = getAddRecExpr(AddRecOps, AddRecLoop,
                                               SCEV::FlagAnyWrap);
         if (Ops.size() == 2) return NewAddRec;
         Ops[Idx] = NewAddRec;
@@ -6965,8 +6971,8 @@ ScalarEvolution::ExitLimit::ExitLimit(const SCEV *E, const SCEV *M,
 /// Allocate memory for BackedgeTakenInfo and copy the not-taken count of each
 /// computable exit into a persistent ExitNotTakenInfo array.
 ScalarEvolution::BackedgeTakenInfo::BackedgeTakenInfo(
-    SmallVectorImpl<ScalarEvolution::BackedgeTakenInfo::EdgeExitInfo>
-        &&ExitCounts,
+    ArrayRef<ScalarEvolution::BackedgeTakenInfo::EdgeExitInfo>
+        ExitCounts,
     bool Complete, const SCEV *MaxCount, bool MaxOrZero)
     : MaxAndComplete(MaxCount, Complete), MaxOrZero(MaxOrZero) {
   using EdgeExitInfo = ScalarEvolution::BackedgeTakenInfo::EdgeExitInfo;
@@ -9369,6 +9375,11 @@ ScalarEvolution::isLoopBackedgeGuardedByCond(const Loop *L,
   // (interprocedural conditions notwithstanding).
   if (!L) return true;
 
+  if (VerifyIR)
+    assert(!verifyFunction(*L->getHeader()->getParent(), &dbgs()) &&
+           "This cannot be done on broken IR!");
+
+
   if (isKnownViaNonRecursiveReasoning(Pred, LHS, RHS))
     return true;
 
@@ -9473,6 +9484,10 @@ ScalarEvolution::isLoopEntryGuardedByCond(const Loop *L,
   // Interpret a null as meaning no loop, where there is obviously no guard
   // (interprocedural conditions notwithstanding).
   if (!L) return false;
+
+  if (VerifyIR)
+    assert(!verifyFunction(*L->getHeader()->getParent(), &dbgs()) &&
+           "This cannot be done on broken IR!");
 
   // Both LHS and RHS must be available at loop entry.
   assert(isAvailableAtLoopEntry(LHS, L) &&

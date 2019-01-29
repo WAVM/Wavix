@@ -1,9 +1,8 @@
 //===- LLToken.h - Token Codes for LLVM Assembly Files ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -270,6 +269,7 @@ enum Kind {
   kw_umin,
 
   // Instruction Opcodes (Opcode in UIntVal).
+  kw_fneg,
   kw_add,
   kw_fadd,
   kw_sub,
@@ -369,6 +369,7 @@ enum Kind {
   kw_readOnly,
   kw_noRecurse,
   kw_returnDoesNotAlias,
+  kw_noInline,
   kw_calls,
   kw_callee,
   kw_hotness,
@@ -416,6 +417,7 @@ enum Kind {
   kw_info,
   kw_byte,
   kw_bit,
+  kw_varFlags,
 
   // Unsigned Valued tokens (UIntVal).
   GlobalID,   // @42
@@ -439,6 +441,7 @@ enum Kind {
   NameTableKind,    // GNU
   DwarfOp,          // DW_OP_foo
   DIFlag,           // DIFlagFoo
+  DISPFlag,         // DISPFlagFoo
   DwarfMacinfo,     // DW_MACINFO_foo
   ChecksumKind,     // CSK_foo
 

@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/AsmPrinter.h - AsmPrinter Framework ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -71,6 +70,7 @@ class MCTargetOptions;
 class MDNode;
 class Module;
 class raw_ostream;
+class StackMaps;
 class TargetLoweringObjectFile;
 class TargetMachine;
 
@@ -137,6 +137,9 @@ private:
 
   static char ID;
 
+protected:
+  /// Protected struct HandlerInfo and Handlers permit target extended
+  /// AsmPrinter adds their own handlers.
   struct HandlerInfo {
     AsmPrinterHandler *Handler;
     const char *TimerName;
@@ -222,6 +225,9 @@ public:
   const MCSubtargetInfo &getSubtargetInfo() const;
 
   void EmitToStreamer(MCStreamer &S, const MCInst &Inst);
+
+  /// Emits inital debug location directive.
+  void emitInitialRawDwarfLocDirective(const MachineFunction &MF);
 
   /// Return the current section we are emitting to.
   const MCSection *getCurrentSection() const;
@@ -364,6 +370,9 @@ public:
   /// eligible for PC relative GOT entry conversion, in such cases we need to
   /// emit the proxies we previously omitted in EmitGlobalVariable.
   void emitGlobalGOTEquivs();
+
+  /// Emit the stack maps.
+  void emitStackMaps(StackMaps &SM);
 
   //===------------------------------------------------------------------===//
   // Overridable Hooks
@@ -542,7 +551,7 @@ public:
   ///
   /// \p Value - The value to emit.
   /// \p Size - The size of the integer (in bytes) to emit.
-  virtual void EmitDebugThreadLocal(const MCExpr *Value, unsigned Size) const;
+  virtual void EmitDebugValue(const MCExpr *Value, unsigned Size) const;
 
   //===------------------------------------------------------------------===//
   // Dwarf Lowering Routines
@@ -652,6 +661,8 @@ private:
   void EmitLLVMUsedList(const ConstantArray *InitList);
   /// Emit llvm.ident metadata in an '.ident' directive.
   void EmitModuleIdents(Module &M);
+  /// Emit bytes for llvm.commandline metadata.
+  void EmitModuleCommandLines(Module &M);
   void EmitXXStructorList(const DataLayout &DL, const Constant *List,
                           bool isCtor);
 

@@ -1,9 +1,8 @@
 //===- AMDGPUBaseInfo.h - Top level definitions for AMDGPU ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -184,6 +183,7 @@ struct MIMGBaseOpcodeInfo {
   bool Atomic;
   bool AtomicX2;
   bool Sampler;
+  bool Gather4;
 
   uint8_t NumExtraArgs;
   bool Gradients;
@@ -219,6 +219,24 @@ int getMIMGOpcode(unsigned BaseOpcode, unsigned MIMGEncoding,
 
 LLVM_READONLY
 int getMaskedMIMGOp(unsigned Opc, unsigned NewChannels);
+
+LLVM_READONLY
+int getMUBUFBaseOpcode(unsigned Opc);
+
+LLVM_READONLY
+int getMUBUFOpcode(unsigned BaseOpc, unsigned Dwords);
+
+LLVM_READONLY
+int getMUBUFDwords(unsigned Opc);
+
+LLVM_READONLY
+bool getMUBUFHasVAddr(unsigned Opc);
+
+LLVM_READONLY
+bool getMUBUFHasSrsrc(unsigned Opc);
+
+LLVM_READONLY
+bool getMUBUFHasSoffset(unsigned Opc);
 
 LLVM_READONLY
 int getMCOpcode(uint16_t Opcode, unsigned Gen);
@@ -258,6 +276,32 @@ std::pair<int, int> getIntegerPairAttribute(const Function &F,
                                             std::pair<int, int> Default,
                                             bool OnlyFirstRequired = false);
 
+/// Represents the counter values to wait for in an s_waitcnt instruction.
+///
+/// Large values (including the maximum possible integer) can be used to
+/// represent "don't care" waits.
+struct Waitcnt {
+  unsigned VmCnt = ~0u;
+  unsigned ExpCnt = ~0u;
+  unsigned LgkmCnt = ~0u;
+
+  Waitcnt() {}
+  Waitcnt(unsigned VmCnt, unsigned ExpCnt, unsigned LgkmCnt)
+      : VmCnt(VmCnt), ExpCnt(ExpCnt), LgkmCnt(LgkmCnt) {}
+
+  static Waitcnt allZero() { return Waitcnt(0, 0, 0); }
+
+  bool dominates(const Waitcnt &Other) const {
+    return VmCnt <= Other.VmCnt && ExpCnt <= Other.ExpCnt &&
+           LgkmCnt <= Other.LgkmCnt;
+  }
+
+  Waitcnt combined(const Waitcnt &Other) const {
+    return Waitcnt(std::min(VmCnt, Other.VmCnt), std::min(ExpCnt, Other.ExpCnt),
+                   std::min(LgkmCnt, Other.LgkmCnt));
+  }
+};
+
 /// \returns Vmcnt bit mask for given isa \p Version.
 unsigned getVmcntBitMask(const IsaVersion &Version);
 
@@ -291,6 +335,8 @@ unsigned decodeLgkmcnt(const IsaVersion &Version, unsigned Waitcnt);
 void decodeWaitcnt(const IsaVersion &Version, unsigned Waitcnt,
                    unsigned &Vmcnt, unsigned &Expcnt, unsigned &Lgkmcnt);
 
+Waitcnt decodeWaitcnt(const IsaVersion &Version, unsigned Encoded);
+
 /// \returns \p Waitcnt with encoded \p Vmcnt for given isa \p Version.
 unsigned encodeVmcnt(const IsaVersion &Version, unsigned Waitcnt,
                      unsigned Vmcnt);
@@ -318,6 +364,8 @@ unsigned encodeLgkmcnt(const IsaVersion &Version, unsigned Waitcnt,
 unsigned encodeWaitcnt(const IsaVersion &Version,
                        unsigned Vmcnt, unsigned Expcnt, unsigned Lgkmcnt);
 
+unsigned encodeWaitcnt(const IsaVersion &Version, const Waitcnt &Decoded);
+
 unsigned getInitialPSInputAddr(const Function &F);
 
 LLVM_READNONE
@@ -342,6 +390,7 @@ inline bool isKernel(CallingConv::ID CC) {
 }
 
 bool hasXNACK(const MCSubtargetInfo &STI);
+bool hasSRAMECC(const MCSubtargetInfo &STI);
 bool hasMIMG_R128(const MCSubtargetInfo &STI);
 bool hasPackedD16(const MCSubtargetInfo &STI);
 

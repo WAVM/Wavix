@@ -1,9 +1,8 @@
 //===-- echo.cpp - tool for testing libLLVM and llvm-c API ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -240,7 +239,17 @@ static LLVMValueRef clone_constant_impl(LLVMValueRef Cst, LLVMModuleRef M) {
     // Try function
     if (LLVMIsAFunction(Cst)) {
       check_value_kind(Cst, LLVMFunctionValueKind);
-      LLVMValueRef Dst = LLVMGetNamedFunction(M, Name);
+
+      LLVMValueRef Dst = nullptr;
+      // Try an intrinsic
+      unsigned ID = LLVMGetIntrinsicID(Cst);
+      if (ID > 0 && !LLVMIntrinsicIsOverloaded(ID)) {
+        Dst = LLVMGetIntrinsicDeclaration(M, ID, nullptr, 0);
+      } else {
+        // Try a normal function
+        Dst = LLVMGetNamedFunction(M, Name);
+      }
+
       if (Dst)
         return Dst;
       report_fatal_error("Could not find function");

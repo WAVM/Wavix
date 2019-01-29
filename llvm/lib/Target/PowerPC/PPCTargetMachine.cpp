@@ -1,9 +1,8 @@
 //===-- PPCTargetMachine.cpp - Define TargetMachine for PowerPC -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -214,19 +213,24 @@ static Reloc::Model getEffectiveRelocModel(const Triple &TT,
   if (TT.isOSDarwin())
     return Reloc::DynamicNoPIC;
 
-  // Non-darwin 64-bit platforms are PIC by default.
-  if (TT.getArch() == Triple::ppc64 || TT.getArch() == Triple::ppc64le)
+  // Big Endian PPC is PIC by default.
+  if (TT.getArch() == Triple::ppc64)
     return Reloc::PIC_;
 
-  // 32-bit is static by default.
+  // Rest are static by default.
   return Reloc::Static;
 }
 
-static CodeModel::Model getEffectiveCodeModel(const Triple &TT,
-                                              Optional<CodeModel::Model> CM,
-                                              bool JIT) {
-  if (CM)
+static CodeModel::Model getEffectivePPCCodeModel(const Triple &TT,
+                                                 Optional<CodeModel::Model> CM,
+                                                 bool JIT) {
+  if (CM) {
+    if (*CM == CodeModel::Tiny)
+      report_fatal_error("Target does not support the tiny CodeModel");
+    if (*CM == CodeModel::Kernel)
+      report_fatal_error("Target does not support the kernel CodeModel");
     return *CM;
+  }
   if (!TT.isOSDarwin() && !JIT &&
       (TT.getArch() == Triple::ppc64 || TT.getArch() == Triple::ppc64le))
     return CodeModel::Medium;
@@ -246,7 +250,7 @@ PPCTargetMachine::PPCTargetMachine(const Target &T, const Triple &TT,
     : LLVMTargetMachine(T, getDataLayoutString(TT), TT, CPU,
                         computeFSAdditions(FS, OL, TT), Options,
                         getEffectiveRelocModel(TT, RM),
-                        getEffectiveCodeModel(TT, CM, JIT), OL),
+                        getEffectivePPCCodeModel(TT, CM, JIT), OL),
       TLOF(createTLOF(getTargetTriple())),
       TargetABI(computeTargetABI(TT, Options)) {
   initAsmInfo();

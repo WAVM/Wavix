@@ -1,9 +1,8 @@
 //===- AMDGPUBaseInfo.cpp - AMDGPU Base encoding information --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -128,6 +127,49 @@ int getMaskedMIMGOp(unsigned Opc, unsigned NewChannels) {
   return NewInfo ? NewInfo->Opcode : -1;
 }
 
+struct MUBUFInfo {
+  uint16_t Opcode;
+  uint16_t BaseOpcode;
+  uint8_t dwords;
+  bool has_vaddr;
+  bool has_srsrc;
+  bool has_soffset;
+};
+
+#define GET_MUBUFInfoTable_DECL
+#define GET_MUBUFInfoTable_IMPL
+#include "AMDGPUGenSearchableTables.inc"
+
+int getMUBUFBaseOpcode(unsigned Opc) {
+  const MUBUFInfo *Info = getMUBUFInfoFromOpcode(Opc);
+  return Info ? Info->BaseOpcode : -1;
+}
+
+int getMUBUFOpcode(unsigned BaseOpc, unsigned Dwords) {
+  const MUBUFInfo *Info = getMUBUFInfoFromBaseOpcodeAndDwords(BaseOpc, Dwords);
+  return Info ? Info->Opcode : -1;
+}
+
+int getMUBUFDwords(unsigned Opc) {
+  const MUBUFInfo *Info = getMUBUFOpcodeHelper(Opc);
+  return Info ? Info->dwords : 0;
+}
+
+bool getMUBUFHasVAddr(unsigned Opc) {
+  const MUBUFInfo *Info = getMUBUFOpcodeHelper(Opc);
+  return Info ? Info->has_vaddr : false;
+}
+
+bool getMUBUFHasSrsrc(unsigned Opc) {
+  const MUBUFInfo *Info = getMUBUFOpcodeHelper(Opc);
+  return Info ? Info->has_srsrc : false;
+}
+
+bool getMUBUFHasSoffset(unsigned Opc) {
+  const MUBUFInfo *Info = getMUBUFOpcodeHelper(Opc);
+  return Info ? Info->has_soffset : false;
+}
+
 // Wrapper for Tablegen'd function.  enum Subtarget is not defined in any
 // header files, so we need to wrap it in a function that takes unsigned
 // instead.
@@ -152,12 +194,15 @@ void streamIsaVersion(const MCSubtargetInfo *STI, raw_ostream &Stream) {
 
   if (hasXNACK(*STI))
     Stream << "+xnack";
+  if (hasSRAMECC(*STI))
+    Stream << "+sram-ecc";
 
   Stream.flush();
 }
 
 bool hasCodeObjectV3(const MCSubtargetInfo *STI) {
-  return STI->getFeatureBits().test(FeatureCodeObjectV3);
+  return STI->getTargetTriple().getOS() == Triple::AMDHSA &&
+             STI->getFeatureBits().test(FeatureCodeObjectV3);
 }
 
 unsigned getWavefrontSize(const MCSubtargetInfo *STI) {
@@ -519,6 +564,14 @@ void decodeWaitcnt(const IsaVersion &Version, unsigned Waitcnt,
   Lgkmcnt = decodeLgkmcnt(Version, Waitcnt);
 }
 
+Waitcnt decodeWaitcnt(const IsaVersion &Version, unsigned Encoded) {
+  Waitcnt Decoded;
+  Decoded.VmCnt = decodeVmcnt(Version, Encoded);
+  Decoded.ExpCnt = decodeExpcnt(Version, Encoded);
+  Decoded.LgkmCnt = decodeLgkmcnt(Version, Encoded);
+  return Decoded;
+}
+
 unsigned encodeVmcnt(const IsaVersion &Version, unsigned Waitcnt,
                      unsigned Vmcnt) {
   Waitcnt =
@@ -547,6 +600,10 @@ unsigned encodeWaitcnt(const IsaVersion &Version,
   Waitcnt = encodeExpcnt(Version, Waitcnt, Expcnt);
   Waitcnt = encodeLgkmcnt(Version, Waitcnt, Lgkmcnt);
   return Waitcnt;
+}
+
+unsigned encodeWaitcnt(const IsaVersion &Version, const Waitcnt &Decoded) {
+  return encodeWaitcnt(Version, Decoded.VmCnt, Decoded.ExpCnt, Decoded.LgkmCnt);
 }
 
 unsigned getInitialPSInputAddr(const Function &F) {
@@ -591,6 +648,10 @@ bool isEntryFunctionCC(CallingConv::ID CC) {
 
 bool hasXNACK(const MCSubtargetInfo &STI) {
   return STI.getFeatureBits()[AMDGPU::FeatureXNACK];
+}
+
+bool hasSRAMECC(const MCSubtargetInfo &STI) {
+  return STI.getFeatureBits()[AMDGPU::FeatureSRAMECC];
 }
 
 bool hasMIMG_R128(const MCSubtargetInfo &STI) {
@@ -748,6 +809,7 @@ unsigned getRegBitWidth(unsigned RCID) {
   case AMDGPU::VS_64RegClassID:
   case AMDGPU::SReg_64RegClassID:
   case AMDGPU::VReg_64RegClassID:
+  case AMDGPU::SReg_64_XEXECRegClassID:
     return 64;
   case AMDGPU::VReg_96RegClassID:
     return 96;

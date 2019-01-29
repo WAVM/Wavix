@@ -1,9 +1,8 @@
 //===- LLVMBitCodes.h - Enum values for the LLVM bitcode format -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -342,6 +341,7 @@ enum ConstantsCodes {
   CST_CODE_INLINEASM = 23,       // INLINEASM:     [sideeffect|alignstack|
                                  //                 asmdialect,asmstr,conststr]
   CST_CODE_CE_GEP_WITH_INRANGE_INDEX = 24, //      [opty, flags, n x operands]
+  CST_CODE_CE_UNOP = 25,         // CE_UNOP:      [opcode, opval]
 };
 
 /// CastOpcodes - These are values used in the bitcode files to encode which
@@ -362,6 +362,14 @@ enum CastOpcodes {
   CAST_INTTOPTR = 10,
   CAST_BITCAST = 11,
   CAST_ADDRSPACECAST = 12
+};
+
+/// UnaryOpcodes - These are values used in the bitcode files to encode which
+/// unop a CST_CODE_CE_UNOP or a XXX refers to.  The values of these enums
+/// have no fixed relation to the LLVM IR enum values.  Changing these will
+/// break compatibility with old files.
+enum UnaryOpcodes {
+  UNOP_NEG = 0
 };
 
 /// BinaryOpcodes - These are values used in the bitcode files to encode which
@@ -398,7 +406,9 @@ enum RMWOperations {
   RMW_MAX = 7,
   RMW_MIN = 8,
   RMW_UMAX = 9,
-  RMW_UMIN = 10
+  RMW_UMIN = 10,
+  RMW_FADD = 11,
+  RMW_FSUB = 12
 };
 
 /// OverflowingBinaryOperatorOptionalFlags - Flags for serializing
@@ -524,6 +534,7 @@ enum FunctionCodes {
   // 53 is unused.
   // 54 is unused.
   FUNC_CODE_OPERAND_BUNDLE = 55, // OPERAND_BUNDLE: [tag#, value...]
+  FUNC_CODE_INST_UNOP = 56,      // UNOP:       [opcode, ty, opval]
 };
 
 enum UseListCodes {

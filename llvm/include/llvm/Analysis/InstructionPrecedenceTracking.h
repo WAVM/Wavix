@@ -1,9 +1,8 @@
 //===-- InstructionPrecedenceTracking.h -------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // Implements a class that is able to define some instructions as "special"
@@ -75,8 +74,14 @@ protected:
   virtual ~InstructionPrecedenceTracking() = default;
 
 public:
-  /// Clears cached information about this particular block.
-  void invalidateBlock(const BasicBlock *BB);
+  /// Notifies this tracking that we are going to insert a new instruction \p
+  /// Inst to the basic block \p BB. It makes all necessary updates to internal
+  /// caches to keep them consistent.
+  void insertInstructionTo(const Instruction *Inst, const BasicBlock *BB);
+
+  /// Notifies this tracking that we are going to remove the instruction \p Inst
+  /// It makes all necessary updates to internal caches to keep them consistent.
+  void removeInstruction(const Instruction *Inst);
 
   /// Invalidates all information from this tracking.
   void clear();
@@ -108,6 +113,31 @@ public:
 
   /// Returns true if the first ICFI of Insn's block exists and dominates Insn.
   bool isDominatedByICFIFromSameBlock(const Instruction *Insn) {
+    return isPreceededBySpecialInstruction(Insn);
+  }
+
+  virtual bool isSpecialInstruction(const Instruction *Insn) const;
+};
+
+class MemoryWriteTracking : public InstructionPrecedenceTracking {
+public:
+  MemoryWriteTracking(DominatorTree *DT) : InstructionPrecedenceTracking(DT) {}
+
+  /// Returns the topmost instruction that may write memory from the given
+  /// basic block. Returns nullptr if there is no such instructions in the block.
+  const Instruction *getFirstMemoryWrite(const BasicBlock *BB) {
+    return getFirstSpecialInstruction(BB);
+  }
+
+  /// Returns true if at least one instruction from the given basic block may
+  /// write memory.
+  bool mayWriteToMemory(const BasicBlock *BB) {
+    return hasSpecialInstructions(BB);
+  }
+
+  /// Returns true if the first memory writing instruction of Insn's block
+  /// exists and dominates Insn.
+  bool isDominatedByMemoryWriteFromSameBlock(const Instruction *Insn) {
     return isPreceededBySpecialInstruction(Insn);
   }
 

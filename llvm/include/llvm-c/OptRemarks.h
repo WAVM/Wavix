@@ -1,9 +1,9 @@
 /*===-- llvm-c/OptRemarks.h - OptRemarks Public C Interface -------*- C -*-===*\
 |*                                                                            *|
-|*                     The LLVM Compiler Infrastructure                       *|
-|*                                                                            *|
-|* This file is distributed under the University of Illinois Open Source      *|
-|* License. See LICENSE.TXT for details.                                      *|
+|* Part of the LLVM Project, under the Apache License v2.0 with LLVM          *|
+|* Exceptions.                                                                *|
+|* See https://llvm.org/LICENSE.txt for license information.                  *|
+|* SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception                    *|
 |*                                                                            *|
 |*===----------------------------------------------------------------------===*|
 |*                                                                            *|
@@ -185,6 +185,13 @@ LLVMOptRemarkParserGetErrorMessage(LLVMOptRemarkParserRef Parser);
  * \since OPT_REMARKS_API_VERSION=0
  */
 extern void LLVMOptRemarkParserDispose(LLVMOptRemarkParserRef Parser);
+
+/**
+ * Returns the version of the opt-remarks dylib.
+ *
+ * \since OPT_REMARKS_API_VERSION=0
+ */
+extern uint32_t LLVMOptRemarkVersion(void);
 
 /**
  * @} // endgoup LLVMCOPTREMARKS

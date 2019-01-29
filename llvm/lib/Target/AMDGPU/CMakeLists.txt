@@ -40,11 +40,11 @@ add_llvm_target(AMDGPUCodeGen
   AMDGPUAtomicOptimizer.cpp
   AMDGPUCallLowering.cpp
   AMDGPUCodeGenPrepare.cpp
+  AMDGPUFixFunctionBitcasts.cpp
   AMDGPUFrameLowering.cpp
   AMDGPUHSAMetadataStreamer.cpp
   AMDGPUInstrInfo.cpp
   AMDGPUInstructionSelector.cpp
-  AMDGPUIntrinsicInfo.cpp
   AMDGPUISelDAGToDAG.cpp
   AMDGPUISelLowering.cpp
   AMDGPULegalizerInfo.cpp
@@ -92,9 +92,11 @@ add_llvm_target(AMDGPUCodeGen
   R600OptimizeVectorRegisters.cpp
   R600Packetizer.cpp
   R600RegisterInfo.cpp
+  SIAddIMGInit.cpp
   SIAnnotateControlFlow.cpp
   SIDebuggerInsertNops.cpp
   SIFixSGPRCopies.cpp
+  SIFixupVectorISel.cpp
   SIFixVGPRCopies.cpp
   SIFixWWMLiveness.cpp
   SIFoldOperands.cpp
@@ -117,6 +119,8 @@ add_llvm_target(AMDGPUCodeGen
   SIShrinkInstructions.cpp
   SIWholeQuadMode.cpp
   GCNILPSched.cpp
+  GCNDPPCombine.cpp
+  SIModeRegister.cpp
   )
 
 add_subdirectory(AsmParser)

@@ -1,9 +1,8 @@
 //===--- IRPrintingPasses.cpp - Module and Function printing passes -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -27,7 +26,8 @@ PrintModulePass::PrintModulePass(raw_ostream &OS, const std::string &Banner,
       ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {}
 
 PreservedAnalyses PrintModulePass::run(Module &M, ModuleAnalysisManager &) {
-  OS << Banner;
+  if (!Banner.empty())
+    OS << Banner << "\n";
   if (llvm::isFunctionInPrintList("*"))
     M.print(OS, nullptr, ShouldPreserveUseListOrder);
   else {

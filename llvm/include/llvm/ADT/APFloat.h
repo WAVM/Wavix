@@ -1,9 +1,8 @@
 //===- llvm/ADT/APFloat.h - Arbitrary Precision Floating Point ---*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -870,13 +869,13 @@ public:
   /// Factory for NaN values.
   ///
   /// \param Negative - True iff the NaN generated should be negative.
-  /// \param type - The unspecified fill bits for creating the NaN, 0 by
+  /// \param payload - The unspecified fill bits for creating the NaN, 0 by
   /// default.  The value is truncated as necessary.
   static APFloat getNaN(const fltSemantics &Sem, bool Negative = false,
-                        unsigned type = 0) {
-    if (type) {
-      APInt fill(64, type);
-      return getQNaN(Sem, Negative, &fill);
+                        uint64_t payload = 0) {
+    if (payload) {
+      APInt intPayload(64, payload);
+      return getQNaN(Sem, Negative, &intPayload);
     } else {
       return getQNaN(Sem, Negative, nullptr);
     }

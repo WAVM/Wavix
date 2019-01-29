@@ -1,3 +1,11 @@
+//===-- AnalysisTest.cpp ---------------------------------------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
 #include "Analysis.h"
 
 #include <cassert>
@@ -28,7 +36,7 @@ protected:
     }
     STI.reset(TheTarget->createMCSubtargetInfo(TT, "haswell", ""));
 
-    // Compute the ProxResIdx of ports unes in tests.
+    // Compute the ProxResIdx of ports uses in tests.
     const auto &SM = STI->getSchedModel();
     for (unsigned I = 0, E = SM.getNumProcResourceKinds(); I < E; ++I) {
       const std::string Name = SM.getProcResource(I)->Name;

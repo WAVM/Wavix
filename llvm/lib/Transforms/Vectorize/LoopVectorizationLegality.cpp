@@ -1,9 +1,8 @@
 //===- LoopVectorizationLegality.cpp --------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -22,6 +21,8 @@ using namespace llvm;
 
 #define LV_NAME "loop-vectorize"
 #define DEBUG_TYPE LV_NAME
+
+extern cl::opt<bool> EnableVPlanPredication;
 
 static cl::opt<bool>
     EnableIfConversion("enable-if-conversion", cl::init(true), cl::Hidden,
@@ -80,10 +81,11 @@ bool LoopVectorizeHints::Hint::validate(unsigned Val) {
   return false;
 }
 
-LoopVectorizeHints::LoopVectorizeHints(const Loop *L, bool DisableInterleaving,
+LoopVectorizeHints::LoopVectorizeHints(const Loop *L,
+                                       bool InterleaveOnlyWhenForced,
                                        OptimizationRemarkEmitter &ORE)
     : Width("vectorize.width", VectorizerParams::VectorizationFactor, HK_WIDTH),
-      Interleave("interleave.count", DisableInterleaving, HK_UNROLL),
+      Interleave("interleave.count", InterleaveOnlyWhenForced, HK_UNROLL),
       Force("vectorize.enable", FK_Undefined, HK_FORCE),
       IsVectorized("isvectorized", 0, HK_ISVECTORIZED), TheLoop(L), ORE(ORE) {
   // Populate values with existing loop metadata.
@@ -98,19 +100,19 @@ LoopVectorizeHints::LoopVectorizeHints(const Loop *L, bool DisableInterleaving,
     // consider the loop to have been already vectorized because there's
     // nothing more that we can do.
     IsVectorized.Value = Width.Value == 1 && Interleave.Value == 1;
-  LLVM_DEBUG(if (DisableInterleaving && Interleave.Value == 1) dbgs()
+  LLVM_DEBUG(if (InterleaveOnlyWhenForced && Interleave.Value == 1) dbgs()
              << "LV: Interleaving disabled by the pass manager\n");
 }
 
-bool LoopVectorizeHints::allowVectorization(Function *F, Loop *L,
-                                            bool AlwaysVectorize) const {
+bool LoopVectorizeHints::allowVectorization(
+    Function *F, Loop *L, bool VectorizeOnlyWhenForced) const {
   if (getForce() == LoopVectorizeHints::FK_Disabled) {
     LLVM_DEBUG(dbgs() << "LV: Not vectorizing: #pragma vectorize disable.\n");
     emitRemarkWithHints();
     return false;
   }
 
-  if (!AlwaysVectorize && getForce() != LoopVectorizeHints::FK_Enabled) {
+  if (VectorizeOnlyWhenForced && getForce() != LoopVectorizeHints::FK_Enabled) {
     LLVM_DEBUG(dbgs() << "LV: Not vectorizing: No #pragma vectorize enable.\n");
     emitRemarkWithHints();
     return false;
@@ -487,7 +489,10 @@ bool LoopVectorizationLegality::canVectorizeOuterLoop() {
     // Check whether the BranchInst is a supported one. Only unconditional
     // branches, conditional branches with an outer loop invariant condition or
     // backedges are supported.
-    if (Br && Br->isConditional() &&
+    // FIXME: We skip these checks when VPlan predication is enabled as we
+    // want to allow divergent branches. This whole check will be removed
+    // once VPlan predication is on by default.
+    if (!EnableVPlanPredication && Br && Br->isConditional() &&
         !TheLoop->isLoopInvariant(Br->getCondition()) &&
         !LI->isLoopHeader(Br->getSuccessor(0)) &&
         !LI->isLoopHeader(Br->getSuccessor(1))) {
@@ -713,10 +718,30 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
           !isa<DbgInfoIntrinsic>(CI) &&
           !(CI->getCalledFunction() && TLI &&
             TLI->isFunctionVectorizable(CI->getCalledFunction()->getName()))) {
-        ORE->emit(createMissedAnalysis("CantVectorizeCall", CI)
-                  << "call instruction cannot be vectorized");
+        // If the call is a recognized math libary call, it is likely that
+        // we can vectorize it given loosened floating-point constraints.
+        LibFunc Func;
+        bool IsMathLibCall =
+            TLI && CI->getCalledFunction() &&
+            CI->getType()->isFloatingPointTy() &&
+            TLI->getLibFunc(CI->getCalledFunction()->getName(), Func) &&
+            TLI->hasOptimizedCodeGen(Func);
+
+        if (IsMathLibCall) {
+          // TODO: Ideally, we should not use clang-specific language here,
+          // but it's hard to provide meaningful yet generic advice.
+          // Also, should this be guarded by allowExtraAnalysis() and/or be part
+          // of the returned info from isFunctionVectorizable()?
+          ORE->emit(createMissedAnalysis("CantVectorizeLibcall", CI)
+              << "library call cannot be vectorized. "
+                 "Try compiling with -fno-math-errno, -ffast-math, "
+                 "or similar flags");
+        } else {
+          ORE->emit(createMissedAnalysis("CantVectorizeCall", CI)
+                    << "call instruction cannot be vectorized");
+        }
         LLVM_DEBUG(
-            dbgs() << "LV: Found a non-intrinsic, non-libfunc callsite.\n");
+            dbgs() << "LV: Found a non-intrinsic callsite.\n");
         return false;
       }
 
@@ -817,15 +842,14 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
   if (!LAI->canVectorizeMemory())
     return false;
 
-  if (LAI->hasMultipleStoresToLoopInvariantAddress()) {
+  if (LAI->hasDependenceInvolvingLoopInvariantAddress()) {
     ORE->emit(createMissedAnalysis("CantVectorizeStoreToLoopInvariantAddress")
-              << "multiple writes to a loop invariant address could not "
+              << "write to a loop invariant address could not "
                  "be vectorized");
     LLVM_DEBUG(
-        dbgs() << "LV: We don't allow multiple stores to a uniform address\n");
+        dbgs() << "LV: Non vectorizable stores to a uniform address\n");
     return false;
   }
-
   Requirements->addRuntimePointerChecks(LAI->getNumRuntimePointerChecks());
   PSE.addPredicate(LAI->getPSE().getUnionPredicate());
 

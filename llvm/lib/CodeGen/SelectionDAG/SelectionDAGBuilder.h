@@ -1,9 +1,8 @@
 //===- SelectionDAGBuilder.h - Selection-DAG building -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -853,6 +852,9 @@ private:
   // These all get lowered before this pass.
   void visitInvoke(const InvokeInst &I);
   void visitResume(const ResumeInst &I);
+
+  void visitUnary(const User &I, unsigned Opcode);
+  void visitFNeg(const User &I) { visitUnary(I, ISD::FNEG); }
 
   void visitBinary(const User &I, unsigned Opcode);
   void visitShift(const User &I, unsigned Opcode);

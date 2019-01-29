@@ -1,9 +1,8 @@
 //===- llvm/unittest/XRay/FDRRecordPrinterTest.cpp --------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 #include "llvm/Support/raw_ostream.h"
@@ -55,11 +54,11 @@ template <> struct Helper<TSCWrapRecord> {
 
 template <> struct Helper<CustomEventRecord> {
   static std::unique_ptr<Record> construct() {
-    return make_unique<CustomEventRecord>(4, 1, "data");
+    return make_unique<CustomEventRecord>(4, 1, 2, "data");
   }
 
   static const char *expected() {
-    return "<Custom Event: tsc = 1, size = 4, data = 'data'>";
+    return "<Custom Event: tsc = 1, cpu = 2, size = 4, data = 'data'>";
   }
 };
 
@@ -132,7 +131,7 @@ TEST(FDRRecordPrinterTest, WriteFunctionRecordEnter) {
   FunctionRecord R(RecordTypes::ENTER, 1, 2);
   ASSERT_FALSE(errorToBool(R.apply(P)));
   OS.flush();
-  EXPECT_THAT(Data, Eq("<Function Enter: #1 delta = +1>"));
+  EXPECT_THAT(Data, Eq("<Function Enter: #1 delta = +2>"));
 }
 
 TEST(FDRRecordPrinterTest, WriteFunctionRecordExit) {
@@ -142,7 +141,7 @@ TEST(FDRRecordPrinterTest, WriteFunctionRecordExit) {
   FunctionRecord R(RecordTypes::EXIT, 1, 2);
   ASSERT_FALSE(errorToBool(R.apply(P)));
   OS.flush();
-  EXPECT_THAT(Data, Eq("<Function Exit: #1 delta = +1>"));
+  EXPECT_THAT(Data, Eq("<Function Exit: #1 delta = +2>"));
 }
 
 TEST(FDRRecordPrinterTest, WriteFunctionRecordTailExit) {
@@ -152,7 +151,7 @@ TEST(FDRRecordPrinterTest, WriteFunctionRecordTailExit) {
   FunctionRecord R(RecordTypes::TAIL_EXIT, 1, 2);
   ASSERT_FALSE(errorToBool(R.apply(P)));
   OS.flush();
-  EXPECT_THAT(Data, Eq("<Function Tail Exit: #1 delta = +1>"));
+  EXPECT_THAT(Data, Eq("<Function Tail Exit: #1 delta = +2>"));
 }
 
 TEST(FDRRecordPrinterTest, WriteFunctionRecordEnterArg) {
@@ -162,7 +161,7 @@ TEST(FDRRecordPrinterTest, WriteFunctionRecordEnterArg) {
   FunctionRecord R(RecordTypes::ENTER_ARG, 1, 2);
   ASSERT_FALSE(errorToBool(R.apply(P)));
   OS.flush();
-  EXPECT_THAT(Data, Eq("<Function Enter With Arg: #1 delta = +1>"));
+  EXPECT_THAT(Data, Eq("<Function Enter With Arg: #1 delta = +2>"));
 }
 
 } // namespace

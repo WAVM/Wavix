@@ -1,9 +1,8 @@
 //===- SIMachineFunctionInfo.cpp - SI Machine Function Info ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -117,7 +116,6 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   }
 
   const MachineFrameInfo &FrameInfo = MF.getFrameInfo();
-  bool MaySpill = ST.isVGPRSpillingEnabled(F);
   bool HasStackObjects = FrameInfo.hasStackObjects();
 
   if (isEntryFunction()) {
@@ -126,21 +124,18 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     if (WorkItemIDZ)
       WorkItemIDY = true;
 
-    if (HasStackObjects || MaySpill) {
-      PrivateSegmentWaveByteOffset = true;
+    PrivateSegmentWaveByteOffset = true;
 
     // HS and GS always have the scratch wave offset in SGPR5 on GFX9.
     if (ST.getGeneration() >= AMDGPUSubtarget::GFX9 &&
         (CC == CallingConv::AMDGPU_HS || CC == CallingConv::AMDGPU_GS))
-      ArgInfo.PrivateSegmentWaveByteOffset
-        = ArgDescriptor::createRegister(AMDGPU::SGPR5);
-    }
+      ArgInfo.PrivateSegmentWaveByteOffset =
+          ArgDescriptor::createRegister(AMDGPU::SGPR5);
   }
 
   bool isAmdHsaOrMesa = ST.isAmdHsaOrMesa(F);
   if (isAmdHsaOrMesa) {
-    if (HasStackObjects || MaySpill)
-      PrivateSegmentBuffer = true;
+    PrivateSegmentBuffer = true;
 
     if (F.hasFnAttribute("amdgpu-dispatch-ptr"))
       DispatchPtr = true;
@@ -151,8 +146,7 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     if (F.hasFnAttribute("amdgpu-dispatch-id"))
       DispatchID = true;
   } else if (ST.isMesaGfxShader(F)) {
-    if (HasStackObjects || MaySpill)
-      ImplicitBufferPtr = true;
+    ImplicitBufferPtr = true;
   }
 
   if (F.hasFnAttribute("amdgpu-kernarg-segment-ptr"))

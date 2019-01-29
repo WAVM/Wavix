@@ -1,9 +1,8 @@
 //===-- MipsMCAsmInfo.cpp - Mips Asm Properties ---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -49,25 +48,5 @@ MipsMCAsmInfo::MipsMCAsmInfo(const Triple &TheTriple) {
   ExceptionsType = ExceptionHandling::DwarfCFI;
   DwarfRegNumForCFI = true;
   HasMipsExpressions = true;
-
-  // Enable IAS by default for O32.
-  if (TheTriple.isMIPS32())
-    UseIntegratedAssembler = true;
-
-  // Enable IAS by default for Debian mips64/mips64el.
-  if (TheTriple.getEnvironment() == Triple::GNUABI64)
-    UseIntegratedAssembler = true;
-
-  // Enable IAS by default for Debian mipsn32/mipsn32el.
-  if (TheTriple.getEnvironment() == Triple::GNUABIN32)
-    UseIntegratedAssembler = true;
-
-  // Enable IAS by default for Android mips64el that uses N64 ABI.
-  if (TheTriple.getArch() == Triple::mips64el && TheTriple.isAndroid())
-    UseIntegratedAssembler = true;
-
-  // Enable IAS by default for FreeBSD / OpenBSD mips64/mips64el.
-  if (TheTriple.isOSFreeBSD() ||
-      TheTriple.isOSOpenBSD())
-    UseIntegratedAssembler = true;
+  UseIntegratedAssembler = true;
 }

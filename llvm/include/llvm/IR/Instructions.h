@@ -1,9 +1,8 @@
 //===- llvm/Instructions.h - Instruction subclass definitions ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -175,47 +174,58 @@ protected:
   LoadInst *cloneImpl() const;
 
 public:
-  LoadInst(Value *Ptr, const Twine &NameStr, Instruction *InsertBefore);
-  LoadInst(Value *Ptr, const Twine &NameStr, BasicBlock *InsertAtEnd);
-  LoadInst(Type *Ty, Value *Ptr, const Twine &NameStr, bool isVolatile = false,
+  LoadInst(Type *Ty, Value *Ptr, const Twine &NameStr = "",
            Instruction *InsertBefore = nullptr);
-  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile = false,
-           Instruction *InsertBefore = nullptr)
-      : LoadInst(cast<PointerType>(Ptr->getType())->getElementType(), Ptr,
-                 NameStr, isVolatile, InsertBefore) {}
-  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
+  LoadInst(Type *Ty, Value *Ptr, const Twine &NameStr, BasicBlock *InsertAtEnd);
+  LoadInst(Type *Ty, Value *Ptr, const Twine &NameStr, bool isVolatile,
+           Instruction *InsertBefore = nullptr);
+  LoadInst(Type *Ty, Value *Ptr, const Twine &NameStr, bool isVolatile,
            BasicBlock *InsertAtEnd);
-  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile, unsigned Align,
-           Instruction *InsertBefore = nullptr)
-      : LoadInst(cast<PointerType>(Ptr->getType())->getElementType(), Ptr,
-                 NameStr, isVolatile, Align, InsertBefore) {}
   LoadInst(Type *Ty, Value *Ptr, const Twine &NameStr, bool isVolatile,
            unsigned Align, Instruction *InsertBefore = nullptr);
-  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
+  LoadInst(Type *Ty, Value *Ptr, const Twine &NameStr, bool isVolatile,
            unsigned Align, BasicBlock *InsertAtEnd);
-  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile, unsigned Align,
-           AtomicOrdering Order, SyncScope::ID SSID = SyncScope::System,
-           Instruction *InsertBefore = nullptr)
-      : LoadInst(cast<PointerType>(Ptr->getType())->getElementType(), Ptr,
-                 NameStr, isVolatile, Align, Order, SSID, InsertBefore) {}
   LoadInst(Type *Ty, Value *Ptr, const Twine &NameStr, bool isVolatile,
            unsigned Align, AtomicOrdering Order,
            SyncScope::ID SSID = SyncScope::System,
            Instruction *InsertBefore = nullptr);
-  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
+  LoadInst(Type *Ty, Value *Ptr, const Twine &NameStr, bool isVolatile,
            unsigned Align, AtomicOrdering Order, SyncScope::ID SSID,
            BasicBlock *InsertAtEnd);
-  LoadInst(Value *Ptr, const char *NameStr, Instruction *InsertBefore);
-  LoadInst(Value *Ptr, const char *NameStr, BasicBlock *InsertAtEnd);
-  LoadInst(Type *Ty, Value *Ptr, const char *NameStr = nullptr,
-           bool isVolatile = false, Instruction *InsertBefore = nullptr);
-  explicit LoadInst(Value *Ptr, const char *NameStr = nullptr,
-                    bool isVolatile = false,
+
+  // Deprecated [opaque pointer types]
+  explicit LoadInst(Value *Ptr, const Twine &NameStr = "",
                     Instruction *InsertBefore = nullptr)
-      : LoadInst(cast<PointerType>(Ptr->getType())->getElementType(), Ptr,
-                 NameStr, isVolatile, InsertBefore) {}
-  LoadInst(Value *Ptr, const char *NameStr, bool isVolatile,
-           BasicBlock *InsertAtEnd);
+      : LoadInst(Ptr->getType()->getPointerElementType(), Ptr, NameStr,
+                 InsertBefore) {}
+  LoadInst(Value *Ptr, const Twine &NameStr, BasicBlock *InsertAtEnd)
+      : LoadInst(Ptr->getType()->getPointerElementType(), Ptr, NameStr,
+                 InsertAtEnd) {}
+  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
+           Instruction *InsertBefore = nullptr)
+      : LoadInst(Ptr->getType()->getPointerElementType(), Ptr, NameStr,
+                 isVolatile, InsertBefore) {}
+  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile,
+           BasicBlock *InsertAtEnd)
+      : LoadInst(Ptr->getType()->getPointerElementType(), Ptr, NameStr,
+                 isVolatile, InsertAtEnd) {}
+  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile, unsigned Align,
+           Instruction *InsertBefore = nullptr)
+      : LoadInst(Ptr->getType()->getPointerElementType(), Ptr, NameStr,
+                 isVolatile, Align, InsertBefore) {}
+  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile, unsigned Align,
+           BasicBlock *InsertAtEnd)
+      : LoadInst(Ptr->getType()->getPointerElementType(), Ptr, NameStr,
+                 isVolatile, Align, InsertAtEnd) {}
+  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile, unsigned Align,
+           AtomicOrdering Order, SyncScope::ID SSID = SyncScope::System,
+           Instruction *InsertBefore = nullptr)
+      : LoadInst(Ptr->getType()->getPointerElementType(), Ptr, NameStr,
+                 isVolatile, Align, Order, SSID, InsertBefore) {}
+  LoadInst(Value *Ptr, const Twine &NameStr, bool isVolatile, unsigned Align,
+           AtomicOrdering Order, SyncScope::ID SSID, BasicBlock *InsertAtEnd)
+      : LoadInst(Ptr->getType()->getPointerElementType(), Ptr, NameStr,
+                 isVolatile, Align, Order, SSID, InsertAtEnd) {}
 
   /// Return true if this is a load from a volatile memory location.
   bool isVolatile() const { return getSubclassDataFromInstruction() & 1; }
@@ -714,8 +724,14 @@ public:
     /// *p = old <unsigned v ? old : v
     UMin,
 
+    /// *p = old + v
+    FAdd,
+
+    /// *p = old - v
+    FSub,
+
     FIRST_BINOP = Xchg,
-    LAST_BINOP = UMin,
+    LAST_BINOP = FSub,
     BAD_BINOP
   };
 
@@ -736,6 +752,16 @@ public:
   }
 
   static StringRef getOperationName(BinOp Op);
+
+  static bool isFPOperation(BinOp Op) {
+    switch (Op) {
+    case AtomicRMWInst::FAdd:
+    case AtomicRMWInst::FSub:
+      return true;
+    default:
+      return false;
+    }
+  }
 
   void setOperation(BinOp Operation) {
     unsigned short SubclassData = getSubclassDataFromInstruction();
@@ -792,6 +818,10 @@ public:
   /// Returns the address space of the pointer operand.
   unsigned getPointerAddressSpace() const {
     return getPointerOperand()->getType()->getPointerAddressSpace();
+  }
+
+  bool isFloatingPointOperation() const {
+    return isFPOperation(getOperation());
   }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
@@ -1104,6 +1134,71 @@ GetElementPtrInst::GetElementPtrInst(Type *PointeeType, Value *Ptr,
 DEFINE_TRANSPARENT_OPERAND_ACCESSORS(GetElementPtrInst, Value)
 
 //===----------------------------------------------------------------------===//
+//                                UnaryOperator Class
+//===----------------------------------------------------------------------===//
+
+/// a unary instruction 
+class UnaryOperator : public UnaryInstruction {
+  void AssertOK();
+
+protected:
+  UnaryOperator(UnaryOps iType, Value *S, Type *Ty,
+                const Twine &Name, Instruction *InsertBefore);
+  UnaryOperator(UnaryOps iType, Value *S, Type *Ty,
+                const Twine &Name, BasicBlock *InsertAtEnd);
+
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+
+  UnaryOperator *cloneImpl() const;
+
+public:
+
+  /// Construct a unary instruction, given the opcode and an operand.
+  /// Optionally (if InstBefore is specified) insert the instruction
+  /// into a BasicBlock right before the specified instruction.  The specified
+  /// Instruction is allowed to be a dereferenced end iterator.
+  ///
+  static UnaryOperator *Create(UnaryOps Op, Value *S,
+                               const Twine &Name = Twine(),
+                               Instruction *InsertBefore = nullptr);
+
+  /// Construct a unary instruction, given the opcode and an operand.
+  /// Also automatically insert this instruction to the end of the
+  /// BasicBlock specified.
+  ///
+  static UnaryOperator *Create(UnaryOps Op, Value *S,
+                               const Twine &Name,
+                               BasicBlock *InsertAtEnd);
+
+  /// These methods just forward to Create, and are useful when you
+  /// statically know what type of instruction you're going to create.  These
+  /// helpers just save some typing.
+#define HANDLE_UNARY_INST(N, OPC, CLASS) \
+  static UnaryInstruction *Create##OPC(Value *V, \
+                                       const Twine &Name = "") {\
+    return Create(Instruction::OPC, V, Name);\
+  }
+#include "llvm/IR/Instruction.def"
+#define HANDLE_UNARY_INST(N, OPC, CLASS) \
+  static UnaryInstruction *Create##OPC(Value *V, \
+                                       const Twine &Name, BasicBlock *BB) {\
+    return Create(Instruction::OPC, V, Name, BB);\
+  }
+#include "llvm/IR/Instruction.def"
+#define HANDLE_UNARY_INST(N, OPC, CLASS) \
+  static UnaryInstruction *Create##OPC(Value *V, \
+                                       const Twine &Name, Instruction *I) {\
+    return Create(Instruction::OPC, V, Name, I);\
+  }
+#include "llvm/IR/Instruction.def"
+
+  UnaryOps getOpcode() const {
+    return static_cast<UnaryOps>(Instruction::getOpcode());
+  }
+};
+
+//===----------------------------------------------------------------------===//
 //                               ICmpInst Class
 //===----------------------------------------------------------------------===//
 
@@ -1299,12 +1394,13 @@ public:
 
   /// Constructor with no-insertion semantics
   FCmpInst(
-    Predicate pred, ///< The predicate to use for the comparison
+    Predicate Pred, ///< The predicate to use for the comparison
     Value *LHS,     ///< The left-hand-side of the expression
     Value *RHS,     ///< The right-hand-side of the expression
-    const Twine &NameStr = "" ///< Name of the instruction
-  ) : CmpInst(makeCmpResultType(LHS->getType()),
-              Instruction::FCmp, pred, LHS, RHS, NameStr) {
+    const Twine &NameStr = "", ///< Name of the instruction
+    Instruction *FlagsSource = nullptr
+  ) : CmpInst(makeCmpResultType(LHS->getType()), Instruction::FCmp, Pred, LHS,
+              RHS, NameStr, nullptr, FlagsSource) {
     AssertOK();
   }
 
@@ -1352,535 +1448,13 @@ public:
   }
 };
 
-class CallInst;
-class InvokeInst;
-
-template <class T> struct CallBaseParent { using type = Instruction; };
-
-//===----------------------------------------------------------------------===//
-/// Base class for all callable instructions (InvokeInst and CallInst)
-/// Holds everything related to calling a function, abstracting from the base
-/// type @p BaseInstTy and the concrete instruction @p InstTy
-///
-template <class InstTy>
-class CallBase : public CallBaseParent<InstTy>::type,
-                 public OperandBundleUser<InstTy, User::op_iterator> {
-protected:
-  AttributeList Attrs; ///< parameter attributes for callable
-  FunctionType *FTy;
-  using BaseInstTy = typename CallBaseParent<InstTy>::type;
-
-  template <class... ArgsTy>
-  CallBase(AttributeList const &A, FunctionType *FT, ArgsTy &&... Args)
-      : BaseInstTy(std::forward<ArgsTy>(Args)...), Attrs(A), FTy(FT) {}
-  bool hasDescriptor() const { return Value::HasDescriptor; }
-
-  using BaseInstTy::BaseInstTy;
-
-  using OperandBundleUser<InstTy,
-                          User::op_iterator>::isFnAttrDisallowedByOpBundle;
-  using OperandBundleUser<InstTy, User::op_iterator>::getNumTotalBundleOperands;
-  using OperandBundleUser<InstTy, User::op_iterator>::bundleOperandHasAttr;
-  using Instruction::getSubclassDataFromInstruction;
-  using Instruction::setInstructionSubclassData;
-
-public:
-  using Instruction::getContext;
-  using OperandBundleUser<InstTy, User::op_iterator>::hasOperandBundles;
-  using OperandBundleUser<InstTy,
-                          User::op_iterator>::getBundleOperandsStartIndex;
-
-  static bool classof(const Instruction *I) {
-    llvm_unreachable(
-        "CallBase is not meant to be used as part of the classof hierarchy");
-  }
-
-public:
-  /// Return the parameter attributes for this call.
-  ///
-  AttributeList getAttributes() const { return Attrs; }
-
-  /// Set the parameter attributes for this call.
-  ///
-  void setAttributes(AttributeList A) { Attrs = A; }
-
-  FunctionType *getFunctionType() const { return FTy; }
-
-  void mutateFunctionType(FunctionType *FTy) {
-    Value::mutateType(FTy->getReturnType());
-    this->FTy = FTy;
-  }
-
-  /// Return the number of call arguments.
-  ///
-  unsigned getNumArgOperands() const {
-    return getNumOperands() - getNumTotalBundleOperands() - InstTy::ArgOffset;
-  }
-
-  /// getArgOperand/setArgOperand - Return/set the i-th call argument.
-  ///
-  Value *getArgOperand(unsigned i) const {
-    assert(i < getNumArgOperands() && "Out of bounds!");
-    return getOperand(i);
-  }
-  void setArgOperand(unsigned i, Value *v) {
-    assert(i < getNumArgOperands() && "Out of bounds!");
-    setOperand(i, v);
-  }
-
-  /// Return the iterator pointing to the beginning of the argument list.
-  User::op_iterator arg_begin() { return op_begin(); }
-
-  /// Return the iterator pointing to the end of the argument list.
-  User::op_iterator arg_end() {
-    // [ call args ], [ operand bundles ], callee
-    return op_end() - getNumTotalBundleOperands() - InstTy::ArgOffset;
-  }
-
-  /// Iteration adapter for range-for loops.
-  iterator_range<User::op_iterator> arg_operands() {
-    return make_range(arg_begin(), arg_end());
-  }
-
-  /// Return the iterator pointing to the beginning of the argument list.
-  User::const_op_iterator arg_begin() const { return op_begin(); }
-
-  /// Return the iterator pointing to the end of the argument list.
-  User::const_op_iterator arg_end() const {
-    // [ call args ], [ operand bundles ], callee
-    return op_end() - getNumTotalBundleOperands() - InstTy::ArgOffset;
-  }
-
-  /// Iteration adapter for range-for loops.
-  iterator_range<User::const_op_iterator> arg_operands() const {
-    return make_range(arg_begin(), arg_end());
-  }
-
-  /// Wrappers for getting the \c Use of a call argument.
-  const Use &getArgOperandUse(unsigned i) const {
-    assert(i < getNumArgOperands() && "Out of bounds!");
-    return User::getOperandUse(i);
-  }
-  Use &getArgOperandUse(unsigned i) {
-    assert(i < getNumArgOperands() && "Out of bounds!");
-    return User::getOperandUse(i);
-  }
-
-  /// If one of the arguments has the 'returned' attribute, return its
-  /// operand value. Otherwise, return nullptr.
-  Value *getReturnedArgOperand() const {
-    unsigned Index;
-
-    if (Attrs.hasAttrSomewhere(Attribute::Returned, &Index) && Index)
-      return getArgOperand(Index - AttributeList::FirstArgIndex);
-    if (const Function *F = getCalledFunction())
-      if (F->getAttributes().hasAttrSomewhere(Attribute::Returned, &Index) &&
-          Index)
-        return getArgOperand(Index - AttributeList::FirstArgIndex);
-
-    return nullptr;
-  }
-
-  User::op_iterator op_begin() {
-    return OperandTraits<CallBase>::op_begin(this);
-  }
-
-  User::const_op_iterator op_begin() const {
-    return OperandTraits<CallBase>::op_begin(const_cast<CallBase *>(this));
-  }
-
-  User::op_iterator op_end() { return OperandTraits<CallBase>::op_end(this); }
-
-  User::const_op_iterator op_end() const {
-    return OperandTraits<CallBase>::op_end(const_cast<CallBase *>(this));
-  }
-
-  Value *getOperand(unsigned i_nocapture) const {
-    assert(i_nocapture < OperandTraits<CallBase>::operands(this) &&
-           "getOperand() out of range!");
-    return cast_or_null<Value>(OperandTraits<CallBase>::op_begin(
-                                   const_cast<CallBase *>(this))[i_nocapture]
-                                   .get());
-  }
-
-  void setOperand(unsigned i_nocapture, Value *Val_nocapture) {
-    assert(i_nocapture < OperandTraits<CallBase>::operands(this) &&
-           "setOperand() out of range!");
-    OperandTraits<CallBase>::op_begin(this)[i_nocapture] = Val_nocapture;
-  }
-
-  unsigned getNumOperands() const {
-    return OperandTraits<CallBase>::operands(this);
-  }
-  template <int Idx_nocapture> Use &Op() {
-    return User::OpFrom<Idx_nocapture>(this);
-  }
-  template <int Idx_nocapture> const Use &Op() const {
-    return User::OpFrom<Idx_nocapture>(this);
-  }
-
-  /// Return the function called, or null if this is an
-  /// indirect function invocation.
-  ///
-  Function *getCalledFunction() const {
-    return dyn_cast<Function>(Op<-InstTy::ArgOffset>());
-  }
-
-  /// Determine whether this call has the given attribute.
-  bool hasFnAttr(Attribute::AttrKind Kind) const {
-    assert(Kind != Attribute::NoBuiltin &&
-           "Use CallBase::isNoBuiltin() to check for Attribute::NoBuiltin");
-    return hasFnAttrImpl(Kind);
-  }
-
-  /// Determine whether this call has the given attribute.
-  bool hasFnAttr(StringRef Kind) const { return hasFnAttrImpl(Kind); }
-
-  /// getCallingConv/setCallingConv - Get or set the calling convention of this
-  /// function call.
-  CallingConv::ID getCallingConv() const {
-    return static_cast<CallingConv::ID>(getSubclassDataFromInstruction() >> 2);
-  }
-  void setCallingConv(CallingConv::ID CC) {
-    auto ID = static_cast<unsigned>(CC);
-    assert(!(ID & ~CallingConv::MaxID) && "Unsupported calling convention");
-    setInstructionSubclassData((getSubclassDataFromInstruction() & 3) |
-                               (ID << 2));
-  }
-
-
-  /// adds the attribute to the list of attributes.
-  void addAttribute(unsigned i, Attribute::AttrKind Kind) {
-    AttributeList PAL = getAttributes();
-    PAL = PAL.addAttribute(getContext(), i, Kind);
-    setAttributes(PAL);
-  }
-
-  /// adds the attribute to the list of attributes.
-  void addAttribute(unsigned i, Attribute Attr) {
-    AttributeList PAL = getAttributes();
-    PAL = PAL.addAttribute(getContext(), i, Attr);
-    setAttributes(PAL);
-  }
-
-  /// Adds the attribute to the indicated argument
-  void addParamAttr(unsigned ArgNo, Attribute::AttrKind Kind) {
-    assert(ArgNo < getNumArgOperands() && "Out of bounds");
-    AttributeList PAL = getAttributes();
-    PAL = PAL.addParamAttribute(getContext(), ArgNo, Kind);
-    setAttributes(PAL);
-  }
-
-  /// Adds the attribute to the indicated argument
-  void addParamAttr(unsigned ArgNo, Attribute Attr) {
-    assert(ArgNo < getNumArgOperands() && "Out of bounds");
-    AttributeList PAL = getAttributes();
-    PAL = PAL.addParamAttribute(getContext(), ArgNo, Attr);
-    setAttributes(PAL);
-  }
-
-  /// removes the attribute from the list of attributes.
-  void removeAttribute(unsigned i, Attribute::AttrKind Kind) {
-    AttributeList PAL = getAttributes();
-    PAL = PAL.removeAttribute(getContext(), i, Kind);
-    setAttributes(PAL);
-  }
-
-  /// removes the attribute from the list of attributes.
-  void removeAttribute(unsigned i, StringRef Kind) {
-    AttributeList PAL = getAttributes();
-    PAL = PAL.removeAttribute(getContext(), i, Kind);
-    setAttributes(PAL);
-  }
-
-  /// Removes the attribute from the given argument
-  void removeParamAttr(unsigned ArgNo, Attribute::AttrKind Kind) {
-    assert(ArgNo < getNumArgOperands() && "Out of bounds");
-    AttributeList PAL = getAttributes();
-    PAL = PAL.removeParamAttribute(getContext(), ArgNo, Kind);
-    setAttributes(PAL);
-  }
-
-  /// Removes the attribute from the given argument
-  void removeParamAttr(unsigned ArgNo, StringRef Kind) {
-    assert(ArgNo < getNumArgOperands() && "Out of bounds");
-    AttributeList PAL = getAttributes();
-    PAL = PAL.removeParamAttribute(getContext(), ArgNo, Kind);
-    setAttributes(PAL);
-  }
-
-  /// adds the dereferenceable attribute to the list of attributes.
-  void addDereferenceableAttr(unsigned i, uint64_t Bytes) {
-    AttributeList PAL = getAttributes();
-    PAL = PAL.addDereferenceableAttr(getContext(), i, Bytes);
-    setAttributes(PAL);
-  }
-
-  /// adds the dereferenceable_or_null attribute to the list of
-  /// attributes.
-  void addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes) {
-    AttributeList PAL = getAttributes();
-    PAL = PAL.addDereferenceableOrNullAttr(getContext(), i, Bytes);
-    setAttributes(PAL);
-  }
-
-  /// Determine whether the return value has the given attribute.
-  bool hasRetAttr(Attribute::AttrKind Kind) const {
-    if (Attrs.hasAttribute(AttributeList::ReturnIndex, Kind))
-      return true;
-
-    // Look at the callee, if available.
-    if (const Function *F = getCalledFunction())
-      return F->getAttributes().hasAttribute(AttributeList::ReturnIndex, Kind);
-    return false;
-  }
-
-  /// Determine whether the argument or parameter has the given attribute.
-  bool paramHasAttr(unsigned ArgNo, Attribute::AttrKind Kind) const {
-    assert(ArgNo < getNumArgOperands() && "Param index out of bounds!");
-
-    if (Attrs.hasParamAttribute(ArgNo, Kind))
-      return true;
-    if (const Function *F = getCalledFunction())
-      return F->getAttributes().hasParamAttribute(ArgNo, Kind);
-    return false;
-  }
-
-  /// Get the attribute of a given kind at a position.
-  Attribute getAttribute(unsigned i, Attribute::AttrKind Kind) const {
-    return getAttributes().getAttribute(i, Kind);
-  }
-
-  /// Get the attribute of a given kind at a position.
-  Attribute getAttribute(unsigned i, StringRef Kind) const {
-    return getAttributes().getAttribute(i, Kind);
-  }
-
-  /// Get the attribute of a given kind from a given arg
-  Attribute getParamAttr(unsigned ArgNo, Attribute::AttrKind Kind) const {
-    assert(ArgNo < getNumArgOperands() && "Out of bounds");
-    return getAttributes().getParamAttr(ArgNo, Kind);
-  }
-
-  /// Get the attribute of a given kind from a given arg
-  Attribute getParamAttr(unsigned ArgNo, StringRef Kind) const {
-    assert(ArgNo < getNumArgOperands() && "Out of bounds");
-    return getAttributes().getParamAttr(ArgNo, Kind);
-  }
-  /// Return true if the data operand at index \p i has the attribute \p
-  /// A.
-  ///
-  /// Data operands include call arguments and values used in operand bundles,
-  /// but does not include the callee operand.  This routine dispatches to the
-  /// underlying AttributeList or the OperandBundleUser as appropriate.
-  ///
-  /// The index \p i is interpreted as
-  ///
-  ///  \p i == Attribute::ReturnIndex  -> the return value
-  ///  \p i in [1, arg_size + 1)  -> argument number (\p i - 1)
-  ///  \p i in [arg_size + 1, data_operand_size + 1) -> bundle operand at index
-  ///     (\p i - 1) in the operand list.
-  bool dataOperandHasImpliedAttr(unsigned i, Attribute::AttrKind Kind) const {
-    // There are getNumOperands() - (InstTy::ArgOffset - 1) data operands.
-    // The last operand is the callee.
-    assert(i < (getNumOperands() - InstTy::ArgOffset + 1) &&
-           "Data operand index out of bounds!");
-
-    // The attribute A can either be directly specified, if the operand in
-    // question is a call argument; or be indirectly implied by the kind of its
-    // containing operand bundle, if the operand is a bundle operand.
-
-    if (i == AttributeList::ReturnIndex)
-      return hasRetAttr(Kind);
-
-    // FIXME: Avoid these i - 1 calculations and update the API to use
-    // zero-based indices.
-    if (i < (getNumArgOperands() + 1))
-      return paramHasAttr(i - 1, Kind);
-
-    assert(hasOperandBundles() && i >= (getBundleOperandsStartIndex() + 1) &&
-           "Must be either a call argument or an operand bundle!");
-    return bundleOperandHasAttr(i - 1, Kind);
-  }
-
-  /// Extract the alignment of the return value.
-  unsigned getRetAlignment() const { return Attrs.getRetAlignment(); }
-
-  /// Extract the alignment for a call or parameter (0=unknown).
-  unsigned getParamAlignment(unsigned ArgNo) const {
-    return Attrs.getParamAlignment(ArgNo);
-  }
-
-  /// Extract the number of dereferenceable bytes for a call or
-  /// parameter (0=unknown).
-  uint64_t getDereferenceableBytes(unsigned i) const {
-    return Attrs.getDereferenceableBytes(i);
-  }
-
-  /// Extract the number of dereferenceable_or_null bytes for a call or
-  /// parameter (0=unknown).
-  uint64_t getDereferenceableOrNullBytes(unsigned i) const {
-    return Attrs.getDereferenceableOrNullBytes(i);
-  }
-
-  /// Determine if the return value is marked with NoAlias attribute.
-  bool returnDoesNotAlias() const {
-    return Attrs.hasAttribute(AttributeList::ReturnIndex, Attribute::NoAlias);
-  }
-
-  /// Return true if the call should not be treated as a call to a
-  /// builtin.
-  bool isNoBuiltin() const {
-    return hasFnAttrImpl(Attribute::NoBuiltin) &&
-      !hasFnAttrImpl(Attribute::Builtin);
-  }
-
-  /// Determine if the call requires strict floating point semantics.
-  bool isStrictFP() const { return hasFnAttr(Attribute::StrictFP); }
-
-  /// Return true if the call should not be inlined.
-  bool isNoInline() const { return hasFnAttr(Attribute::NoInline); }
-  void setIsNoInline() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::NoInline);
-  }
-  /// Determine if the call does not access memory.
-  bool doesNotAccessMemory() const {
-    return hasFnAttr(Attribute::ReadNone);
-  }
-  void setDoesNotAccessMemory() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::ReadNone);
-  }
-
-  /// Determine if the call does not access or only reads memory.
-  bool onlyReadsMemory() const {
-    return doesNotAccessMemory() || hasFnAttr(Attribute::ReadOnly);
-  }
-  void setOnlyReadsMemory() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::ReadOnly);
-  }
-
-  /// Determine if the call does not access or only writes memory.
-  bool doesNotReadMemory() const {
-    return doesNotAccessMemory() || hasFnAttr(Attribute::WriteOnly);
-  }
-  void setDoesNotReadMemory() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::WriteOnly);
-  }
-
-  /// Determine if the call can access memmory only using pointers based
-  /// on its arguments.
-  bool onlyAccessesArgMemory() const {
-    return hasFnAttr(Attribute::ArgMemOnly);
-  }
-  void setOnlyAccessesArgMemory() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::ArgMemOnly);
-  }
-
-  /// Determine if the function may only access memory that is
-  /// inaccessible from the IR.
-  bool onlyAccessesInaccessibleMemory() const {
-    return hasFnAttr(Attribute::InaccessibleMemOnly);
-  }
-  void setOnlyAccessesInaccessibleMemory() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::InaccessibleMemOnly);
-  }
-
-  /// Determine if the function may only access memory that is
-  /// either inaccessible from the IR or pointed to by its arguments.
-  bool onlyAccessesInaccessibleMemOrArgMem() const {
-    return hasFnAttr(Attribute::InaccessibleMemOrArgMemOnly);
-  }
-  void setOnlyAccessesInaccessibleMemOrArgMem() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::InaccessibleMemOrArgMemOnly);
-  }
-  /// Determine if the call cannot return.
-  bool doesNotReturn() const { return hasFnAttr(Attribute::NoReturn); }
-  void setDoesNotReturn() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::NoReturn);
-  }
-
-  /// Determine if the call should not perform indirect branch tracking.
-  bool doesNoCfCheck() const { return hasFnAttr(Attribute::NoCfCheck); }
-
-  /// Determine if the call cannot unwind.
-  bool doesNotThrow() const { return hasFnAttr(Attribute::NoUnwind); }
-  void setDoesNotThrow() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::NoUnwind);
-  }
-
-  /// Determine if the invoke cannot be duplicated.
-  bool cannotDuplicate() const {return hasFnAttr(Attribute::NoDuplicate); }
-  void setCannotDuplicate() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::NoDuplicate);
-  }
-
-  /// Determine if the invoke is convergent
-  bool isConvergent() const { return hasFnAttr(Attribute::Convergent); }
-  void setConvergent() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::Convergent);
-  }
-  void setNotConvergent() {
-    removeAttribute(AttributeList::FunctionIndex, Attribute::Convergent);
-  }
-
-  /// Determine if the call returns a structure through first
-  /// pointer argument.
-  bool hasStructRetAttr() const {
-    if (getNumArgOperands() == 0)
-      return false;
-
-    // Be friendly and also check the callee.
-    return paramHasAttr(0, Attribute::StructRet);
-  }
-
-  /// Determine if any call argument is an aggregate passed by value.
-  bool hasByValArgument() const {
-    return Attrs.hasAttrSomewhere(Attribute::ByVal);
-  }
-  /// Get a pointer to the function that is invoked by this
-  /// instruction.
-  const Value *getCalledValue() const { return Op<-InstTy::ArgOffset>(); }
-  Value *getCalledValue() { return Op<-InstTy::ArgOffset>(); }
-
-  /// Set the function called.
-  void setCalledFunction(Value* Fn) {
-    setCalledFunction(
-        cast<FunctionType>(cast<PointerType>(Fn->getType())->getElementType()),
-        Fn);
-  }
-  void setCalledFunction(FunctionType *FTy, Value *Fn) {
-    this->FTy = FTy;
-    assert(FTy == cast<FunctionType>(
-                      cast<PointerType>(Fn->getType())->getElementType()));
-    Op<-InstTy::ArgOffset>() = Fn;
-  }
-
-protected:
-  template <typename AttrKind> bool hasFnAttrImpl(AttrKind Kind) const {
-    if (Attrs.hasAttribute(AttributeList::FunctionIndex, Kind))
-      return true;
-
-    // Operand bundles override attributes on the called function, but don't
-    // override attributes directly present on the call instruction.
-    if (isFnAttrDisallowedByOpBundle(Kind))
-      return false;
-
-    if (const Function *F = getCalledFunction())
-      return F->getAttributes().hasAttribute(AttributeList::FunctionIndex,
-                                             Kind);
-    return false;
-  }
-};
-
 //===----------------------------------------------------------------------===//
 /// This class represents a function call, abstracting a target
 /// machine's calling convention.  This class uses low bit of the SubClassData
 /// field to indicate whether or not this is a tail call.  The rest of the bits
 /// hold the calling convention of the call.
 ///
-class CallInst : public CallBase<CallInst> {
-  friend class OperandBundleUser<CallInst, User::op_iterator>;
-
+class CallInst : public CallBase {
   CallInst(const CallInst &CI);
 
   /// Construct a CallInst given a range of arguments.
@@ -1889,36 +1463,32 @@ class CallInst : public CallBase<CallInst> {
                   ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr,
                   Instruction *InsertBefore);
 
-  inline CallInst(Value *Func, ArrayRef<Value *> Args,
-                  ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr,
-                  Instruction *InsertBefore)
-      : CallInst(cast<FunctionType>(
-                     cast<PointerType>(Func->getType())->getElementType()),
-                 Func, Args, Bundles, NameStr, InsertBefore) {}
-
-  inline CallInst(Value *Func, ArrayRef<Value *> Args, const Twine &NameStr,
-                  Instruction *InsertBefore)
-      : CallInst(Func, Args, None, NameStr, InsertBefore) {}
+  inline CallInst(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
+                  const Twine &NameStr, Instruction *InsertBefore)
+      : CallInst(Ty, Func, Args, None, NameStr, InsertBefore) {}
 
   /// Construct a CallInst given a range of arguments.
   /// Construct a CallInst from a range of arguments
-  inline CallInst(Value *Func, ArrayRef<Value *> Args,
+  inline CallInst(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
                   ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr,
                   BasicBlock *InsertAtEnd);
 
-  explicit CallInst(Value *F, const Twine &NameStr, Instruction *InsertBefore);
+  explicit CallInst(FunctionType *Ty, Value *F, const Twine &NameStr,
+                    Instruction *InsertBefore);
 
-  CallInst(Value *F, const Twine &NameStr, BasicBlock *InsertAtEnd);
+  CallInst(FunctionType *ty, Value *F, const Twine &NameStr,
+           BasicBlock *InsertAtEnd);
 
-  void init(Value *Func, ArrayRef<Value *> Args,
-            ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr) {
-    init(cast<FunctionType>(
-             cast<PointerType>(Func->getType())->getElementType()),
-         Func, Args, Bundles, NameStr);
-  }
   void init(FunctionType *FTy, Value *Func, ArrayRef<Value *> Args,
             ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr);
-  void init(Value *Func, const Twine &NameStr);
+  void init(FunctionType *FTy, Value *Func, const Twine &NameStr);
+
+  /// Compute the number of operands to allocate.
+  static int ComputeNumOperands(int NumArgs, int NumBundleInputs = 0) {
+    // We need one operand for the called function, plus the input operand
+    // counts provided.
+    return 1 + NumArgs + NumBundleInputs;
+  }
 
 protected:
   // Note: Instruction needs to be a friend here to call cloneImpl.
@@ -1927,8 +1497,91 @@ protected:
   CallInst *cloneImpl() const;
 
 public:
-  static constexpr int ArgOffset = 1;
+  static CallInst *Create(FunctionType *Ty, Value *F, const Twine &NameStr = "",
+                          Instruction *InsertBefore = nullptr) {
+    return new (ComputeNumOperands(0)) CallInst(Ty, F, NameStr, InsertBefore);
+  }
 
+  static CallInst *Create(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
+                          const Twine &NameStr,
+                          Instruction *InsertBefore = nullptr) {
+    return new (ComputeNumOperands(Args.size()))
+        CallInst(Ty, Func, Args, None, NameStr, InsertBefore);
+  }
+
+  static CallInst *Create(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
+                          ArrayRef<OperandBundleDef> Bundles = None,
+                          const Twine &NameStr = "",
+                          Instruction *InsertBefore = nullptr) {
+    const int NumOperands =
+        ComputeNumOperands(Args.size(), CountBundleInputs(Bundles));
+    const unsigned DescriptorBytes = Bundles.size() * sizeof(BundleOpInfo);
+
+    return new (NumOperands, DescriptorBytes)
+        CallInst(Ty, Func, Args, Bundles, NameStr, InsertBefore);
+  }
+
+  static CallInst *Create(FunctionType *Ty, Value *F, const Twine &NameStr,
+                          BasicBlock *InsertAtEnd) {
+    return new (ComputeNumOperands(0)) CallInst(Ty, F, NameStr, InsertAtEnd);
+  }
+
+  static CallInst *Create(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
+                          const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    return new (ComputeNumOperands(Args.size()))
+        CallInst(Ty, Func, Args, None, NameStr, InsertAtEnd);
+  }
+
+  static CallInst *Create(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
+                          ArrayRef<OperandBundleDef> Bundles,
+                          const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    const int NumOperands =
+        ComputeNumOperands(Args.size(), CountBundleInputs(Bundles));
+    const unsigned DescriptorBytes = Bundles.size() * sizeof(BundleOpInfo);
+
+    return new (NumOperands, DescriptorBytes)
+        CallInst(Ty, Func, Args, Bundles, NameStr, InsertAtEnd);
+  }
+
+  static CallInst *Create(Function *Func, const Twine &NameStr = "",
+                          Instruction *InsertBefore = nullptr) {
+    return Create(Func->getFunctionType(), Func, NameStr, InsertBefore);
+  }
+
+  static CallInst *Create(Function *Func, ArrayRef<Value *> Args,
+                          const Twine &NameStr = "",
+                          Instruction *InsertBefore = nullptr) {
+    return Create(Func->getFunctionType(), Func, Args, NameStr, InsertBefore);
+  }
+
+  static CallInst *Create(Function *Func, const Twine &NameStr,
+                          BasicBlock *InsertAtEnd) {
+    return Create(Func->getFunctionType(), Func, NameStr, InsertAtEnd);
+  }
+
+  static CallInst *Create(Function *Func, ArrayRef<Value *> Args,
+                          const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    return Create(Func->getFunctionType(), Func, Args, NameStr, InsertAtEnd);
+  }
+
+  // Deprecated [opaque pointer types]
+  static CallInst *Create(Value *Func, const Twine &NameStr = "",
+                          Instruction *InsertBefore = nullptr) {
+    return Create(cast<FunctionType>(
+                      cast<PointerType>(Func->getType())->getElementType()),
+                  Func, NameStr, InsertBefore);
+  }
+
+  // Deprecated [opaque pointer types]
+  static CallInst *Create(Value *Func, ArrayRef<Value *> Args,
+                          const Twine &NameStr,
+                          Instruction *InsertBefore = nullptr) {
+    return Create(cast<FunctionType>(
+                      cast<PointerType>(Func->getType())->getElementType()),
+                  Func, Args, NameStr, InsertBefore);
+  }
+
+  // Deprecated [opaque pointer types]
   static CallInst *Create(Value *Func, ArrayRef<Value *> Args,
                           ArrayRef<OperandBundleDef> Bundles = None,
                           const Twine &NameStr = "",
@@ -1938,58 +1591,29 @@ public:
                   Func, Args, Bundles, NameStr, InsertBefore);
   }
 
-  static CallInst *Create(Value *Func, ArrayRef<Value *> Args,
-                          const Twine &NameStr,
-                          Instruction *InsertBefore = nullptr) {
+  // Deprecated [opaque pointer types]
+  static CallInst *Create(Value *Func, const Twine &NameStr,
+                          BasicBlock *InsertAtEnd) {
     return Create(cast<FunctionType>(
                       cast<PointerType>(Func->getType())->getElementType()),
-                  Func, Args, None, NameStr, InsertBefore);
+                  Func, NameStr, InsertAtEnd);
   }
 
-  static CallInst *Create(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
-                          const Twine &NameStr,
-                          Instruction *InsertBefore = nullptr) {
-    return new (unsigned(Args.size() + 1))
-        CallInst(Ty, Func, Args, None, NameStr, InsertBefore);
+  // Deprecated [opaque pointer types]
+  static CallInst *Create(Value *Func, ArrayRef<Value *> Args,
+                          const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    return Create(cast<FunctionType>(
+                      cast<PointerType>(Func->getType())->getElementType()),
+                  Func, Args, NameStr, InsertAtEnd);
   }
 
-  static CallInst *Create(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
-                          ArrayRef<OperandBundleDef> Bundles = None,
-                          const Twine &NameStr = "",
-                          Instruction *InsertBefore = nullptr) {
-    const unsigned TotalOps =
-        unsigned(Args.size()) + CountBundleInputs(Bundles) + 1;
-    const unsigned DescriptorBytes = Bundles.size() * sizeof(BundleOpInfo);
-
-    return new (TotalOps, DescriptorBytes)
-        CallInst(Ty, Func, Args, Bundles, NameStr, InsertBefore);
-  }
-
+  // Deprecated [opaque pointer types]
   static CallInst *Create(Value *Func, ArrayRef<Value *> Args,
                           ArrayRef<OperandBundleDef> Bundles,
                           const Twine &NameStr, BasicBlock *InsertAtEnd) {
-    const unsigned TotalOps =
-        unsigned(Args.size()) + CountBundleInputs(Bundles) + 1;
-    const unsigned DescriptorBytes = Bundles.size() * sizeof(BundleOpInfo);
-
-    return new (TotalOps, DescriptorBytes)
-        CallInst(Func, Args, Bundles, NameStr, InsertAtEnd);
-  }
-
-  static CallInst *Create(Value *Func, ArrayRef<Value *> Args,
-                          const Twine &NameStr, BasicBlock *InsertAtEnd) {
-    return new (unsigned(Args.size() + 1))
-        CallInst(Func, Args, None, NameStr, InsertAtEnd);
-  }
-
-  static CallInst *Create(Value *F, const Twine &NameStr = "",
-                          Instruction *InsertBefore = nullptr) {
-    return new (1) CallInst(F, NameStr, InsertBefore);
-  }
-
-  static CallInst *Create(Value *F, const Twine &NameStr,
-                          BasicBlock *InsertAtEnd) {
-    return new (1) CallInst(F, NameStr, InsertAtEnd);
+    return Create(cast<FunctionType>(
+                      cast<PointerType>(Func->getType())->getElementType()),
+                  Func, Args, Bundles, NameStr, InsertAtEnd);
   }
 
   /// Create a clone of \p CI with a different set of operand bundles and
@@ -2080,7 +1704,7 @@ public:
   }
 
   /// Check if this call is an inline asm statement.
-  bool isInlineAsm() const { return isa<InlineAsm>(Op<-1>()); }
+  bool isInlineAsm() const { return isa<InlineAsm>(getCalledOperand()); }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static bool classof(const Instruction *I) {
@@ -2098,32 +1722,25 @@ private:
   }
 };
 
-template <>
-struct OperandTraits<CallBase<CallInst>>
-    : public VariadicOperandTraits<CallBase<CallInst>, 1> {};
-
-CallInst::CallInst(Value *Func, ArrayRef<Value *> Args,
+CallInst::CallInst(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
                    ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr,
                    BasicBlock *InsertAtEnd)
-    : CallBase<CallInst>(
-          cast<FunctionType>(
-              cast<PointerType>(Func->getType())->getElementType())
-              ->getReturnType(),
-          Instruction::Call,
-          OperandTraits<CallBase<CallInst>>::op_end(this) -
-              (Args.size() + CountBundleInputs(Bundles) + 1),
-          unsigned(Args.size() + CountBundleInputs(Bundles) + 1), InsertAtEnd) {
-  init(Func, Args, Bundles, NameStr);
+    : CallBase(Ty->getReturnType(), Instruction::Call,
+               OperandTraits<CallBase>::op_end(this) -
+                   (Args.size() + CountBundleInputs(Bundles) + 1),
+               unsigned(Args.size() + CountBundleInputs(Bundles) + 1),
+               InsertAtEnd) {
+  init(Ty, Func, Args, Bundles, NameStr);
 }
 
 CallInst::CallInst(FunctionType *Ty, Value *Func, ArrayRef<Value *> Args,
                    ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr,
                    Instruction *InsertBefore)
-    : CallBase<CallInst>(Ty->getReturnType(), Instruction::Call,
-                         OperandTraits<CallBase<CallInst>>::op_end(this) -
-                             (Args.size() + CountBundleInputs(Bundles) + 1),
-                         unsigned(Args.size() + CountBundleInputs(Bundles) + 1),
-                         InsertBefore) {
+    : CallBase(Ty->getReturnType(), Instruction::Call,
+               OperandTraits<CallBase>::op_end(this) -
+                   (Args.size() + CountBundleInputs(Bundles) + 1),
+               unsigned(Args.size() + CountBundleInputs(Bundles) + 1),
+               InsertBefore) {
   init(Ty, Func, Args, Bundles, NameStr);
 }
 
@@ -2645,6 +2262,25 @@ public:
   /// Example: shufflevector <4 x n> A, <4 x n> B, <0,4,2,6>
   bool isTranspose() const {
     return !changesLength() && isTransposeMask(getMask());
+  }
+
+  /// Return true if this shuffle mask is an extract subvector mask.
+  /// A valid extract subvector mask returns a smaller vector from a single
+  /// source operand. The base extraction index is returned as well.
+  static bool isExtractSubvectorMask(ArrayRef<int> Mask, int NumSrcElts,
+                                     int &Index);
+  static bool isExtractSubvectorMask(const Constant *Mask, int NumSrcElts,
+                                     int &Index) {
+    assert(Mask->getType()->isVectorTy() && "Shuffle needs vector constant.");
+    SmallVector<int, 16> MaskAsInts;
+    getShuffleMask(Mask, MaskAsInts);
+    return isExtractSubvectorMask(MaskAsInts, NumSrcElts, Index);
+  }
+
+  /// Return true if this shuffle mask is an extract subvector mask.
+  bool isExtractSubvectorMask(int &Index) const {
+    int NumSrcElts = Op<0>()->getType()->getVectorNumElements();
+    return isExtractSubvectorMask(getMask(), NumSrcElts, Index);
   }
 
   /// Change values in a shuffle permute mask assuming the two vector operands
@@ -3981,47 +3617,42 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(IndirectBrInst, Value)
 /// Invoke instruction.  The SubclassData field is used to hold the
 /// calling convention of the call.
 ///
-class InvokeInst : public CallBase<InvokeInst> {
-  friend class OperandBundleUser<InvokeInst, User::op_iterator>;
+class InvokeInst : public CallBase {
+  /// The number of operands for this call beyond the called function,
+  /// arguments, and operand bundles.
+  static constexpr int NumExtraOperands = 2;
+
+  /// The index from the end of the operand array to the normal destination.
+  static constexpr int NormalDestOpEndIdx = -3;
+
+  /// The index from the end of the operand array to the unwind destination.
+  static constexpr int UnwindDestOpEndIdx = -2;
 
   InvokeInst(const InvokeInst &BI);
 
   /// Construct an InvokeInst given a range of arguments.
   ///
   /// Construct an InvokeInst from a range of arguments
-  inline InvokeInst(Value *Func, BasicBlock *IfNormal, BasicBlock *IfException,
-                    ArrayRef<Value *> Args, ArrayRef<OperandBundleDef> Bundles,
-                    unsigned Values, const Twine &NameStr,
-                    Instruction *InsertBefore)
-      : InvokeInst(cast<FunctionType>(
-                       cast<PointerType>(Func->getType())->getElementType()),
-                   Func, IfNormal, IfException, Args, Bundles, Values, NameStr,
-                   InsertBefore) {}
+  inline InvokeInst(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
+                    BasicBlock *IfException, ArrayRef<Value *> Args,
+                    ArrayRef<OperandBundleDef> Bundles, int NumOperands,
+                    const Twine &NameStr, Instruction *InsertBefore);
 
   inline InvokeInst(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
                     BasicBlock *IfException, ArrayRef<Value *> Args,
-                    ArrayRef<OperandBundleDef> Bundles, unsigned Values,
-                    const Twine &NameStr, Instruction *InsertBefore);
-  /// Construct an InvokeInst given a range of arguments.
-  ///
-  /// Construct an InvokeInst from a range of arguments
-  inline InvokeInst(Value *Func, BasicBlock *IfNormal, BasicBlock *IfException,
-                    ArrayRef<Value *> Args, ArrayRef<OperandBundleDef> Bundles,
-                    unsigned Values, const Twine &NameStr,
-                    BasicBlock *InsertAtEnd);
+                    ArrayRef<OperandBundleDef> Bundles, int NumOperands,
+                    const Twine &NameStr, BasicBlock *InsertAtEnd);
 
-
-  void init(Value *Func, BasicBlock *IfNormal, BasicBlock *IfException,
-            ArrayRef<Value *> Args, ArrayRef<OperandBundleDef> Bundles,
-            const Twine &NameStr) {
-    init(cast<FunctionType>(
-             cast<PointerType>(Func->getType())->getElementType()),
-         Func, IfNormal, IfException, Args, Bundles, NameStr);
-  }
-
-  void init(FunctionType *FTy, Value *Func, BasicBlock *IfNormal,
+  void init(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
             BasicBlock *IfException, ArrayRef<Value *> Args,
             ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr);
+
+  /// Compute the number of operands to allocate.
+  static int ComputeNumOperands(int NumArgs, int NumBundleInputs = 0) {
+    // We need one operand for the called function, plus our extra operands and
+    // the input operand counts provided.
+    return 1 + NumExtraOperands + NumArgs + NumBundleInputs;
+  }
 
 protected:
   // Note: Instruction needs to be a friend here to call cloneImpl.
@@ -4030,7 +3661,85 @@ protected:
   InvokeInst *cloneImpl() const;
 
 public:
-  static constexpr int ArgOffset = 3;
+  static InvokeInst *Create(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
+                            BasicBlock *IfException, ArrayRef<Value *> Args,
+                            const Twine &NameStr,
+                            Instruction *InsertBefore = nullptr) {
+    int NumOperands = ComputeNumOperands(Args.size());
+    return new (NumOperands)
+        InvokeInst(Ty, Func, IfNormal, IfException, Args, None, NumOperands,
+                   NameStr, InsertBefore);
+  }
+
+  static InvokeInst *Create(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
+                            BasicBlock *IfException, ArrayRef<Value *> Args,
+                            ArrayRef<OperandBundleDef> Bundles = None,
+                            const Twine &NameStr = "",
+                            Instruction *InsertBefore = nullptr) {
+    int NumOperands =
+        ComputeNumOperands(Args.size(), CountBundleInputs(Bundles));
+    unsigned DescriptorBytes = Bundles.size() * sizeof(BundleOpInfo);
+
+    return new (NumOperands, DescriptorBytes)
+        InvokeInst(Ty, Func, IfNormal, IfException, Args, Bundles, NumOperands,
+                   NameStr, InsertBefore);
+  }
+
+  static InvokeInst *Create(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
+                            BasicBlock *IfException, ArrayRef<Value *> Args,
+                            const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    int NumOperands = ComputeNumOperands(Args.size());
+    return new (NumOperands)
+        InvokeInst(Ty, Func, IfNormal, IfException, Args, None, NumOperands,
+                   NameStr, InsertAtEnd);
+  }
+
+  static InvokeInst *Create(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
+                            BasicBlock *IfException, ArrayRef<Value *> Args,
+                            ArrayRef<OperandBundleDef> Bundles,
+                            const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    int NumOperands =
+        ComputeNumOperands(Args.size(), CountBundleInputs(Bundles));
+    unsigned DescriptorBytes = Bundles.size() * sizeof(BundleOpInfo);
+
+    return new (NumOperands, DescriptorBytes)
+        InvokeInst(Ty, Func, IfNormal, IfException, Args, Bundles, NumOperands,
+                   NameStr, InsertAtEnd);
+  }
+
+  static InvokeInst *Create(Function *Func, BasicBlock *IfNormal,
+                            BasicBlock *IfException, ArrayRef<Value *> Args,
+                            const Twine &NameStr,
+                            Instruction *InsertBefore = nullptr) {
+    return Create(Func->getFunctionType(), Func, IfNormal, IfException, Args,
+                  None, NameStr, InsertBefore);
+  }
+
+  static InvokeInst *Create(Function *Func, BasicBlock *IfNormal,
+                            BasicBlock *IfException, ArrayRef<Value *> Args,
+                            ArrayRef<OperandBundleDef> Bundles = None,
+                            const Twine &NameStr = "",
+                            Instruction *InsertBefore = nullptr) {
+    return Create(Func->getFunctionType(), Func, IfNormal, IfException, Args,
+                  Bundles, NameStr, InsertBefore);
+  }
+
+  static InvokeInst *Create(Function *Func, BasicBlock *IfNormal,
+                            BasicBlock *IfException, ArrayRef<Value *> Args,
+                            const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    return Create(Func->getFunctionType(), Func, IfNormal, IfException, Args,
+                  NameStr, InsertAtEnd);
+  }
+
+  static InvokeInst *Create(Function *Func, BasicBlock *IfNormal,
+                            BasicBlock *IfException, ArrayRef<Value *> Args,
+                            ArrayRef<OperandBundleDef> Bundles,
+                            const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    return Create(Func->getFunctionType(), Func, IfNormal, IfException, Args,
+                  Bundles, NameStr, InsertAtEnd);
+  }
+
+  // Deprecated [opaque pointer types]
   static InvokeInst *Create(Value *Func, BasicBlock *IfNormal,
                             BasicBlock *IfException, ArrayRef<Value *> Args,
                             const Twine &NameStr,
@@ -4041,6 +3750,7 @@ public:
                   InsertBefore);
   }
 
+  // Deprecated [opaque pointer types]
   static InvokeInst *Create(Value *Func, BasicBlock *IfNormal,
                             BasicBlock *IfException, ArrayRef<Value *> Args,
                             ArrayRef<OperandBundleDef> Bundles = None,
@@ -4052,47 +3762,24 @@ public:
                   InsertBefore);
   }
 
-  static InvokeInst *Create(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
+  // Deprecated [opaque pointer types]
+  static InvokeInst *Create(Value *Func, BasicBlock *IfNormal,
                             BasicBlock *IfException, ArrayRef<Value *> Args,
-                            const Twine &NameStr,
-                            Instruction *InsertBefore = nullptr) {
-    unsigned Values = unsigned(Args.size()) + 3;
-    return new (Values) InvokeInst(Ty, Func, IfNormal, IfException, Args, None,
-                                   Values, NameStr, InsertBefore);
+                            const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    return Create(cast<FunctionType>(
+                      cast<PointerType>(Func->getType())->getElementType()),
+                  Func, IfNormal, IfException, Args, NameStr, InsertAtEnd);
   }
 
-  static InvokeInst *Create(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
-                            BasicBlock *IfException, ArrayRef<Value *> Args,
-                            ArrayRef<OperandBundleDef> Bundles = None,
-                            const Twine &NameStr = "",
-                            Instruction *InsertBefore = nullptr) {
-    unsigned Values = unsigned(Args.size()) + CountBundleInputs(Bundles) + 3;
-    unsigned DescriptorBytes = Bundles.size() * sizeof(BundleOpInfo);
-
-    return new (Values, DescriptorBytes)
-        InvokeInst(Ty, Func, IfNormal, IfException, Args, Bundles, Values,
-                   NameStr, InsertBefore);
-  }
-
-  static InvokeInst *Create(Value *Func,
-                            BasicBlock *IfNormal, BasicBlock *IfException,
-                            ArrayRef<Value *> Args, const Twine &NameStr,
-                            BasicBlock *InsertAtEnd) {
-    unsigned Values = unsigned(Args.size()) + 3;
-    return new (Values) InvokeInst(Func, IfNormal, IfException, Args, None,
-                                   Values, NameStr, InsertAtEnd);
-  }
-
+  // Deprecated [opaque pointer types]
   static InvokeInst *Create(Value *Func, BasicBlock *IfNormal,
                             BasicBlock *IfException, ArrayRef<Value *> Args,
                             ArrayRef<OperandBundleDef> Bundles,
                             const Twine &NameStr, BasicBlock *InsertAtEnd) {
-    unsigned Values = unsigned(Args.size()) + CountBundleInputs(Bundles) + 3;
-    unsigned DescriptorBytes = Bundles.size() * sizeof(BundleOpInfo);
-
-    return new (Values, DescriptorBytes)
-        InvokeInst(Func, IfNormal, IfException, Args, Bundles, Values, NameStr,
-                   InsertAtEnd);
+    return Create(cast<FunctionType>(
+                      cast<PointerType>(Func->getType())->getElementType()),
+                  Func, IfNormal, IfException, Args, Bundles, NameStr,
+                  InsertAtEnd);
   }
 
   /// Create a clone of \p II with a different set of operand bundles and
@@ -4113,43 +3800,18 @@ public:
     addAttribute(AttributeList::FunctionIndex, Attribute::NoUnwind);
   }
 
-  /// Return the function called, or null if this is an
-  /// indirect function invocation.
-  ///
-  Function *getCalledFunction() const {
-    return dyn_cast<Function>(Op<-3>());
-  }
-
-  /// Get a pointer to the function that is invoked by this
-  /// instruction
-  const Value *getCalledValue() const { return Op<-3>(); }
-        Value *getCalledValue()       { return Op<-3>(); }
-
-  /// Set the function called.
-  void setCalledFunction(Value* Fn) {
-    setCalledFunction(
-        cast<FunctionType>(cast<PointerType>(Fn->getType())->getElementType()),
-        Fn);
-  }
-  void setCalledFunction(FunctionType *FTy, Value *Fn) {
-    this->FTy = FTy;
-    assert(FTy == cast<FunctionType>(
-                      cast<PointerType>(Fn->getType())->getElementType()));
-    Op<-3>() = Fn;
-  }
-
   // get*Dest - Return the destination basic blocks...
   BasicBlock *getNormalDest() const {
-    return cast<BasicBlock>(Op<-2>());
+    return cast<BasicBlock>(Op<NormalDestOpEndIdx>());
   }
   BasicBlock *getUnwindDest() const {
-    return cast<BasicBlock>(Op<-1>());
+    return cast<BasicBlock>(Op<UnwindDestOpEndIdx>());
   }
   void setNormalDest(BasicBlock *B) {
-    Op<-2>() = reinterpret_cast<Value*>(B);
+    Op<NormalDestOpEndIdx>() = reinterpret_cast<Value *>(B);
   }
   void setUnwindDest(BasicBlock *B) {
-    Op<-1>() = reinterpret_cast<Value*>(B);
+    Op<UnwindDestOpEndIdx>() = reinterpret_cast<Value *>(B);
   }
 
   /// Get the landingpad instruction from the landing pad
@@ -4161,9 +3823,12 @@ public:
     return i == 0 ? getNormalDest() : getUnwindDest();
   }
 
-  void setSuccessor(unsigned idx, BasicBlock *NewSucc) {
-    assert(idx < 2 && "Successor # out of range for invoke!");
-    *(&Op<-2>() + idx) = reinterpret_cast<Value*>(NewSucc);
+  void setSuccessor(unsigned i, BasicBlock *NewSucc) {
+    assert(i < 2 && "Successor # out of range for invoke!");
+    if (i == 0)
+      setNormalDest(NewSucc);
+    else
+      setUnwindDest(NewSucc);
   }
 
   unsigned getNumSuccessors() const { return 2; }
@@ -4185,35 +3850,25 @@ private:
   }
 };
 
-template <>
-struct OperandTraits<CallBase<InvokeInst>>
-    : public VariadicOperandTraits<CallBase<InvokeInst>, 3> {};
-
 InvokeInst::InvokeInst(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
                        BasicBlock *IfException, ArrayRef<Value *> Args,
-                       ArrayRef<OperandBundleDef> Bundles, unsigned Values,
+                       ArrayRef<OperandBundleDef> Bundles, int NumOperands,
                        const Twine &NameStr, Instruction *InsertBefore)
-    : CallBase<InvokeInst>(Ty->getReturnType(), Instruction::Invoke,
-                           OperandTraits<CallBase<InvokeInst>>::op_end(this) -
-                               Values,
-                           Values, InsertBefore) {
+    : CallBase(Ty->getReturnType(), Instruction::Invoke,
+               OperandTraits<CallBase>::op_end(this) - NumOperands, NumOperands,
+               InsertBefore) {
   init(Ty, Func, IfNormal, IfException, Args, Bundles, NameStr);
 }
 
-InvokeInst::InvokeInst(Value *Func, BasicBlock *IfNormal,
+InvokeInst::InvokeInst(FunctionType *Ty, Value *Func, BasicBlock *IfNormal,
                        BasicBlock *IfException, ArrayRef<Value *> Args,
-                       ArrayRef<OperandBundleDef> Bundles, unsigned Values,
+                       ArrayRef<OperandBundleDef> Bundles, int NumOperands,
                        const Twine &NameStr, BasicBlock *InsertAtEnd)
-    : CallBase<InvokeInst>(
-          cast<FunctionType>(
-              cast<PointerType>(Func->getType())->getElementType())
-              ->getReturnType(),
-          Instruction::Invoke,
-          OperandTraits<CallBase<InvokeInst>>::op_end(this) - Values, Values,
-          InsertAtEnd) {
-  init(Func, IfNormal, IfException, Args, Bundles, NameStr);
+    : CallBase(Ty->getReturnType(), Instruction::Invoke,
+               OperandTraits<CallBase>::op_end(this) - NumOperands, NumOperands,
+               InsertAtEnd) {
+  init(Ty, Func, IfNormal, IfException, Args, Bundles, NameStr);
 }
-
 
 //===----------------------------------------------------------------------===//
 //                              ResumeInst Class

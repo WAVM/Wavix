@@ -1,9 +1,8 @@
 //===-- PredicateInfo.cpp - PredicateInfo Builder--------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------===//
 //
@@ -522,7 +521,7 @@ Value *PredicateInfo::materializeStack(unsigned int &Counter,
     if (isa<PredicateWithEdge>(ValInfo)) {
       IRBuilder<> B(getBranchTerminator(ValInfo));
       Function *IF = getCopyDeclaration(F.getParent(), Op->getType());
-      if (IF->user_begin() == IF->user_end())
+      if (empty(IF->users()))
         CreatedDeclarations.insert(IF);
       CallInst *PIC =
           B.CreateCall(IF, Op, Op->getName() + "." + Twine(Counter++));
@@ -534,7 +533,7 @@ Value *PredicateInfo::materializeStack(unsigned int &Counter,
              "Should not have gotten here without it being an assume");
       IRBuilder<> B(PAssume->AssumeInst);
       Function *IF = getCopyDeclaration(F.getParent(), Op->getType());
-      if (IF->user_begin() == IF->user_end())
+      if (empty(IF->users()))
         CreatedDeclarations.insert(IF);
       CallInst *PIC = B.CreateCall(IF, Op);
       PredicateMap.insert({PIC, ValInfo});

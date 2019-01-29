@@ -1,9 +1,8 @@
 //==-- AArch64.h - Top-level interface for AArch64  --------------*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -32,12 +31,14 @@ class MachineFunctionPass;
 FunctionPass *createAArch64DeadRegisterDefinitions();
 FunctionPass *createAArch64RedundantCopyEliminationPass();
 FunctionPass *createAArch64CondBrTuning();
+FunctionPass *createAArch64CompressJumpTablesPass();
 FunctionPass *createAArch64ConditionalCompares();
 FunctionPass *createAArch64AdvSIMDScalar();
 FunctionPass *createAArch64ISelDag(AArch64TargetMachine &TM,
                                  CodeGenOpt::Level OptLevel);
 FunctionPass *createAArch64StorePairSuppressPass();
 FunctionPass *createAArch64ExpandPseudoPass();
+FunctionPass *createAArch64SpeculationHardeningPass();
 FunctionPass *createAArch64LoadStoreOptimizationPass();
 FunctionPass *createAArch64SIMDInstrOptPass();
 ModulePass *createAArch64PromoteConstantPass();
@@ -62,10 +63,12 @@ void initializeAArch64AdvSIMDScalarPass(PassRegistry&);
 void initializeAArch64BranchTargetsPass(PassRegistry&);
 void initializeAArch64CollectLOHPass(PassRegistry&);
 void initializeAArch64CondBrTuningPass(PassRegistry &);
+void initializeAArch64CompressJumpTablesPass(PassRegistry&);
 void initializeAArch64ConditionalComparesPass(PassRegistry&);
 void initializeAArch64ConditionOptimizerPass(PassRegistry&);
 void initializeAArch64DeadRegisterDefinitionsPass(PassRegistry&);
 void initializeAArch64ExpandPseudoPass(PassRegistry&);
+void initializeAArch64SpeculationHardeningPass(PassRegistry&);
 void initializeAArch64LoadStoreOptPass(PassRegistry&);
 void initializeAArch64SIMDInstrOptPass(PassRegistry&);
 void initializeAArch64PreLegalizerCombinerPass(PassRegistry&);

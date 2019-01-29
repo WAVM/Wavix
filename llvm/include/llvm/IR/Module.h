@@ -1,9 +1,8 @@
 //===- llvm/Module.h - C++ class to represent a VM module -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -49,6 +48,7 @@ class MemoryBuffer;
 class RandomNumberGenerator;
 template <class PtrType> class SmallPtrSetImpl;
 class StructType;
+class VersionTuple;
 
 /// A Module instance is used to store all the information related to an
 /// LLVM module. Modules are the top level container of all other LLVM
@@ -366,6 +366,11 @@ public:
     return getOrInsertFunction(Name, AttributeList{}, RetTy, Args...);
   }
 
+  // Avoid an incorrect ordering that'd otherwise compile incorrectly.
+  template <typename... ArgsTy>
+  Constant *getOrInsertFunction(StringRef Name, AttributeList AttributeList,
+                                FunctionType *Invalid, ArgsTy... Args) = delete;
+
   /// Look up the specified function in the module symbol table. If it does not
   /// exist, return null.
   Function *getFunction(StringRef Name) const;
@@ -402,11 +407,15 @@ public:
   }
 
   /// Look up the specified global in the module symbol table.
-  ///   1. If it does not exist, add a declaration of the global and return it.
-  ///   2. Else, the global exists but has the wrong type: return the function
-  ///      with a constantexpr cast to the right type.
-  ///   3. Finally, if the existing global is the correct declaration, return
-  ///      the existing global.
+  /// If it does not exist, invoke a callback to create a declaration of the
+  /// global and return it. The global is constantexpr casted to the expected
+  /// type if necessary.
+  Constant *
+  getOrInsertGlobal(StringRef Name, Type *Ty,
+                    function_ref<GlobalVariable *()> CreateGlobalCallback);
+
+  /// Look up the specified global in the module symbol table. If required, this
+  /// overload constructs the global variable using its constructor's defaults.
   Constant *getOrInsertGlobal(StringRef Name, Type *Ty);
 
 /// @}
@@ -868,6 +877,17 @@ public:
   /// Set that PLT should be avoid for RTLib calls.
   void setRtLibUseGOT();
 
+  /// @name Utility functions for querying and setting the build SDK version
+  /// @{
+
+  /// Attach a build SDK version metadata to this module.
+  void setSDKVersion(const VersionTuple &V);
+
+  /// Get the build SDK version metadata.
+  ///
+  /// An empty version is returned if no such metadata is attached.
+  VersionTuple getSDKVersion() const;
+  /// @}
 
   /// Take ownership of the given memory buffer.
   void setOwnedMemoryBuffer(std::unique_ptr<MemoryBuffer> MB);

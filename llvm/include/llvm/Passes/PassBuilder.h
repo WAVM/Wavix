@@ -1,9 +1,8 @@
 //===- Parsing, selection, and construction of pass pipelines --*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -501,6 +500,18 @@ public:
     PipelineStartEPCallbacks.push_back(C);
   }
 
+  /// Register a callback for a default optimizer pipeline extension point
+  ///
+  /// This extension point allows adding optimizations at the very end of the
+  /// function optimization pipeline. A key difference between this and the
+  /// legacy PassManager's OptimizerLast callback is that this extension point
+  /// is not triggered at O0. Extensions to the O0 pipeline should append their
+  /// passes to the end of the overall pipeline.
+  void registerOptimizerLastEPCallback(
+      const std::function<void(FunctionPassManager &, OptimizationLevel)> &C) {
+    OptimizerLastEPCallbacks.push_back(C);
+  }
+
   /// Register a callback for parsing an AliasAnalysis Name to populate
   /// the given AAManager \p AA
   void registerParseAACallback(
@@ -614,6 +625,8 @@ private:
       CGSCCOptimizerLateEPCallbacks;
   SmallVector<std::function<void(FunctionPassManager &, OptimizationLevel)>, 2>
       VectorizerStartEPCallbacks;
+  SmallVector<std::function<void(FunctionPassManager &, OptimizationLevel)>, 2>
+      OptimizerLastEPCallbacks;
   // Module callbacks
   SmallVector<std::function<void(ModulePassManager &)>, 2>
       PipelineStartEPCallbacks;

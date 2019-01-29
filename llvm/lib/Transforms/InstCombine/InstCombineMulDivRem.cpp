@@ -1,9 +1,8 @@
 //===- InstCombineMulDivRem.cpp -------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -243,6 +242,11 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
       NewMul->setHasNoSignedWrap();
     return NewMul;
   }
+
+  // -X * Y --> -(X * Y)
+  // X * -Y --> -(X * Y)
+  if (match(&I, m_c_Mul(m_OneUse(m_Neg(m_Value(X))), m_Value(Y))))
+    return BinaryOperator::CreateNeg(Builder.CreateMul(X, Y));
 
   // (X / Y) *  Y = X - (X % Y)
   // (X / Y) * -Y = (X % Y) - X

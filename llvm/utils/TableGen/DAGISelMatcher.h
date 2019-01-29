@@ -1,9 +1,8 @@
 //===- DAGISelMatcher.h - Representation of DAG pattern matcher -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -414,10 +413,14 @@ private:
 /// see if the node is acceptable.
 class CheckPredicateMatcher : public Matcher {
   TreePattern *Pred;
+  const SmallVector<unsigned, 4> Operands;
 public:
-  CheckPredicateMatcher(const TreePredicateFn &pred);
+  CheckPredicateMatcher(const TreePredicateFn &pred,
+                        const SmallVectorImpl<unsigned> &Operands);
 
   TreePredicateFn getPredicate() const;
+  unsigned getNumOperands() const;
+  unsigned getOperandNo(unsigned i) const;
 
   static bool classof(const Matcher *N) {
     return N->getKind() == CheckPredicate;

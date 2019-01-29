@@ -1,9 +1,8 @@
 //===--- LivePhysRegs.cpp - Live Physical Register Set --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -29,8 +28,8 @@ using namespace llvm;
 /// The clobbers set will be the list of live registers clobbered
 /// by the regmask.
 void LivePhysRegs::removeRegsInMask(const MachineOperand &MO,
-        SmallVectorImpl<std::pair<unsigned, const MachineOperand*>> *Clobbers) {
-  SparseSet<unsigned>::iterator LRI = LiveRegs.begin();
+    SmallVectorImpl<std::pair<MCPhysReg, const MachineOperand*>> *Clobbers) {
+  RegisterSet::iterator LRI = LiveRegs.begin();
   while (LRI != LiveRegs.end()) {
     if (MO.clobbersPhysReg(*LRI)) {
       if (Clobbers)
@@ -83,7 +82,7 @@ void LivePhysRegs::stepBackward(const MachineInstr &MI) {
 /// on accurate kill flags. If possible use stepBackward() instead of this
 /// function.
 void LivePhysRegs::stepForward(const MachineInstr &MI,
-        SmallVectorImpl<std::pair<unsigned, const MachineOperand*>> &Clobbers) {
+    SmallVectorImpl<std::pair<MCPhysReg, const MachineOperand*>> &Clobbers) {
   // Remove killed registers from the set.
   for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
     if (O->isReg() && !O->isDebug()) {
@@ -142,7 +141,7 @@ LLVM_DUMP_METHOD void LivePhysRegs::dump() const {
 #endif
 
 bool LivePhysRegs::available(const MachineRegisterInfo &MRI,
-                             unsigned Reg) const {
+                             MCPhysReg Reg) const {
   if (LiveRegs.count(Reg))
     return false;
   if (MRI.isReserved(Reg))
@@ -157,7 +156,7 @@ bool LivePhysRegs::available(const MachineRegisterInfo &MRI,
 /// Add live-in registers of basic block \p MBB to \p LiveRegs.
 void LivePhysRegs::addBlockLiveIns(const MachineBasicBlock &MBB) {
   for (const auto &LI : MBB.liveins()) {
-    unsigned Reg = LI.PhysReg;
+    MCPhysReg Reg = LI.PhysReg;
     LaneBitmask Mask = LI.LaneMask;
     MCSubRegIndexIterator S(Reg, TRI);
     assert(Mask.any() && "Invalid livein mask");

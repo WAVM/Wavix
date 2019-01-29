@@ -1,9 +1,8 @@
 //===- FDRRecords.cpp - Unit Tests for XRay FDR Record Loading ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 #include "gmock/gmock.h"
@@ -34,6 +33,8 @@ TEST(XRayFDRTest, BuilderAndBlockIndexer) {
                     .add<PIDRecord>(1)
                     .add<FunctionRecord>(RecordTypes::ENTER, 1, 1)
                     .add<FunctionRecord>(RecordTypes::EXIT, 1, 100)
+                    .add<CustomEventRecordV5>(1, 4, "XRAY")
+                    .add<TypedEventRecord>(1, 4, 2, "XRAY")
                     .consume();
   auto Block1 = LogBuilder()
                     .add<BufferExtents>(100)
@@ -42,6 +43,8 @@ TEST(XRayFDRTest, BuilderAndBlockIndexer) {
                     .add<PIDRecord>(1)
                     .add<FunctionRecord>(RecordTypes::ENTER, 1, 1)
                     .add<FunctionRecord>(RecordTypes::EXIT, 1, 100)
+                    .add<CustomEventRecordV5>(1, 4, "XRAY")
+                    .add<TypedEventRecord>(1, 4, 2, "XRAY")
                     .consume();
   auto Block2 = LogBuilder()
                     .add<BufferExtents>(100)
@@ -50,6 +53,8 @@ TEST(XRayFDRTest, BuilderAndBlockIndexer) {
                     .add<PIDRecord>(1)
                     .add<FunctionRecord>(RecordTypes::ENTER, 1, 1)
                     .add<FunctionRecord>(RecordTypes::EXIT, 1, 100)
+                    .add<CustomEventRecordV5>(1, 4, "XRAY")
+                    .add<TypedEventRecord>(1, 4, 2, "XRAY")
                     .consume();
   BlockIndexer::Index Index;
   BlockIndexer Indexer(Index);
@@ -92,6 +97,8 @@ TEST(XRayFDRTest, IndexAndVerifyBlocks) {
                     .add<NewCPUIDRecord>(1, 2)
                     .add<FunctionRecord>(RecordTypes::ENTER, 1, 1)
                     .add<FunctionRecord>(RecordTypes::EXIT, 1, 100)
+                    .add<CustomEventRecordV5>(1, 4, "XRAY")
+                    .add<TypedEventRecord>(1, 4, 2, "XRAY")
                     .consume();
   auto Block1 = LogBuilder()
                     .add<BufferExtents>(64)
@@ -101,6 +108,8 @@ TEST(XRayFDRTest, IndexAndVerifyBlocks) {
                     .add<NewCPUIDRecord>(1, 2)
                     .add<FunctionRecord>(RecordTypes::ENTER, 1, 1)
                     .add<FunctionRecord>(RecordTypes::EXIT, 1, 100)
+                    .add<CustomEventRecordV5>(1, 4, "XRAY")
+                    .add<TypedEventRecord>(1, 4, 2, "XRAY")
                     .consume();
   auto Block2 = LogBuilder()
                     .add<BufferExtents>(64)
@@ -110,6 +119,8 @@ TEST(XRayFDRTest, IndexAndVerifyBlocks) {
                     .add<NewCPUIDRecord>(1, 2)
                     .add<FunctionRecord>(RecordTypes::ENTER, 1, 1)
                     .add<FunctionRecord>(RecordTypes::EXIT, 1, 100)
+                    .add<CustomEventRecordV5>(1, 4, "XRAY")
+                    .add<TypedEventRecord>(1, 4, 2, "XRAY")
                     .consume();
 
   // First, index the records in different blocks.

@@ -1,9 +1,8 @@
 //===- ELFObjectFile.h - ELF object file implementation ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -260,6 +259,8 @@ protected:
   bool isSectionData(DataRefImpl Sec) const override;
   bool isSectionBSS(DataRefImpl Sec) const override;
   bool isSectionVirtual(DataRefImpl Sec) const override;
+  bool isBerkeleyText(DataRefImpl Sec) const override;
+  bool isBerkeleyData(DataRefImpl Sec) const override;
   relocation_iterator section_rel_begin(DataRefImpl Sec) const override;
   relocation_iterator section_rel_end(DataRefImpl Sec) const override;
   std::vector<SectionRef> dynamic_relocation_sections() const override;
@@ -333,9 +334,10 @@ protected:
     // A symbol is exported if its binding is either GLOBAL or WEAK, and its
     // visibility is either DEFAULT or PROTECTED. All other symbols are not
     // exported.
-    return ((Binding == ELF::STB_GLOBAL || Binding == ELF::STB_WEAK) &&
-            (Visibility == ELF::STV_DEFAULT ||
-             Visibility == ELF::STV_PROTECTED));
+    return (
+        (Binding == ELF::STB_GLOBAL || Binding == ELF::STB_WEAK ||
+         Binding == ELF::STB_GNU_UNIQUE) &&
+        (Visibility == ELF::STV_DEFAULT || Visibility == ELF::STV_PROTECTED));
   }
 
   // This flag is used for classof, to distinguish ELFObjectFile from
@@ -759,6 +761,20 @@ bool ELFObjectFile<ELFT>::isSectionVirtual(DataRefImpl Sec) const {
 }
 
 template <class ELFT>
+bool ELFObjectFile<ELFT>::isBerkeleyText(DataRefImpl Sec) const {
+  return getSection(Sec)->sh_flags & ELF::SHF_ALLOC &&
+         (getSection(Sec)->sh_flags & ELF::SHF_EXECINSTR ||
+          !(getSection(Sec)->sh_flags & ELF::SHF_WRITE));
+}
+
+template <class ELFT>
+bool ELFObjectFile<ELFT>::isBerkeleyData(DataRefImpl Sec) const {
+  const Elf_Shdr *EShdr = getSection(Sec);
+  return !isBerkeleyText(Sec) && EShdr->sh_type != ELF::SHT_NOBITS &&
+         EShdr->sh_flags & ELF::SHF_ALLOC;
+}
+
+template <class ELFT>
 relocation_iterator
 ELFObjectFile<ELFT>::section_rel_begin(DataRefImpl Sec) const {
   DataRefImpl RelData;
@@ -1021,6 +1037,8 @@ StringRef ELFObjectFile<ELFT>::getFileFormatName() const {
       return "ELF32-lanai";
     case ELF::EM_MIPS:
       return "ELF32-mips";
+    case ELF::EM_MSP430:
+      return "ELF32-msp430";
     case ELF::EM_PPC:
       return "ELF32-ppc";
     case ELF::EM_RISCV:
@@ -1091,6 +1109,8 @@ template <class ELFT> Triple::ArchType ELFObjectFile<ELFT>::getArch() const {
     default:
       report_fatal_error("Invalid ELFCLASS!");
     }
+  case ELF::EM_MSP430:
+    return Triple::msp430;
   case ELF::EM_PPC:
     return Triple::ppc;
   case ELF::EM_PPC64:

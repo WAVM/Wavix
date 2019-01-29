@@ -1,9 +1,8 @@
 //===-- RISCVELFStreamer.cpp - RISCV ELF Target Streamer Methods ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -38,5 +37,9 @@ MCELFStreamer &RISCVTargetELFStreamer::getStreamer() {
   return static_cast<MCELFStreamer &>(Streamer);
 }
 
+void RISCVTargetELFStreamer::emitDirectiveOptionPush() {}
+void RISCVTargetELFStreamer::emitDirectiveOptionPop() {}
 void RISCVTargetELFStreamer::emitDirectiveOptionRVC() {}
 void RISCVTargetELFStreamer::emitDirectiveOptionNoRVC() {}
+void RISCVTargetELFStreamer::emitDirectiveOptionRelax() {}
+void RISCVTargetELFStreamer::emitDirectiveOptionNoRelax() {}

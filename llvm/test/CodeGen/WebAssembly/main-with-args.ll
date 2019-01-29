@@ -1,4 +1,4 @@
-; RUN: llc < %s -asm-verbose=false -wasm-temporary-workarounds=false | FileCheck %s
+; RUN: llc < %s -asm-verbose=false | FileCheck %s
 
 ; Test that main function with expected signature is not wrapped
 
@@ -10,7 +10,6 @@ define i32 @main(i32 %a, i8** %b) {
 }
 
 ; CHECK-LABEL: main:
-; CHECK-NEXT: .param i32, i32
-; CHECK-NEXT: .result i32
+; CHECK-NEXT: .functype main (i32, i32) -> (i32)
 
 ; CHECK-NOT: __original_main:

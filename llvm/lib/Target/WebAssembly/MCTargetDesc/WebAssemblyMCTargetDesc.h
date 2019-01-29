@@ -1,9 +1,8 @@
 //==- WebAssemblyMCTargetDesc.h - WebAssembly Target Descriptions -*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -77,18 +76,14 @@ enum OperandType {
   OPERAND_SIGNATURE,
   /// type signature immediate for call_indirect.
   OPERAND_TYPEINDEX,
+  /// Event index.
+  OPERAND_EVENT,
+  /// A list of branch targets for br_list.
+  OPERAND_BRLIST,
 };
 } // end namespace WebAssembly
 
 namespace WebAssemblyII {
-enum {
-  // For variadic instructions, this flag indicates whether an operand
-  // in the variable_ops range is an immediate value.
-  VariableOpIsImmediate = (1 << 0),
-  // For immediate values in the variable_ops range, this flag indicates
-  // whether the value represents a control-flow label.
-  VariableOpImmediateIsLabel = (1 << 1)
-};
 
 /// Target Operand Flag enum.
 enum TOF {
@@ -97,7 +92,8 @@ enum TOF {
   // Flags to indicate the type of the symbol being referenced
   MO_SYMBOL_FUNCTION = 0x1,
   MO_SYMBOL_GLOBAL = 0x2,
-  MO_SYMBOL_MASK = 0x3,
+  MO_SYMBOL_EVENT = 0x4,
+  MO_SYMBOL_MASK = 0x7,
 };
 } // end namespace WebAssemblyII
 
@@ -351,7 +347,8 @@ enum class ExprType : unsigned {
   F32 = 0x7D,
   F64 = 0x7C,
   V128 = 0x7B,
-  ExceptRef = 0x68
+  ExceptRef = 0x68,
+  Invalid = 0x00
 };
 
 /// Instruction opcodes emitted via means other than CodeGen.

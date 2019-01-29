@@ -1,9 +1,8 @@
 //===- ELFYAML.h - ELF YAMLIO implementation --------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -68,6 +67,7 @@ struct FileHeader {
   ELF_ELFCLASS Class;
   ELF_ELFDATA Data;
   ELF_ELFOSABI OSABI;
+  llvm::yaml::Hex8 ABIVersion;
   ELF_ET Type;
   ELF_EM Machine;
   ELF_EF Flags;

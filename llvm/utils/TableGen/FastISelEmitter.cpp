@@ -1,9 +1,8 @@
 ///===- FastISelEmitter.cpp - Generate an instruction selector -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -210,13 +209,13 @@ struct OperandsSignature {
       // Handle imm operands specially.
       if (!Op->isLeaf() && Op->getOperator()->getName() == "imm") {
         unsigned PredNo = 0;
-        if (!Op->getPredicateFns().empty()) {
-          TreePredicateFn PredFn = Op->getPredicateFns()[0];
+        if (!Op->getPredicateCalls().empty()) {
+          TreePredicateFn PredFn = Op->getPredicateCalls()[0].Fn;
           // If there is more than one predicate weighing in on this operand
           // then we don't handle it.  This doesn't typically happen for
           // immediates anyway.
-          if (Op->getPredicateFns().size() > 1 ||
-              !PredFn.isImmediatePattern())
+          if (Op->getPredicateCalls().size() > 1 ||
+              !PredFn.isImmediatePattern() || PredFn.usesOperands())
             return false;
           // Ignore any instruction with 'FastIselShouldIgnore', these are
           // not needed and just bloat the fast instruction selector.  For
@@ -236,7 +235,7 @@ struct OperandsSignature {
 
       // For now, filter out any operand with a predicate.
       // For now, filter out any operand with multiple values.
-      if (!Op->getPredicateFns().empty() || Op->getNumTypes() != 1)
+      if (!Op->getPredicateCalls().empty() || Op->getNumTypes() != 1)
         return false;
 
       if (!Op->isLeaf()) {
@@ -529,7 +528,7 @@ void FastISelMap::collectPatterns(CodeGenDAGPatterns &CGP) {
     }
 
     // For now, filter out any instructions with predicates.
-    if (!InstPatNode->getPredicateFns().empty())
+    if (!InstPatNode->getPredicateCalls().empty())
       continue;
 
     // Check all the operands.

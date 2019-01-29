@@ -1,9 +1,8 @@
 //===---- X86CondBrFolding.cpp - optimize conditional branches ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // This file defines a pass that optimizes condition branches on x86 by taking
@@ -62,8 +61,9 @@ STATISTIC(NumFixedCondBrs, "Number of x86 condbr folded");
 namespace {
 class X86CondBrFoldingPass : public MachineFunctionPass {
 public:
-  X86CondBrFoldingPass() : MachineFunctionPass(ID) {}
-
+  X86CondBrFoldingPass() : MachineFunctionPass(ID) {
+    initializeX86CondBrFoldingPassPass(*PassRegistry::getPassRegistry());
+  }
   StringRef getPassName() const override { return "X86 CondBr Folding"; }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
@@ -73,12 +73,13 @@ public:
     AU.addRequired<MachineBranchProbabilityInfo>();
   }
 
-private:
+public:
   static char ID;
 };
+} // namespace
 
 char X86CondBrFoldingPass::ID = 0;
-} // namespace
+INITIALIZE_PASS(X86CondBrFoldingPass, "X86CondBrFolding", "X86CondBrFolding", false, false)
 
 FunctionPass *llvm::createX86CondBrFolding() {
   return new X86CondBrFoldingPass();
@@ -466,7 +467,8 @@ bool X86CondBrFolding::analyzeCompare(const MachineInstr &MI, unsigned &SrcReg,
     break;
   }
   SrcReg = MI.getOperand(SrcRegIndex).getReg();
-  assert(MI.getOperand(ValueIndex).isImm() && "Expecting Imm operand");
+  if (!MI.getOperand(ValueIndex).isImm())
+    return false;
   CmpValue = MI.getOperand(ValueIndex).getImm();
   return true;
 }

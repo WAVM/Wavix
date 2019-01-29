@@ -1,9 +1,8 @@
 //===-- PPCAsmPrinter.cpp - Print machine instrs to PowerPC assembly ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -327,7 +326,7 @@ MCSymbol *PPCAsmPrinter::lookUpOrCreateTOCEntry(MCSymbol *Sym) {
 }
 
 void PPCAsmPrinter::EmitEndOfAsmFile(Module &M) {
-  SM.serializeToStackMapSection();
+  emitStackMaps(SM);
 }
 
 void PPCAsmPrinter::LowerSTACKMAP(StackMaps &SM, const MachineInstr &MI) {

@@ -1,9 +1,8 @@
 //===------ SimplifyLibCalls.cpp - Library calls simplifier ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -798,8 +797,11 @@ Value *LibCallSimplifier::optimizeMemChr(CallInst *CI, IRBuilder<> &B) {
       Bitfield.setBit((unsigned char)C);
     Value *BitfieldC = B.getInt(Bitfield);
 
-    // First check that the bit field access is within bounds.
+    // Adjust width of "C" to the bitfield width, then mask off the high bits.
     Value *C = B.CreateZExtOrTrunc(CI->getArgOperand(1), BitfieldC->getType());
+    C = B.CreateAnd(C, B.getIntN(Width, 0xFF));
+
+    // First check that the bit field access is within bounds.
     Value *Bounds = B.CreateICmp(ICmpInst::ICMP_ULT, C, B.getIntN(Width, Width),
                                  "memchr.bounds");
 

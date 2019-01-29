@@ -1,9 +1,8 @@
 //===- ARMFrameLowering.cpp - ARM Frame Information -----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -79,12 +78,11 @@ ARMFrameLowering::ARMFrameLowering(const ARMSubtarget &sti)
     : TargetFrameLowering(StackGrowsDown, sti.getStackAlignment(), 0, 4),
       STI(sti) {}
 
-bool ARMFrameLowering::noFramePointerElim(const MachineFunction &MF) const {
+bool ARMFrameLowering::keepFramePointer(const MachineFunction &MF) const {
   // iOS always has a FP for backtracking, force other targets to keep their FP
   // when doing FastISel. The emitted code is currently superior, and in cases
   // like test-suite's lencod FastISel isn't quite correct when FP is eliminated.
-  return TargetFrameLowering::noFramePointerElim(MF) ||
-         MF.getSubtarget<ARMSubtarget>().useFastISel();
+  return MF.getSubtarget<ARMSubtarget>().useFastISel();
 }
 
 /// Returns true if the target can safely skip saving callee-saved registers
@@ -911,6 +909,7 @@ ARMFrameLowering::ResolveFrameIndexReference(const MachineFunction &MF,
       assert(RegInfo->hasBasePointer(MF) &&
              "VLAs and dynamic stack alignment, but missing base pointer!");
       FrameReg = RegInfo->getBaseRegister();
+      Offset -= SPAdj;
     }
     return Offset;
   }
@@ -2157,9 +2156,15 @@ void ARMFrameLowering::adjustForSegmentedStacks(
 
   // Do not generate a prologue for leaf functions with a stack of size zero.
   // For non-leaf functions we have to allow for the possibility that the
-  // call is to a non-split function, as in PR37807.
-  if (StackSize == 0 && !MFI.hasTailCall())
+  // callis to a non-split function, as in PR37807. This function could also
+  // take the address of a non-split function. When the linker tries to adjust
+  // its non-existent prologue, it would fail with an error. Mark the object
+  // file so that such failures are not errors. See this Go language bug-report
+  // https://go-review.googlesource.com/c/go/+/148819/
+  if (StackSize == 0 && !MFI.hasTailCall()) {
+    MF.getMMI().setHasNosplitStack(true);
     return;
+  }
 
   // Use R4 and R5 as scratch registers.
   // We save R4 and R5 before use and restore them before leaving the function.

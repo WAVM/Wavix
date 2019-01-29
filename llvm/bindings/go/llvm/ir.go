@@ -1,9 +1,8 @@
 //===- ir.go - Bindings for ir --------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1256,6 +1255,19 @@ func InlineAsm(t Type, asmString, constraints string, hasSideEffects, isAlignSta
 	defer C.free(unsafe.Pointer(cconstraints))
 	rv.C = C.LLVMGetInlineAsm(t.C, casm, C.size_t(len(asmString)), cconstraints, C.size_t(len(constraints)), boolToLLVMBool(hasSideEffects), boolToLLVMBool(isAlignStack), C.LLVMInlineAsmDialect(dialect))
 	return
+}
+
+// Operations on aggregates
+func (v Value) Indices() []uint32 {
+	num := C.LLVMGetNumIndices(v.C)
+	indicesPtr := C.LLVMGetIndices(v.C)
+	// https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
+	rawIndices := (*[1 << 30]C.uint)(unsafe.Pointer(indicesPtr))[:num:num]
+	indices := make([]uint32, num)
+	for i := range indices {
+		indices[i] = uint32(rawIndices[i])
+	}
+	return indices
 }
 
 //-------------------------------------------------------------------------

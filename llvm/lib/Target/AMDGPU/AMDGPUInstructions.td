@@ -1,9 +1,8 @@
 //===-- AMDGPUInstructions.td - Common instruction defs ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -135,6 +134,12 @@ def brtarget   : Operand<OtherVT>;
 // Misc. PatFrags
 //===----------------------------------------------------------------------===//
 
+class HasOneUseUnaryOp<SDPatternOperator op> : PatFrag<
+  (ops node:$src0),
+  (op $src0),
+  [{ return N->hasOneUse(); }]
+>;
+
 class HasOneUseBinOp<SDPatternOperator op> : PatFrag<
   (ops node:$src0, node:$src1),
   (op $src0, $src1),
@@ -164,6 +169,8 @@ def and_oneuse : HasOneUseBinOp<and>;
 def or_oneuse : HasOneUseBinOp<or>;
 def xor_oneuse : HasOneUseBinOp<xor>;
 } // Properties = [SDNPCommutative, SDNPAssociative]
+
+def not_oneuse : HasOneUseUnaryOp<not>;
 
 def add_oneuse : HasOneUseBinOp<add>;
 def sub_oneuse : HasOneUseBinOp<sub>;
@@ -796,18 +803,30 @@ class ROTRPattern <Instruction BIT_ALIGN> : AMDGPUPat <
   (BIT_ALIGN $src0, $src0, $src1)
 >;
 
-// This matches 16 permutations of
-// max(min(x, y), min(max(x, y), z))
-class IntMed3Pat<Instruction med3Inst,
+multiclass IntMed3Pat<Instruction med3Inst,
+                 SDPatternOperator min,
                  SDPatternOperator max,
-                 SDPatternOperator max_oneuse,
                  SDPatternOperator min_oneuse,
-                 ValueType vt = i32> : AMDGPUPat<
+                 SDPatternOperator max_oneuse,
+                 ValueType vt = i32> {
+
+  // This matches 16 permutations of 
+  // min(max(a, b), max(min(a, b), c))
+  def : AMDGPUPat <
+  (min (max_oneuse vt:$src0, vt:$src1),
+       (max_oneuse (min_oneuse vt:$src0, vt:$src1), vt:$src2)),
+  (med3Inst vt:$src0, vt:$src1, vt:$src2)
+>;
+
+  // This matches 16 permutations of 
+  // max(min(x, y), min(max(x, y), z))
+  def : AMDGPUPat <
   (max (min_oneuse vt:$src0, vt:$src1),
        (min_oneuse (max_oneuse vt:$src0, vt:$src1), vt:$src2)),
   (med3Inst $src0, $src1, $src2)
 >;
-
+}
+  
 // Special conversion patterns
 
 def cvt_rpi_i32_f32 : PatFrag <
@@ -822,6 +841,7 @@ def cvt_flr_i32_f32 : PatFrag <
   [{ (void)N; return TM.Options.NoNaNsFPMath; }]
 >;
 
+let AddedComplexity = 2 in {
 class IMad24Pat<Instruction Inst, bit HasClamp = 0> : AMDGPUPat <
   (add (AMDGPUmul_i24 i32:$src0, i32:$src1), i32:$src2),
   !if(HasClamp, (Inst $src0, $src1, $src2, (i1 0)),
@@ -833,6 +853,7 @@ class UMad24Pat<Instruction Inst, bit HasClamp = 0> : AMDGPUPat <
   !if(HasClamp, (Inst $src0, $src1, $src2, (i1 0)),
                 (Inst $src0, $src1, $src2))
 >;
+} // AddedComplexity.
 
 class RcpPat<Instruction RcpInst, ValueType vt> : AMDGPUPat <
   (fdiv FP_ONE, vt:$src),

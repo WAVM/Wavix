@@ -1,9 +1,8 @@
 //===- MustExecute.cpp - Printer for isGuaranteedToExecute ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -72,6 +71,7 @@ bool ICFLoopSafetyInfo::anyBlockMayThrow() const {
 void ICFLoopSafetyInfo::computeLoopSafetyInfo(const Loop *CurLoop) {
   assert(CurLoop != nullptr && "CurLoop can't be null");
   ICF.clear();
+  MW.clear();
   MayThrow = false;
   // Figure out the fact that at least one block may throw.
   for (auto &BB : CurLoop->blocks())
@@ -82,8 +82,15 @@ void ICFLoopSafetyInfo::computeLoopSafetyInfo(const Loop *CurLoop) {
   computeBlockColors(CurLoop);
 }
 
-void ICFLoopSafetyInfo::dropCachedInfo(const BasicBlock *BB) {
-  ICF.invalidateBlock(BB);
+void ICFLoopSafetyInfo::insertInstructionTo(const Instruction *Inst,
+                                            const BasicBlock *BB) {
+  ICF.insertInstructionTo(Inst, BB);
+  MW.insertInstructionTo(Inst, BB);
+}
+
+void ICFLoopSafetyInfo::removeInstruction(const Instruction *Inst) {
+  ICF.removeInstruction(Inst);
+  MW.removeInstruction(Inst);
 }
 
 void LoopSafetyInfo::computeBlockColors(const Loop *CurLoop) {
@@ -139,9 +146,12 @@ static bool CanProveNotTakenFirstIteration(const BasicBlock *ExitBlock,
   return SimpleCst->isAllOnesValue();
 }
 
-void LoopSafetyInfo::collectTransitivePredecessors(
+/// Collect all blocks from \p CurLoop which lie on all possible paths from
+/// the header of \p CurLoop (inclusive) to BB (exclusive) into the set
+/// \p Predecessors. If \p BB is the header, \p Predecessors will be empty.
+static void collectTransitivePredecessors(
     const Loop *CurLoop, const BasicBlock *BB,
-    SmallPtrSetImpl<const BasicBlock *> &Predecessors) const {
+    SmallPtrSetImpl<const BasicBlock *> &Predecessors) {
   assert(Predecessors.empty() && "Garbage in predecessors set?");
   assert(CurLoop->contains(BB) && "Should only be called for loop blocks!");
   if (BB == CurLoop->getHeader())
@@ -245,6 +255,34 @@ bool ICFLoopSafetyInfo::isGuaranteedToExecute(const Instruction &Inst,
                                               const Loop *CurLoop) const {
   return !ICF.isDominatedByICFIFromSameBlock(&Inst) &&
          allLoopPathsLeadToBlock(CurLoop, Inst.getParent(), DT);
+}
+
+bool ICFLoopSafetyInfo::doesNotWriteMemoryBefore(const BasicBlock *BB,
+                                                 const Loop *CurLoop) const {
+  assert(CurLoop->contains(BB) && "Should only be called for loop blocks!");
+
+  // Fast path: there are no instructions before header.
+  if (BB == CurLoop->getHeader())
+    return true;
+
+  // Collect all transitive predecessors of BB in the same loop. This set will
+  // be a subset of the blocks within the loop.
+  SmallPtrSet<const BasicBlock *, 4> Predecessors;
+  collectTransitivePredecessors(CurLoop, BB, Predecessors);
+  // Find if there any instruction in either predecessor that could write
+  // to memory.
+  for (auto *Pred : Predecessors)
+    if (MW.mayWriteToMemory(Pred))
+      return false;
+  return true;
+}
+
+bool ICFLoopSafetyInfo::doesNotWriteMemoryBefore(const Instruction &I,
+                                                 const Loop *CurLoop) const {
+  auto *BB = I.getParent();
+  assert(CurLoop->contains(BB) && "Should only be called for loop blocks!");
+  return !MW.isDominatedByMemoryWriteFromSameBlock(&I) &&
+         doesNotWriteMemoryBefore(BB, CurLoop);
 }
 
 namespace {

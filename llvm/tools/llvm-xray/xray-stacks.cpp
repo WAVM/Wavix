@@ -1,9 +1,8 @@
 //===- xray-stacks.cpp: XRay Function Call Stack Accounting ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -366,6 +365,9 @@ public:
                                     AccountRecordState *state) {
     auto &TS = ThreadStackMap[R.TId];
     switch (R.Type) {
+    case RecordTypes::CUSTOM_EVENT:
+    case RecordTypes::TYPED_EVENT:
+      return AccountRecordStatus::OK;
     case RecordTypes::ENTER:
     case RecordTypes::ENTER_ARG: {
       state->wasLastRecordExit = false;
@@ -734,7 +736,7 @@ static CommandRegistration Unused(&Stack, []() -> Error {
                 Twine("Failed loading input file '") + Filename + "'",
                 std::make_error_code(std::errc::invalid_argument)),
             TraceOrErr.takeError());
-      logAllUnhandledErrors(TraceOrErr.takeError(), errs(), "");
+      logAllUnhandledErrors(TraceOrErr.takeError(), errs());
       continue;
     }
     auto &T = *TraceOrErr;

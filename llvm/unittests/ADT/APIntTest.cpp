@@ -1,9 +1,8 @@
 //===- llvm/unittest/ADT/APInt.cpp - APInt unit tests ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -1174,6 +1173,30 @@ TEST(APIntTest, fromString) {
   EXPECT_EQ(APInt(32, uint64_t(-36LL)), APInt(32, "-10", 36));
   EXPECT_EQ(APInt(32, uint64_t(-71LL)), APInt(32, "-1Z", 36));
   EXPECT_EQ(APInt(32, uint64_t(-72LL)), APInt(32, "-20", 36));
+}
+
+TEST(APIntTest, SaturatingMath) {
+  APInt AP_10 = APInt(8, 10);
+  APInt AP_100 = APInt(8, 100);
+  APInt AP_200 = APInt(8, 200);
+
+  EXPECT_EQ(APInt(8, 200), AP_100.uadd_sat(AP_100));
+  EXPECT_EQ(APInt(8, 255), AP_100.uadd_sat(AP_200));
+  EXPECT_EQ(APInt(8, 255), APInt(8, 255).uadd_sat(APInt(8, 255)));
+
+  EXPECT_EQ(APInt(8, 110), AP_10.sadd_sat(AP_100));
+  EXPECT_EQ(APInt(8, 127), AP_100.sadd_sat(AP_100));
+  EXPECT_EQ(APInt(8, -128), (-AP_100).sadd_sat(-AP_100));
+  EXPECT_EQ(APInt(8, -128), APInt(8, -128).sadd_sat(APInt(8, -128)));
+
+  EXPECT_EQ(APInt(8, 90), AP_100.usub_sat(AP_10));
+  EXPECT_EQ(APInt(8, 0), AP_100.usub_sat(AP_200));
+  EXPECT_EQ(APInt(8, 0), APInt(8, 0).usub_sat(APInt(8, 255)));
+
+  EXPECT_EQ(APInt(8, -90), AP_10.ssub_sat(AP_100));
+  EXPECT_EQ(APInt(8, 127), AP_100.ssub_sat(-AP_100));
+  EXPECT_EQ(APInt(8, -128), (-AP_100).ssub_sat(AP_100));
+  EXPECT_EQ(APInt(8, -128), APInt(8, -128).ssub_sat(APInt(8, 127)));
 }
 
 TEST(APIntTest, FromArray) {

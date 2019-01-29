@@ -1,9 +1,8 @@
 //===-- AMDGPUInstrInfo.td - AMDGPU DAG nodes --------------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -62,16 +61,8 @@ def AMDGPULoopOp : SDTypeProfile<0, 2,
   [SDTCisVT<0, i64>, SDTCisVT<1, OtherVT>]
 >;
 
-def AMDGPUBreakOp : SDTypeProfile<1, 1,
-  [SDTCisVT<0, i64>, SDTCisVT<1, i64>]
->;
-
 def AMDGPUIfBreakOp : SDTypeProfile<1, 2,
   [SDTCisVT<0, i64>, SDTCisVT<1, i1>, SDTCisVT<2, i64>]
->;
-
-def AMDGPUElseBreakOp : SDTypeProfile<1, 2,
-  [SDTCisVT<0, i64>, SDTCisVT<1, i64>, SDTCisVT<2, i64>]
 >;
 
 def AMDGPUAddeSubeOp : SDTypeProfile<2, 3,
@@ -378,6 +369,17 @@ def AMDGPUinterp_p2 : SDNode<"AMDGPUISD::INTERP_P2",
                       SDTypeProfile<1, 4, [SDTCisFP<0>]>,
                       [SDNPInGlue]>;
 
+def AMDGPUinterp_p1ll_f16 : SDNode<"AMDGPUISD::INTERP_P1LL_F16",
+                            SDTypeProfile<1, 7, [SDTCisFP<0>]>,
+                            [SDNPInGlue, SDNPOutGlue]>;
+
+def AMDGPUinterp_p1lv_f16 : SDNode<"AMDGPUISD::INTERP_P1LV_F16",
+                            SDTypeProfile<1, 9, [SDTCisFP<0>]>,
+                            [SDNPInGlue, SDNPOutGlue]>;
+
+def AMDGPUinterp_p2_f16 : SDNode<"AMDGPUISD::INTERP_P2_F16",
+                          SDTypeProfile<1, 8, [SDTCisFP<0>]>,
+                          [SDNPInGlue]>;
 
 def AMDGPUkill : SDNode<"AMDGPUISD::KILL", AMDGPUKillSDT,
   [SDNPHasChain, SDNPSideEffect]>;

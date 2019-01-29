@@ -1,9 +1,8 @@
 //===-- AArch64TargetTransformInfo.cpp - AArch64 specific TTI -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -660,11 +659,13 @@ int AArch64TTIImpl::getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
                                                ArrayRef<unsigned> Indices,
                                                unsigned Alignment,
                                                unsigned AddressSpace,
-                                               bool IsMasked) {
+                                               bool UseMaskForCond,
+                                               bool UseMaskForGaps) {
   assert(Factor >= 2 && "Invalid interleave factor");
   assert(isa<VectorType>(VecTy) && "Expect a vector type");
 
-  if (!IsMasked && Factor <= TLI->getMaxSupportedInterleaveFactor()) {
+  if (!UseMaskForCond && !UseMaskForGaps && 
+      Factor <= TLI->getMaxSupportedInterleaveFactor()) {
     unsigned NumElts = VecTy->getVectorNumElements();
     auto *SubVecTy = VectorType::get(VecTy->getScalarType(), NumElts / Factor);
 
@@ -677,7 +678,8 @@ int AArch64TTIImpl::getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
   }
 
   return BaseT::getInterleavedMemoryOpCost(Opcode, VecTy, Factor, Indices,
-                                           Alignment, AddressSpace, IsMasked);
+                                           Alignment, AddressSpace,
+                                           UseMaskForCond, UseMaskForGaps);
 }
 
 int AArch64TTIImpl::getCostOfKeepingLiveOverCall(ArrayRef<Type *> Tys) {
@@ -946,9 +948,20 @@ int AArch64TTIImpl::getArithmeticReductionCost(unsigned Opcode, Type *ValTy,
 
 int AArch64TTIImpl::getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
                                    Type *SubTp) {
-  if (Kind == TTI::SK_Transpose || Kind == TTI::SK_Select ||
-      Kind == TTI::SK_PermuteSingleSrc) {
+  if (Kind == TTI::SK_Broadcast || Kind == TTI::SK_Transpose ||
+      Kind == TTI::SK_Select || Kind == TTI::SK_PermuteSingleSrc) {
     static const CostTblEntry ShuffleTbl[] = {
+      // Broadcast shuffle kinds can be performed with 'dup'.
+      { TTI::SK_Broadcast, MVT::v8i8,  1 },
+      { TTI::SK_Broadcast, MVT::v16i8, 1 },
+      { TTI::SK_Broadcast, MVT::v4i16, 1 },
+      { TTI::SK_Broadcast, MVT::v8i16, 1 },
+      { TTI::SK_Broadcast, MVT::v2i32, 1 },
+      { TTI::SK_Broadcast, MVT::v4i32, 1 },
+      { TTI::SK_Broadcast, MVT::v2i64, 1 },
+      { TTI::SK_Broadcast, MVT::v2f32, 1 },
+      { TTI::SK_Broadcast, MVT::v4f32, 1 },
+      { TTI::SK_Broadcast, MVT::v2f64, 1 },
       // Transpose shuffle kinds can be performed with 'trn1/trn2' and
       // 'zip1/zip2' instructions.
       { TTI::SK_Transpose, MVT::v8i8,  1 },

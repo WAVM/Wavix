@@ -1,9 +1,8 @@
 //===-- WindowsResource.cpp -------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -259,7 +258,7 @@ WindowsResourceParser::TreeNode::addChild(ArrayRef<UTF16> NameRef,
   std::vector<UTF16> EndianCorrectedName;
   if (sys::IsBigEndianHost) {
     EndianCorrectedName.resize(NameRef.size() + 1);
-    std::copy(NameRef.begin(), NameRef.end(), EndianCorrectedName.begin() + 1);
+    llvm::copy(NameRef, EndianCorrectedName.begin() + 1);
     EndianCorrectedName[0] = UNI_UTF16_BYTE_ORDER_MARK_SWAPPED;
     CorrectedName = makeArrayRef(EndianCorrectedName);
   } else
@@ -501,8 +500,7 @@ void WindowsResourceCOFFWriter::writeFirstSection() {
 void WindowsResourceCOFFWriter::writeSecondSection() {
   // Now write the .rsrc$02 section.
   for (auto const &RawDataEntry : Data) {
-    std::copy(RawDataEntry.begin(), RawDataEntry.end(),
-              BufferStart + CurrentOffset);
+    llvm::copy(RawDataEntry, BufferStart + CurrentOffset);
     CurrentOffset += alignTo(RawDataEntry.size(), sizeof(uint64_t));
   }
 
@@ -672,7 +670,7 @@ void WindowsResourceCOFFWriter::writeDirectoryStringTable() {
     support::endian::write16le(BufferStart + CurrentOffset, Length);
     CurrentOffset += sizeof(uint16_t);
     auto *Start = reinterpret_cast<UTF16 *>(BufferStart + CurrentOffset);
-    std::copy(String.begin(), String.end(), Start);
+    llvm::copy(String, Start);
     CurrentOffset += Length * sizeof(UTF16);
     TotalStringTableSize += Length * sizeof(UTF16) + sizeof(uint16_t);
   }

@@ -1,9 +1,8 @@
 //===- PromoteMemoryToRegister.cpp - Convert allocas to registers ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -82,8 +81,7 @@ bool llvm::isAllocaPromotable(const AllocaInst *AI) {
       if (SI->isVolatile())
         return false;
     } else if (const IntrinsicInst *II = dyn_cast<IntrinsicInst>(U)) {
-      if (II->getIntrinsicID() != Intrinsic::lifetime_start &&
-          II->getIntrinsicID() != Intrinsic::lifetime_end)
+      if (!II->isLifetimeStartOrEnd())
         return false;
     } else if (const BitCastInst *BCI = dyn_cast<BitCastInst>(U)) {
       if (BCI->getType() != Type::getInt8PtrTy(U->getContext(), AS))
@@ -751,14 +749,18 @@ void PromoteMem2Reg::run() {
     // Ok, now we know that all of the PHI nodes are missing entries for some
     // basic blocks.  Start by sorting the incoming predecessors for efficient
     // access.
-    llvm::sort(Preds);
+    auto CompareBBNumbers = [this](BasicBlock *A, BasicBlock *B) {
+      return BBNumbers.lookup(A) < BBNumbers.lookup(B);
+    };
+    llvm::sort(Preds, CompareBBNumbers);
 
     // Now we loop through all BB's which have entries in SomePHI and remove
     // them from the Preds list.
     for (unsigned i = 0, e = SomePHI->getNumIncomingValues(); i != e; ++i) {
       // Do a log(n) search of the Preds list for the entry we want.
       SmallVectorImpl<BasicBlock *>::iterator EntIt = std::lower_bound(
-          Preds.begin(), Preds.end(), SomePHI->getIncomingBlock(i));
+          Preds.begin(), Preds.end(), SomePHI->getIncomingBlock(i),
+          CompareBBNumbers);
       assert(EntIt != Preds.end() && *EntIt == SomePHI->getIncomingBlock(i) &&
              "PHI node has entry for a block which is not a predecessor!");
 

@@ -1,9 +1,8 @@
 //===-- WebAssemblyAddMissingPrototypes.cpp - Fix prototypeless functions -===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -60,7 +59,7 @@ ModulePass *llvm::createWebAssemblyAddMissingPrototypes() {
 }
 
 bool WebAssemblyAddMissingPrototypes::runOnModule(Module &M) {
-  LLVM_DEBUG(dbgs() << "runnning AddMissingPrototypes\n");
+  LLVM_DEBUG(dbgs() << "********** Add Missing Prototypes **********\n");
 
   std::vector<std::pair<Function *, Function *>> Replacements;
 
@@ -90,16 +89,24 @@ bool WebAssemblyAddMissingPrototypes::runOnModule(Module &M) {
     Function *NewF = nullptr;
     for (Use &U : F.uses()) {
       LLVM_DEBUG(dbgs() << "prototype-less use: " << F.getName() << "\n");
-      if (BitCastOperator *BC = dyn_cast<BitCastOperator>(U.getUser())) {
-        FunctionType *DestType =
-            cast<FunctionType>(BC->getDestTy()->getPointerElementType());
-
-        // Create a new function with the correct type
-        NewType = DestType;
-        NewF = Function::Create(NewType, F.getLinkage(), F.getName());
-        NewF->setAttributes(F.getAttributes());
-        NewF->removeFnAttr("no-prototype");
-        break;
+      if (auto *BC = dyn_cast<BitCastOperator>(U.getUser())) {
+        if (auto *DestType = dyn_cast<FunctionType>(
+                BC->getDestTy()->getPointerElementType())) {
+          if (!NewType) {
+            // Create a new function with the correct type
+            NewType = DestType;
+            NewF = Function::Create(NewType, F.getLinkage(), F.getName() + ".fixed_sig");
+            NewF->setAttributes(F.getAttributes());
+            NewF->removeFnAttr("no-prototype");
+            Replacements.emplace_back(&F, NewF);
+          } else {
+            if (NewType != DestType) {
+              report_fatal_error("Prototypeless function used with "
+                                 "conflicting signatures: " +
+                                 F.getName());
+            }
+          }
+        }
       }
     }
 
@@ -109,35 +116,17 @@ bool WebAssemblyAddMissingPrototypes::runOnModule(Module &M) {
                         F.getName() + "\n");
       continue;
     }
-
-    for (Use &U : F.uses()) {
-      if (BitCastOperator *BC = dyn_cast<BitCastOperator>(U.getUser())) {
-        FunctionType *DestType =
-            cast<FunctionType>(BC->getDestTy()->getPointerElementType());
-        if (NewType != DestType) {
-          report_fatal_error(
-              "Prototypeless function used with conflicting signatures: " +
-              F.getName());
-        }
-        BC->replaceAllUsesWith(NewF);
-        Replacements.emplace_back(&F, NewF);
-      } else {
-        dbgs() << *U.getUser()->getType() << "\n";
-#ifndef NDEBUG
-        U.getUser()->dump();
-#endif
-        report_fatal_error(
-            "unexpected use of prototypeless function: " + F.getName() + "\n");
-      }
-    }
   }
 
-  // Finally replace the old function declarations with the new ones
   for (auto &Pair : Replacements) {
-    Function *Old = Pair.first;
-    Function *New = Pair.second;
-    Old->eraseFromParent();
-    M.getFunctionList().push_back(New);
+    Function *OldF = Pair.first;
+    Function *NewF = Pair.second;
+    std::string Name = OldF->getName();
+    M.getFunctionList().push_back(NewF);
+    OldF->replaceAllUsesWith(
+      ConstantExpr::getPointerBitCastOrAddrSpaceCast(NewF, OldF->getType()));
+    OldF->eraseFromParent();
+    NewF->setName(Name);
   }
 
   return !Replacements.empty();

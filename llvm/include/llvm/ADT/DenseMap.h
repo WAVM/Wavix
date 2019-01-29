@@ -1,9 +1,8 @@
 //===- llvm/ADT/DenseMap.h - Dense probed hash table ------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -40,7 +39,32 @@ namespace detail {
 template <typename KeyT, typename ValueT>
 struct DenseMapPair : public std::pair<KeyT, ValueT> {
 
-  using std::pair<KeyT, ValueT>::pair;
+  // FIXME: Switch to inheriting constructors when we drop support for older
+  //        clang versions.
+  // NOTE: This default constructor is declared with '{}' rather than
+  //       '= default' to work around a separate bug in clang-3.8. This can
+  //       also go when we switch to inheriting constructors.
+  DenseMapPair() {}
+
+  DenseMapPair(const KeyT &Key, const ValueT &Value)
+      : std::pair<KeyT, ValueT>(Key, Value) {}
+
+  DenseMapPair(KeyT &&Key, ValueT &&Value)
+      : std::pair<KeyT, ValueT>(std::move(Key), std::move(Value)) {}
+
+  template <typename AltKeyT, typename AltValueT>
+  DenseMapPair(AltKeyT &&AltKey, AltValueT &&AltValue,
+               typename std::enable_if<
+                   std::is_convertible<AltKeyT, KeyT>::value &&
+                   std::is_convertible<AltValueT, ValueT>::value>::type * = 0)
+      : std::pair<KeyT, ValueT>(std::forward<AltKeyT>(AltKey),
+                                std::forward<AltValueT>(AltValue)) {}
+
+  template <typename AltPairT>
+  DenseMapPair(AltPairT &&AltPair,
+               typename std::enable_if<std::is_convertible<
+                   AltPairT, std::pair<KeyT, ValueT>>::value>::type * = 0)
+      : std::pair<KeyT, ValueT>(std::forward<AltPairT>(AltPair)) {}
 
   KeyT &getFirst() { return std::pair<KeyT, ValueT>::first; }
   const KeyT &getFirst() const { return std::pair<KeyT, ValueT>::first; }
@@ -121,7 +145,8 @@ public:
     }
 
     const KeyT EmptyKey = getEmptyKey(), TombstoneKey = getTombstoneKey();
-    if (isPodLike<KeyT>::value && isPodLike<ValueT>::value) {
+    if (is_trivially_copyable<KeyT>::value &&
+        is_trivially_copyable<ValueT>::value) {
       // Use a simpler loop when these are trivial types.
       for (BucketT *P = getBuckets(), *E = getBucketsEnd(); P != E; ++P)
         P->getFirst() = EmptyKey;
@@ -397,7 +422,8 @@ protected:
     setNumEntries(other.getNumEntries());
     setNumTombstones(other.getNumTombstones());
 
-    if (isPodLike<KeyT>::value && isPodLike<ValueT>::value)
+    if (is_trivially_copyable<KeyT>::value &&
+        is_trivially_copyable<ValueT>::value)
       memcpy(reinterpret_cast<void *>(getBuckets()), other.getBuckets(),
              getNumBuckets() * sizeof(BucketT));
     else

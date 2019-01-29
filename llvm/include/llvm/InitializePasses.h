@@ -1,9 +1,8 @@
 //===- llvm/InitializePasses.h - Initialize All Passes ----------*- C++ -*-===//
 //
-//                      The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -65,8 +64,8 @@ void initializeAAEvalLegacyPassPass(PassRegistry&);
 void initializeAAResultsWrapperPassPass(PassRegistry&);
 void initializeADCELegacyPassPass(PassRegistry&);
 void initializeAddDiscriminatorsLegacyPassPass(PassRegistry&);
-void initializeAddressSanitizerModuleLegacyPassPass(PassRegistry &);
-void initializeAddressSanitizerLegacyPassPass(PassRegistry &);
+void initializeAddressSanitizerModulePass(PassRegistry&);
+void initializeAddressSanitizerPass(PassRegistry&);
 void initializeAggressiveInstCombinerLegacyPassPass(PassRegistry&);
 void initializeAliasSetPrinterPass(PassRegistry&);
 void initializeAlignmentFromAssumptionsPass(PassRegistry&);
@@ -85,6 +84,7 @@ void initializeBranchProbabilityInfoWrapperPassPass(PassRegistry&);
 void initializeBranchRelaxationPass(PassRegistry&);
 void initializeBreakCriticalEdgesPass(PassRegistry&);
 void initializeBreakFalseDepsPass(PassRegistry&);
+void initializeCanonicalizeAliasesLegacyPassPass(PassRegistry &);
 void initializeCFGOnlyPrinterLegacyPassPass(PassRegistry&);
 void initializeCFGOnlyViewerLegacyPassPass(PassRegistry&);
 void initializeCFGPrinterLegacyPassPass(PassRegistry&);
@@ -140,6 +140,7 @@ void initializeExpandISelPseudosPass(PassRegistry&);
 void initializeExpandMemCmpPassPass(PassRegistry&);
 void initializeExpandPostRAPass(PassRegistry&);
 void initializeExpandReductionsPass(PassRegistry&);
+void initializeMakeGuardsExplicitLegacyPassPass(PassRegistry&);
 void initializeExternalAAWrapperPassPass(PassRegistry&);
 void initializeFEntryInserterPass(PassRegistry&);
 void initializeFinalizeMachineBundlesPass(PassRegistry&);
@@ -182,6 +183,7 @@ void initializeInstrProfilingLegacyPassPass(PassRegistry&);
 void initializeInstructionCombiningPassPass(PassRegistry&);
 void initializeInstructionSelectPass(PassRegistry&);
 void initializeInterleavedAccessPass(PassRegistry&);
+void initializeInterleavedLoadCombinePass(PassRegistry &);
 void initializeInternalizeLegacyPassPass(PassRegistry&);
 void initializeIntervalPartitionPass(PassRegistry&);
 void initializeJumpThreadingPass(PassRegistry&);
@@ -196,6 +198,7 @@ void initializeLegacyDivergenceAnalysisPass(PassRegistry&);
 void initializeLegacyLICMPassPass(PassRegistry&);
 void initializeLegacyLoopSinkPassPass(PassRegistry&);
 void initializeLegalizerPass(PassRegistry&);
+void initializeGISelCSEAnalysisWrapperPassPass(PassRegistry &);
 void initializeLibCallsShrinkWrapLegacyPassPass(PassRegistry&);
 void initializeLintPass(PassRegistry&);
 void initializeLiveDebugValuesPass(PassRegistry&);
@@ -205,7 +208,7 @@ void initializeLiveRangeShrinkPass(PassRegistry&);
 void initializeLiveRegMatrixPass(PassRegistry&);
 void initializeLiveStacksPass(PassRegistry&);
 void initializeLiveVariablesPass(PassRegistry&);
-void initializeLoadStoreVectorizerPass(PassRegistry&);
+void initializeLoadStoreVectorizerLegacyPassPass(PassRegistry&);
 void initializeLoaderPassPass(PassRegistry&);
 void initializeLocalStackSlotPassPass(PassRegistry&);
 void initializeLocalizerPass(PassRegistry&);
@@ -271,7 +274,7 @@ void initializeMemDerefPrinterPass(PassRegistry&);
 void initializeMemoryDependenceWrapperPassPass(PassRegistry&);
 void initializeMemorySSAPrinterLegacyPassPass(PassRegistry&);
 void initializeMemorySSAWrapperPassPass(PassRegistry&);
-void initializeMemorySanitizerPass(PassRegistry&);
+void initializeMemorySanitizerLegacyPassPass(PassRegistry&);
 void initializeMergeFunctionsPass(PassRegistry&);
 void initializeMergeICmpsPass(PassRegistry&);
 void initializeMergedLoadStoreMotionLegacyPassPass(PassRegistry&);
@@ -354,7 +357,7 @@ void initializeSampleProfileLoaderLegacyPassPass(PassRegistry&);
 void initializeSanitizerCoverageModulePass(PassRegistry&);
 void initializeScalarEvolutionWrapperPassPass(PassRegistry&);
 void initializeScalarizeMaskedMemIntrinPass(PassRegistry&);
-void initializeScalarizerPass(PassRegistry&);
+void initializeScalarizerLegacyPassPass(PassRegistry&);
 void initializeScavengerTestPass(PassRegistry&);
 void initializeScopedNoAliasAAWrapperPassPass(PassRegistry&);
 void initializeSeparateConstOffsetFromGEPPass(PassRegistry&);
@@ -371,6 +374,8 @@ void initializeSpillPlacementPass(PassRegistry&);
 void initializeStackColoringPass(PassRegistry&);
 void initializeStackMapLivenessPass(PassRegistry&);
 void initializeStackProtectorPass(PassRegistry&);
+void initializeStackSafetyGlobalInfoWrapperPassPass(PassRegistry &);
+void initializeStackSafetyInfoWrapperPassPass(PassRegistry &);
 void initializeStackSlotColoringPass(PassRegistry&);
 void initializeStraightLineStrengthReducePass(PassRegistry&);
 void initializeStripDeadDebugInfoPass(PassRegistry&);
@@ -386,7 +391,7 @@ void initializeTailDuplicatePass(PassRegistry&);
 void initializeTargetLibraryInfoWrapperPassPass(PassRegistry&);
 void initializeTargetPassConfigPass(PassRegistry&);
 void initializeTargetTransformInfoWrapperPassPass(PassRegistry&);
-void initializeThreadSanitizerPass(PassRegistry&);
+void initializeThreadSanitizerLegacyPassPass(PassRegistry&);
 void initializeTwoAddressInstructionPassPass(PassRegistry&);
 void initializeTypeBasedAAWrapperPassPass(PassRegistry&);
 void initializeUnifyFunctionExitNodesPass(PassRegistry&);
@@ -396,6 +401,7 @@ void initializeUnreachableMachineBlockElimPass(PassRegistry&);
 void initializeVerifierLegacyPassPass(PassRegistry&);
 void initializeVirtRegMapPass(PassRegistry&);
 void initializeVirtRegRewriterPass(PassRegistry&);
+void initializeWarnMissedTransformationsLegacyPass(PassRegistry &);
 void initializeWasmEHPreparePass(PassRegistry&);
 void initializeWholeProgramDevirtPass(PassRegistry&);
 void initializeWinEHPreparePass(PassRegistry&);

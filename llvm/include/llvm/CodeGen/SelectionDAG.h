@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/SelectionDAG.h - InstSelection DAG ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -308,6 +307,9 @@ public:
         : DAGUpdateListener(DAG), Callback(std::move(Callback)) {}
 
     void NodeDeleted(SDNode *N, SDNode *E) override { Callback(N, E); }
+
+   private:
+    virtual void anchor();
   };
 
   /// When true, additional steps are taken to
@@ -786,24 +788,6 @@ public:
   /// value assuming it was the smaller SrcTy value.
   SDValue getZeroExtendInReg(SDValue Op, const SDLoc &DL, EVT VT);
 
-  /// Return an operation which will any-extend the low lanes of the operand
-  /// into the specified vector type. For example,
-  /// this can convert a v16i8 into a v4i32 by any-extending the low four
-  /// lanes of the operand from i8 to i32.
-  SDValue getAnyExtendVectorInReg(SDValue Op, const SDLoc &DL, EVT VT);
-
-  /// Return an operation which will sign extend the low lanes of the operand
-  /// into the specified vector type. For example,
-  /// this can convert a v16i8 into a v4i32 by sign extending the low four
-  /// lanes of the operand from i8 to i32.
-  SDValue getSignExtendVectorInReg(SDValue Op, const SDLoc &DL, EVT VT);
-
-  /// Return an operation which will zero extend the low lanes of the operand
-  /// into the specified vector type. For example,
-  /// this can convert a v16i8 into a v4i32 by zero extending the low four
-  /// lanes of the operand from i8 to i32.
-  SDValue getZeroExtendVectorInReg(SDValue Op, const SDLoc &DL, EVT VT);
-
   /// Convert Op, which must be of integer type, to the integer type VT,
   /// by using an extension appropriate for the target's
   /// BooleanContent for type OpVT or truncating it.
@@ -947,40 +931,44 @@ public:
                           Type *SizeTy, unsigned ElemSz, bool isTailCall,
                           MachinePointerInfo DstPtrInfo);
 
-  /// Helper function to make it easier to build SetCC's if you just
-  /// have an ISD::CondCode instead of an SDValue.
-  ///
+  /// Helper function to make it easier to build SetCC's if you just have an
+  /// ISD::CondCode instead of an SDValue.
   SDValue getSetCC(const SDLoc &DL, EVT VT, SDValue LHS, SDValue RHS,
                    ISD::CondCode Cond) {
     assert(LHS.getValueType().isVector() == RHS.getValueType().isVector() &&
-      "Cannot compare scalars to vectors");
+           "Cannot compare scalars to vectors");
     assert(LHS.getValueType().isVector() == VT.isVector() &&
-      "Cannot compare scalars to vectors");
+           "Cannot compare scalars to vectors");
     assert(Cond != ISD::SETCC_INVALID &&
-        "Cannot create a setCC of an invalid node.");
+           "Cannot create a setCC of an invalid node.");
     return getNode(ISD::SETCC, DL, VT, LHS, RHS, getCondCode(Cond));
   }
 
-  /// Helper function to make it easier to build Select's if you just
-  /// have operands and don't want to check for vector.
+  /// Helper function to make it easier to build Select's if you just have
+  /// operands and don't want to check for vector.
   SDValue getSelect(const SDLoc &DL, EVT VT, SDValue Cond, SDValue LHS,
                     SDValue RHS) {
     assert(LHS.getValueType() == RHS.getValueType() &&
            "Cannot use select on differing types");
     assert(VT.isVector() == LHS.getValueType().isVector() &&
            "Cannot mix vectors and scalars");
-    return getNode(Cond.getValueType().isVector() ? ISD::VSELECT : ISD::SELECT, DL, VT,
-                   Cond, LHS, RHS);
+    auto Opcode = Cond.getValueType().isVector() ? ISD::VSELECT : ISD::SELECT;
+    return getNode(Opcode, DL, VT, Cond, LHS, RHS);
   }
 
-  /// Helper function to make it easier to build SelectCC's if you
-  /// just have an ISD::CondCode instead of an SDValue.
-  ///
+  /// Helper function to make it easier to build SelectCC's if you just have an
+  /// ISD::CondCode instead of an SDValue.
   SDValue getSelectCC(const SDLoc &DL, SDValue LHS, SDValue RHS, SDValue True,
                       SDValue False, ISD::CondCode Cond) {
-    return getNode(ISD::SELECT_CC, DL, True.getValueType(),
-                   LHS, RHS, True, False, getCondCode(Cond));
+    return getNode(ISD::SELECT_CC, DL, True.getValueType(), LHS, RHS, True,
+                   False, getCondCode(Cond));
   }
+
+  /// Try to simplify a select/vselect into 1 of its operands or a constant.
+  SDValue simplifySelect(SDValue Cond, SDValue TVal, SDValue FVal);
+
+  /// Try to simplify a shift into 1 of its operands or a constant.
+  SDValue simplifyShift(SDValue X, SDValue Y);
 
   /// VAArg produces a result and token chain, and takes a pointer
   /// and a source value as input.
@@ -1142,6 +1130,13 @@ public:
   /// Expand the specified \c ISD::VACOPY node as the Legalize pass would.
   SDValue expandVACopy(SDNode *Node);
 
+  /// Returs an GlobalAddress of the function from the current module with
+  /// name matching the given ExternalSymbol. Additionally can provide the
+  /// matched function.
+  /// Panics the function doesn't exists.
+  SDValue getSymbolFunctionGlobalAddress(SDValue Op,
+                                         Function **TargetFunction = nullptr);
+
   /// *Mutate* the specified node in-place to have the
   /// specified operands.  If the resultant node already exists in the DAG,
   /// this does not modify the specified node, instead it returns the node that
@@ -1157,6 +1152,11 @@ public:
   SDNode *UpdateNodeOperands(SDNode *N, SDValue Op1, SDValue Op2,
                                SDValue Op3, SDValue Op4, SDValue Op5);
   SDNode *UpdateNodeOperands(SDNode *N, ArrayRef<SDValue> Ops);
+
+  /// Creates a new TokenFactor containing \p Vals. If \p Vals contains 64k
+  /// values or more, move values into new TokenFactors in 64k-1 blocks, until
+  /// the final TokenFactor has less than 64k operands.
+  SDValue getTokenFactor(const SDLoc &DL, SmallVectorImpl<SDValue> &Vals);
 
   /// *Mutate* the specified machine node's memory references to the provided
   /// list.
@@ -1362,21 +1362,20 @@ public:
   /// with this SelectionDAG.
   bool hasDebugValues() const { return !DbgInfo->empty(); }
 
-  SDDbgInfo::DbgIterator DbgBegin() { return DbgInfo->DbgBegin(); }
-  SDDbgInfo::DbgIterator DbgEnd()   { return DbgInfo->DbgEnd(); }
+  SDDbgInfo::DbgIterator DbgBegin() const { return DbgInfo->DbgBegin(); }
+  SDDbgInfo::DbgIterator DbgEnd() const  { return DbgInfo->DbgEnd(); }
 
-  SDDbgInfo::DbgIterator ByvalParmDbgBegin() {
+  SDDbgInfo::DbgIterator ByvalParmDbgBegin() const {
     return DbgInfo->ByvalParmDbgBegin();
   }
-
-  SDDbgInfo::DbgIterator ByvalParmDbgEnd()   {
+  SDDbgInfo::DbgIterator ByvalParmDbgEnd() const {
     return DbgInfo->ByvalParmDbgEnd();
   }
 
-  SDDbgInfo::DbgLabelIterator DbgLabelBegin() {
+  SDDbgInfo::DbgLabelIterator DbgLabelBegin() const {
     return DbgInfo->DbgLabelBegin();
   }
-  SDDbgInfo::DbgLabelIterator DbgLabelEnd() {
+  SDDbgInfo::DbgLabelIterator DbgLabelEnd() const {
     return DbgInfo->DbgLabelEnd();
   }
 
@@ -1445,18 +1444,6 @@ public:
   /// TargetLowering class to allow target nodes to be understood.
   KnownBits computeKnownBits(SDValue Op, const APInt &DemandedElts,
                              unsigned Depth = 0) const;
-
-  /// \copydoc SelectionDAG::computeKnownBits(SDValue,unsigned)
-  void computeKnownBits(SDValue Op, KnownBits &Known,
-                        unsigned Depth = 0) const {
-    Known = computeKnownBits(Op, Depth);
-  }
-
-  /// \copydoc SelectionDAG::computeKnownBits(SDValue,const APInt&,unsigned)
-  void computeKnownBits(SDValue Op, KnownBits &Known, const APInt &DemandedElts,
-                        unsigned Depth = 0) const {
-    Known = computeKnownBits(Op, DemandedElts, Depth);
-  }
 
   /// Used to represent the possible overflow behavior of an operation.
   /// Never: the operation cannot overflow.
@@ -1528,6 +1515,18 @@ public:
   /// Return true if A and B have no common bits set. As an example, this can
   /// allow an 'add' to be transformed into an 'or'.
   bool haveNoCommonBitsSet(SDValue A, SDValue B) const;
+
+  /// Test whether \p V has a splatted value for all the demanded elements.
+  ///
+  /// On success \p UndefElts will indicate the elements that have UNDEF
+  /// values instead of the splat value, this is only guaranteed to be correct
+  /// for \p DemandedElts.
+  ///
+  /// NOTE: The function will return true for a demanded splat of UNDEF values.
+  bool isSplatValue(SDValue V, const APInt &DemandedElts, APInt &UndefElts);
+
+  /// Test whether \p V has a splatted value.
+  bool isSplatValue(SDValue V, bool AllowUndefs = false);
 
   /// Match a binop + shuffle pyramid that represents a horizontal reduction
   /// over the elements of a vector starting from the EXTRACT_VECTOR_ELT node /p

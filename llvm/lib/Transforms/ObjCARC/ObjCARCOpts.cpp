@@ -1,9 +1,8 @@
 //===- ObjCARCOpts.cpp - ObjC ARC Optimization ----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -600,6 +599,17 @@ ObjCARCOpt::OptimizeRetainRVCall(Function &F, Instruction *RetainRV) {
     }
   }
 
+  // Track PHIs which are equivalent to our Arg.
+  SmallDenseSet<const Value*, 2> EquivalentArgs;
+  EquivalentArgs.insert(Arg);
+
+  // Add PHIs that are equivalent to Arg to ArgUsers.
+  if (const PHINode *PN = dyn_cast<PHINode>(Arg)) {
+    SmallVector<const Value *, 2> ArgUsers;
+    getEquivalentPHIs(*PN, ArgUsers);
+    EquivalentArgs.insert(ArgUsers.begin(), ArgUsers.end());
+  }
+
   // Check for being preceded by an objc_autoreleaseReturnValue on the same
   // pointer. In this case, we can delete the pair.
   BasicBlock::iterator I = RetainRV->getIterator(),
@@ -609,7 +619,7 @@ ObjCARCOpt::OptimizeRetainRVCall(Function &F, Instruction *RetainRV) {
       --I;
     while (I != Begin && IsNoopInstruction(&*I));
     if (GetBasicARCInstKind(&*I) == ARCInstKind::AutoreleaseRV &&
-        GetArgRCIdentityRoot(&*I) == Arg) {
+        EquivalentArgs.count(GetArgRCIdentityRoot(&*I))) {
       Changed = true;
       ++NumPeeps;
 

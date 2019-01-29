@@ -1099,20 +1099,15 @@ define <2 x double> @test69(<2 x i16> %a) {
   ret <2 x double> %w
 
 ; CHECK-LABEL: @test69
-; CHECK-DAG: lfiwax f0, 0, r3
-; CHECK-DAG: lfiwax f1, 0, r3
-; CHECK-DAG: xscvsxddp f0, f0
-; CHECK-DAG: xscvsxddp f1, f1
-; CHECK: xxmrghd v2, vs1, vs0
+; CHECK-DAG: lxvd2x v2, 0, r3
+; CHECK-DAG: xvcvsxddp v2, v2
 ; CHECK: blr
 
 ; CHECK-LE-LABEL: @test69
-; CHECK-LE: mfvsrd
-; CHECK-LE: mtvsrwa
-; CHECK-LE: mtvsrwa
-; CHECK-LE: xscvsxddp
-; CHECK-LE: xscvsxddp
-; CHECK-LE: xxmrghd
+; CHECK-LE: vperm
+; CHECK-LE: vsld
+; CHECK-LE: vsrad
+; CHECK-LE: xvcvsxddp v2, v2
 ; CHECK-LE: blr
 }
 
@@ -1122,20 +1117,15 @@ define <2 x double> @test70(<2 x i8> %a) {
   ret <2 x double> %w
 
 ; CHECK-LABEL: @test70
-; CHECK-DAG: lfiwax f0, 0, r3
-; CHECK-DAG: lfiwax f1, 0, r3
-; CHECK-DAG: xscvsxddp f0, f0
-; CHECK-DAG: xscvsxddp f1, f1
-; CHECK: xxmrghd v2, vs1, vs0
+; CHECK-DAG: lxvd2x v2, 0, r3
+; CHECK-DAG: xvcvsxddp v2, v2
 ; CHECK: blr
 
 ; CHECK-LE-LABEL: @test70
-; CHECK-LE: mfvsrd
-; CHECK-LE: mtvsrwa
-; CHECK-LE: mtvsrwa
-; CHECK-LE: xscvsxddp
-; CHECK-LE: xscvsxddp
-; CHECK-LE: xxmrghd
+; CHECK-LE: vperm
+; CHECK-LE: vsld
+; CHECK-LE: vsrad
+; CHECK-LE: xvcvsxddp v2, v2
 ; CHECK-LE: blr
 }
 
@@ -1211,51 +1201,3 @@ entry:
 ; CHECK-LE: xscmpudp cr0, f3, f4
 ; CHECK-LE: beqlr cr0
 }
-
-; Function Attrs: nounwind readnone
-define <4 x i32> @test83(i8* %a) {
-  entry:
-    %0 = tail call <4 x i32> @llvm.ppc.vsx.lxvw4x.be(i8* %a)
-      ret <4 x i32> %0
-; CHECK-LABEL: test83
-; CHECK: lxvw4x v2, 0, r3
-; CHECK: blr
-}
-; Function Attrs: nounwind readnone
-declare <4 x i32> @llvm.ppc.vsx.lxvw4x.be(i8*)
-
-; Function Attrs: nounwind readnone
-define <2 x double> @test84(i8* %a) {
-  entry:
-    %0 = tail call <2 x double> @llvm.ppc.vsx.lxvd2x.be(i8* %a)
-      ret <2 x double> %0
-; CHECK-LABEL: test84
-; CHECK: lxvd2x v2, 0, r3
-; CHECK: blr
-}
-; Function Attrs: nounwind readnone
-declare <2 x double> @llvm.ppc.vsx.lxvd2x.be(i8*)
-
-; Function Attrs: nounwind readnone
-define void @test85(<4 x i32> %a, i8* %b) {
-  entry:
-    tail call void @llvm.ppc.vsx.stxvw4x.be(<4 x i32> %a, i8* %b)
-    ret void
-; CHECK-LABEL: test85
-; CHECK: stxvw4x v2, 0, r5
-; CHECK: blr
-}
-; Function Attrs: nounwind readnone
-declare void @llvm.ppc.vsx.stxvw4x.be(<4 x i32>, i8*)
-
-; Function Attrs: nounwind readnone
-define void @test86(<2 x double> %a, i8* %b) {
-  entry:
-    tail call void @llvm.ppc.vsx.stxvd2x.be(<2 x double> %a, i8* %b)
-    ret void
-; CHECK-LABEL: test86
-; CHECK: stxvd2x v2, 0, r5
-; CHECK: blr
-}
-; Function Attrs: nounwind readnone
-declare void @llvm.ppc.vsx.stxvd2x.be(<2 x double>, i8*)

@@ -1,9 +1,8 @@
 //===-- Assembler.cpp -------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -142,8 +141,10 @@ llvm::BitVector getFunctionReservedRegs(const llvm::TargetMachine &TM) {
       llvm::make_unique<llvm::LLVMContext>();
   std::unique_ptr<llvm::Module> Module =
       createModule(Context, TM.createDataLayout());
+  // TODO: This only works for targets implementing LLVMTargetMachine.
+  const LLVMTargetMachine &LLVMTM = static_cast<const LLVMTargetMachine&>(TM);
   std::unique_ptr<llvm::MachineModuleInfo> MMI =
-      llvm::make_unique<llvm::MachineModuleInfo>(&TM);
+      llvm::make_unique<llvm::MachineModuleInfo>(&LLVMTM);
   llvm::MachineFunction &MF =
       createVoidVoidPtrMachineFunction(FunctionID, Module.get(), MMI.get());
   // Saving reserved registers for client.

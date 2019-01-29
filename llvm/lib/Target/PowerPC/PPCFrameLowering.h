@@ -1,9 +1,8 @@
 //===-- PPCFrameLowering.h - Define frame lowering for PowerPC --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -99,6 +98,13 @@ public:
                                  MachineBasicBlock::iterator MI,
                                  const std::vector<CalleeSavedInfo> &CSI,
                                  const TargetRegisterInfo *TRI) const override;
+  /// This function will assign callee saved gprs to volatile vector registers
+  /// for prologue spills when applicable. It returns false if there are any
+  /// registers which were not spilled to volatile vector registers.
+  bool
+  assignCalleeSavedSpillSlots(MachineFunction &MF,
+                              const TargetRegisterInfo *TRI,
+                              std::vector<CalleeSavedInfo> &CSI) const override;
 
   MachineBasicBlock::iterator
   eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,

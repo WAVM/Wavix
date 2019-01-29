@@ -1,9 +1,8 @@
 //===-- ARMInstrThumb.td - Thumb support for ARM -----------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -181,6 +180,19 @@ def t_addrmode_pc : MemOperand {
 def t_addrmode_rr_asm_operand : AsmOperandClass { let Name = "MemThumbRR"; }
 def t_addrmode_rr : MemOperand,
                     ComplexPattern<i32, 2, "SelectThumbAddrModeRR", []> {
+  let EncoderMethod = "getThumbAddrModeRegRegOpValue";
+  let PrintMethod = "printThumbAddrModeRROperand";
+  let DecoderMethod = "DecodeThumbAddrModeRR";
+  let ParserMatchClass = t_addrmode_rr_asm_operand;
+  let MIOperandInfo = (ops tGPR:$base, tGPR:$offsreg);
+}
+
+// t_addrmode_rr_sext := reg + reg
+//
+// This is similar to t_addrmode_rr, but uses different heuristics for
+// ldrsb/ldrsh.
+def t_addrmode_rr_sext : MemOperand,
+                    ComplexPattern<i32, 2, "SelectThumbAddrModeRRSext", []> {
   let EncoderMethod = "getThumbAddrModeRegRegOpValue";
   let PrintMethod = "printThumbAddrModeRROperand";
   let DecoderMethod = "DecodeThumbAddrModeRR";
@@ -732,17 +744,17 @@ defm tLDRH : thumb_ld_rr_ri_enc<0b101, 0b1000, t_addrmode_rr,
 
 let AddedComplexity = 10 in
 def tLDRSB :                    // A8.6.80
-  T1pILdStEncode<0b011, (outs tGPR:$Rt), (ins t_addrmode_rr:$addr),
+  T1pILdStEncode<0b011, (outs tGPR:$Rt), (ins t_addrmode_rr_sext:$addr),
                  AddrModeT1_1, IIC_iLoad_bh_r,
                  "ldrsb", "\t$Rt, $addr",
-                 [(set tGPR:$Rt, (sextloadi8 t_addrmode_rr:$addr))]>;
+                 [(set tGPR:$Rt, (sextloadi8 t_addrmode_rr_sext:$addr))]>;
 
 let AddedComplexity = 10 in
 def tLDRSH :                    // A8.6.84
-  T1pILdStEncode<0b111, (outs tGPR:$Rt), (ins t_addrmode_rr:$addr),
+  T1pILdStEncode<0b111, (outs tGPR:$Rt), (ins t_addrmode_rr_sext:$addr),
                  AddrModeT1_2, IIC_iLoad_bh_r,
                  "ldrsh", "\t$Rt, $addr",
-                 [(set tGPR:$Rt, (sextloadi16 t_addrmode_rr:$addr))]>;
+                 [(set tGPR:$Rt, (sextloadi16 t_addrmode_rr_sext:$addr))]>;
 
 
 def tSTRspi : T1pIs<(outs), (ins tGPR:$Rt, t_addrmode_sp:$addr), IIC_iStore_i,
@@ -781,7 +793,7 @@ defm tSTRH : thumb_st_rr_ri_enc<0b001, 0b1000, t_addrmode_rr,
 // These require base address to be written back or one of the loaded regs.
 let hasSideEffects = 0 in {
 
-let mayLoad = 1, hasExtraDefRegAllocReq = 1 in
+let mayLoad = 1, hasExtraDefRegAllocReq = 1, variadicOpsAreDefs = 1 in
 def tLDMIA : T1I<(outs), (ins tGPR:$Rn, pred:$p, reglist:$regs, variable_ops),
         IIC_iLoad_m, "ldm${p}\t$Rn, $regs", []>, T1Encoding<{1,1,0,0,1,?}> {
   bits<3> Rn;
@@ -826,7 +838,8 @@ def : InstAlias<"ldm${p} $Rn!, $regs",
                 (tLDMIA tGPR:$Rn, pred:$p, reglist:$regs), 0>,
         Requires<[IsThumb, IsThumb1Only]>;
 
-let mayLoad = 1, Uses = [SP], Defs = [SP], hasExtraDefRegAllocReq = 1 in
+let mayLoad = 1, Uses = [SP], Defs = [SP], hasExtraDefRegAllocReq = 1,
+    variadicOpsAreDefs = 1 in
 def tPOP : T1I<(outs), (ins pred:$p, reglist:$regs, variable_ops),
                IIC_iPop,
                "pop${p}\t$regs", []>,
@@ -1343,7 +1356,19 @@ let hasPostISelHook = 1, Defs = [CPSR] in {
                                                            tGPR:$Rm))]>,
                 Requires<[IsThumb1Only]>,
                 Sched<[WriteALU]>;
+
+  def tRSBS   : tPseudoInst<(outs tGPR:$Rd), (ins tGPR:$Rn),
+                            2, IIC_iALUr,
+                            [(set tGPR:$Rd, CPSR, (ARMsubc 0, tGPR:$Rn))]>,
+                Requires<[IsThumb1Only]>,
+                Sched<[WriteALU]>;
 }
+
+
+def : T1Pat<(ARMsubs tGPR:$Rn, tGPR:$Rm), (tSUBSrr $Rn, $Rm)>;
+def : T1Pat<(ARMsubs tGPR:$Rn, imm0_7:$imm3), (tSUBSi3 $Rn, imm0_7:$imm3)>;
+def : T1Pat<(ARMsubs tGPR:$Rn, imm0_255:$imm8), (tSUBSi8 $Rn, imm0_255:$imm8)>;
+
 
 // Sign-extend byte
 def tSXTB :                     // A8.6.222
@@ -1379,6 +1404,9 @@ def tUDF : TI<(outs), (ins imm0_255:$imm8), IIC_Br, "udf\t$imm8",
   let Inst{11-8} = 0b1110;
   let Inst{7-0} = imm8;
 }
+
+def : Pat<(debugtrap), (tBKPT 0)>, Requires<[IsThumb, HasV5T]>;
+def : Pat<(debugtrap), (tUDF 254)>, Requires<[IsThumb, NoV5T]>;
 
 def t__brkdiv0 : TI<(outs), (ins), IIC_Br, "__brkdiv0",
                     [(int_arm_undefined 249)]>, Encoding16,

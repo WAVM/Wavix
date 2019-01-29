@@ -1,9 +1,8 @@
 //===-- llvm/CodeGen/TargetFrameLowering.h ----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -207,8 +206,11 @@ public:
     return false;
   }
 
-  /// Return true if the target needs to disable frame pointer elimination.
-  virtual bool noFramePointerElim(const MachineFunction &MF) const;
+  /// Return true if the target wants to keep the frame pointer regardless of
+  /// the function attribute "frame-pointer".
+  virtual bool keepFramePointer(const MachineFunction &MF) const {
+    return false;
+  }
 
   /// hasFP - Return true if the specified function should have a dedicated
   /// frame pointer register. For most targets this is true only if the function

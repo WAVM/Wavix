@@ -1,9 +1,9 @@
 /*===-- llvm_ocaml.c - LLVM OCaml Glue --------------------------*- C++ -*-===*\
 |*                                                                            *|
-|*                     The LLVM Compiler Infrastructure                       *|
-|*                                                                            *|
-|* This file is distributed under the University of Illinois Open Source      *|
-|* License. See LICENSE.TXT for details.                                      *|
+|* Part of the LLVM Project, under the Apache License v2.0 with LLVM          *|
+|* Exceptions.                                                                *|
+|* See https://llvm.org/LICENSE.txt for license information.                  *|
+|* SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception                    *|
 |*                                                                            *|
 |*===----------------------------------------------------------------------===*|
 |*                                                                            *|
@@ -483,9 +483,9 @@ CAMLprim value llvm_struct_set_body(LLVMTypeRef Ty,
 CAMLprim value llvm_struct_name(LLVMTypeRef Ty)
 {
   CAMLparam0();
+  CAMLlocal1(result);
   const char *C = LLVMGetStructName(Ty);
   if (C) {
-    CAMLlocal1(result);
     result = caml_alloc_small(1, 0);
     Store_field(result, 0, caml_copy_string(C));
     CAMLreturn(result);
@@ -636,6 +636,7 @@ enum ValueKind {
 
 CAMLprim value llvm_classify_value(LLVMValueRef Val) {
   CAMLparam0();
+  CAMLlocal1(result);
   if (!Val)
     CAMLreturn(Val_int(NullValue));
   if (LLVMIsAConstant(Val)) {
@@ -652,7 +653,6 @@ CAMLprim value llvm_classify_value(LLVMValueRef Val) {
     DEFINE_CASE(Val, ConstantVector);
   }
   if (LLVMIsAInstruction(Val)) {
-    CAMLlocal1(result);
     result = caml_alloc_small(1, 0);
     Store_field(result, 0, Val_int(LLVMGetInstructionOpcode(Val)));
     CAMLreturn(result);
@@ -822,12 +822,11 @@ CAMLprim LLVMValueRef llvm_mdnull(LLVMContextRef C) {
 /* llvalue -> string option */
 CAMLprim value llvm_get_mdstring(LLVMValueRef V) {
   CAMLparam0();
+  CAMLlocal2(Option, Str);
   const char *S;
   unsigned Len;
 
   if ((S = LLVMGetMDString(V, &Len))) {
-    CAMLlocal2(Option, Str);
-
     Str = caml_alloc_string(Len);
     memcpy(String_val(Str), S, Len);
     Option = alloc(1,0);

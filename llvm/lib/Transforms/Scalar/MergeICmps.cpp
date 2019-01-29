@@ -1,9 +1,8 @@
 //===- MergeICmps.cpp - Optimize chains of integer comparisons ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -98,7 +97,7 @@ BCEAtom visitICmpLoadOperand(Value *const Val) {
     Value *const Addr = LoadI->getOperand(0);
     if (auto *const GEP = dyn_cast<GetElementPtrInst>(Addr)) {
       LLVM_DEBUG(dbgs() << "GEP\n");
-      if (LoadI->isUsedOutsideOfBlock(LoadI->getParent())) {
+      if (GEP->isUsedOutsideOfBlock(LoadI->getParent())) {
         LLVM_DEBUG(dbgs() << "used outside of block\n");
         return {};
       }
@@ -283,8 +282,9 @@ BCECmpBlock visitICmp(const ICmpInst *const CmpI,
     if (!Lhs.Base()) return {};
     auto Rhs = visitICmpLoadOperand(CmpI->getOperand(1));
     if (!Rhs.Base()) return {};
+    const auto &DL = CmpI->getModule()->getDataLayout();
     return BCECmpBlock(std::move(Lhs), std::move(Rhs),
-                       CmpI->getOperand(0)->getType()->getScalarSizeInBits());
+                       DL.getTypeSizeInBits(CmpI->getOperand(0)->getType()));
   }
   return {};
 }

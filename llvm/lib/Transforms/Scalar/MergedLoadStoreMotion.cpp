@@ -1,9 +1,8 @@
 //===- MergedLoadStoreMotion.cpp - merge and hoist/sink load/stores -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -211,6 +210,7 @@ PHINode *MergedLoadStoreMotion::getPHIOperand(BasicBlock *BB, StoreInst *S0,
 
   auto *NewPN = PHINode::Create(Opd1->getType(), 2, Opd2->getName() + ".sink",
                                 &BB->front());
+  NewPN->applyMergedLocation(S0->getDebugLoc(), S1->getDebugLoc());
   NewPN->addIncoming(Opd1, S0->getParent());
   NewPN->addIncoming(Opd2, S1->getParent());
   return NewPN;

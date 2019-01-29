@@ -1,9 +1,8 @@
 //===-- llvm/CodeGen/DwarfUnit.cpp - Dwarf Type and Compile Units ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1361,7 +1360,7 @@ void DwarfUnit::constructEnumTypeDIE(DIE &Buffer, const DICompositeType *CTy) {
   if (DTy) {
     if (DD->getDwarfVersion() >= 3)
       addType(Buffer, DTy);
-    if (DD->getDwarfVersion() >= 4 && (CTy->getFlags() & DINode::FlagFixedEnum))
+    if (DD->getDwarfVersion() >= 4 && (CTy->getFlags() & DINode::FlagEnumClass))
       addFlag(Buffer, dwarf::DW_AT_enum_class);
   }
 
@@ -1553,7 +1552,14 @@ DIE *DwarfUnit::getOrCreateStaticMemberDIE(const DIDerivedType *DT) {
 void DwarfUnit::emitCommonHeader(bool UseOffsets, dwarf::UnitType UT) {
   // Emit size of content not including length itself
   Asm->OutStreamer->AddComment("Length of Unit");
-  Asm->emitInt32(getHeaderSize() + getUnitDie().getSize());
+  if (!DD->useSectionsAsReferences()) {
+    StringRef Prefix = isDwoUnit() ? "debug_info_dwo_" : "debug_info_";
+    MCSymbol *BeginLabel = Asm->createTempSymbol(Prefix + "start");
+    EndLabel = Asm->createTempSymbol(Prefix + "end");
+    Asm->EmitLabelDifference(EndLabel, BeginLabel, 4);
+    Asm->OutStreamer->EmitLabel(BeginLabel);
+  } else
+    Asm->emitInt32(getHeaderSize() + getUnitDie().getSize());
 
   Asm->OutStreamer->AddComment("DWARF version number");
   unsigned Version = DD->getDwarfVersion();
@@ -1656,11 +1662,11 @@ void DwarfUnit::addRnglistsBase() {
                   TLOF.getDwarfRnglistsSection()->getBeginSymbol());
 }
 
-void DwarfUnit::addAddrTableBase() {
+void DwarfUnit::addLoclistsBase() {
+  assert(DD->getDwarfVersion() >= 5 &&
+         "DW_AT_loclists_base requires DWARF version 5 or later");
   const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
-  MCSymbol *Label = DD->getAddressPool().getLabel();
-  addSectionLabel(getUnitDie(),
-                  getDwarfVersion() >= 5 ? dwarf::DW_AT_addr_base
-                                         : dwarf::DW_AT_GNU_addr_base,
-                  Label, TLOF.getDwarfAddrSection()->getBeginSymbol());
+  addSectionLabel(getUnitDie(), dwarf::DW_AT_loclists_base,
+                  DU->getLoclistsTableBaseSym(),
+                  TLOF.getDwarfLoclistsSection()->getBeginSymbol());
 }

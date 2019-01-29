@@ -1,9 +1,8 @@
 //===-- SIInstrFormats.td - SI Instruction Encodings ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -121,6 +120,10 @@ class InstSI <dag outs, dag ins, string asm = "",
   // This bit indicates that this is a D16 buffer instruction.
   field bit D16Buf = 0;
 
+  // This bit indicates that this uses the floating point double precision
+  // rounding mode flags
+  field bit FPDPRounding = 0;
+
   // These need to be kept in sync with the enum in SIInstrFlags.
   let TSFlags{0} = SALU;
   let TSFlags{1} = VALU;
@@ -177,6 +180,8 @@ class InstSI <dag outs, dag ins, string asm = "",
   let TSFlags{49} = IsPacked;
 
   let TSFlags{50} = D16Buf;
+
+  let TSFlags{51} = FPDPRounding;
 
   let SchedRW = [Write32Bit];
 

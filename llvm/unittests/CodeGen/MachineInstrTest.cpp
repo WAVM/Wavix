@@ -1,9 +1,8 @@
 //===- MachineInstrTest.cpp -----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -257,8 +256,8 @@ TEST(MachineInstrPrintingTest, DebugLocPrinting) {
   LLVMContext Ctx;
   DIFile *DIF = DIFile::getDistinct(Ctx, "filename", "");
   DISubprogram *DIS = DISubprogram::getDistinct(
-      Ctx, nullptr, "", "", DIF, 0, nullptr, false, false, 0, nullptr, 0, 0, 0,
-      DINode::FlagZero, false, nullptr);
+      Ctx, nullptr, "", "", DIF, 0, nullptr, 0, nullptr, 0, 0, DINode::FlagZero,
+      DISubprogram::SPFlagZero, nullptr);
   DILocation *DIL = DILocation::get(Ctx, 1, 5, DIS);
   DebugLoc DL(DIL);
   MachineInstr *MI = MF->CreateMachineInstr(MCID, DL);
@@ -272,5 +271,7 @@ TEST(MachineInstrPrintingTest, DebugLocPrinting) {
   ASSERT_TRUE(
       StringRef(OS.str()).endswith("filename:1:5"));
 }
+
+static_assert(is_trivially_copyable<MCOperand>::value, "trivially copyable");
 
 } // end namespace

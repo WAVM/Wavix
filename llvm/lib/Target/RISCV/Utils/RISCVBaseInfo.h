@@ -1,9 +1,8 @@
 //===-- RISCVBaseInfo.h - Top level definitions for RISCV MC ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -39,9 +38,10 @@ enum {
   InstFormatCIW = 11,
   InstFormatCL = 12,
   InstFormatCS = 13,
-  InstFormatCB = 14,
-  InstFormatCJ = 15,
-  InstFormatOther = 16,
+  InstFormatCA = 14,
+  InstFormatCB = 15,
+  InstFormatCJ = 16,
+  InstFormatOther = 17,
 
   InstFormatMask = 31
 };

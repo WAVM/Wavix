@@ -1,9 +1,8 @@
 //===- llvm/Analysis/AliasSetTracker.h - Build Alias Sets -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -310,10 +309,10 @@ private:
   }
 
 public:
-  /// Return true if the specified pointer "may" (or must) alias one of the
-  /// members in the set.
-  bool aliasesPointer(const Value *Ptr, LocationSize Size,
-                      const AAMDNodes &AAInfo, AliasAnalysis &AA) const;
+  /// If the specified pointer "may" (or must) alias one of the members in the
+  /// set return the appropriate AliasResult. Otherwise return NoAlias.
+  AliasResult aliasesPointer(const Value *Ptr, LocationSize Size,
+                             const AAMDNodes &AAInfo, AliasAnalysis &AA) const;
   bool aliasesUnknownInst(const Instruction *Inst, AliasAnalysis &AA) const;
 };
 
@@ -389,10 +388,6 @@ public:
   /// set is returned.
   AliasSet &getAliasSetFor(const MemoryLocation &MemLoc);
 
-  /// Return true if the specified instruction "may" (or must) alias one of the
-  /// members in any of the sets.
-  bool containsUnknown(const Instruction *I) const;
-
   /// Return the underlying alias analysis object used by this tracker.
   AliasAnalysis &getAliasAnalysis() const { return AA; }
 
@@ -441,12 +436,7 @@ private:
     return *Entry;
   }
 
-  AliasSet &addPointer(Value *P, LocationSize Size, const AAMDNodes &AAInfo,
-                       AliasSet::AccessLattice E);
-  AliasSet &addPointer(MemoryLocation Loc,
-                       AliasSet::AccessLattice E) {
-    return addPointer(const_cast<Value*>(Loc.Ptr), Loc.Size, Loc.AATags, E);
-  }
+  AliasSet &addPointer(MemoryLocation Loc, AliasSet::AccessLattice E);
   AliasSet *mergeAliasSetsForPointer(const Value *Ptr, LocationSize Size,
                                      const AAMDNodes &AAInfo);
 

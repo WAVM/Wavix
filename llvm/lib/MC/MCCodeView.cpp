@@ -1,9 +1,8 @@
 //===- MCCodeView.h - Machine Code CodeView support -------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -432,13 +431,13 @@ void CodeViewContext::emitInlineLineTableForFunction(MCObjectStreamer &OS,
                                   OS.getCurrentSectionOnly());
 }
 
-void CodeViewContext::emitDefRange(
+MCFragment *CodeViewContext::emitDefRange(
     MCObjectStreamer &OS,
     ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
     StringRef FixedSizePortion) {
   // Create and insert a fragment into the current section that will be encoded
   // later.
-  new MCCVDefRangeFragment(Ranges, FixedSizePortion,
+  return new MCCVDefRangeFragment(Ranges, FixedSizePortion,
                            OS.getCurrentSectionOnly());
 }
 

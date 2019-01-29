@@ -1,9 +1,8 @@
 //===-- WebAssemblyFastISel.cpp - WebAssembly FastISel implementation -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -137,10 +136,13 @@ private:
     case MVT::v16i8:
     case MVT::v8i16:
     case MVT::v4i32:
-    case MVT::v2i64:
     case MVT::v4f32:
-    case MVT::v2f64:
       if (Subtarget->hasSIMD128())
+        return VT;
+      break;
+    case MVT::v2i64:
+    case MVT::v2f64:
+      if (Subtarget->hasUnimplementedSIMD128())
         return VT;
       break;
     default:
@@ -440,13 +442,12 @@ unsigned WebAssemblyFastISel::zeroExtendToI32(unsigned Reg, const Value *V,
 
   switch (From) {
   case MVT::i1:
-    // If the value is naturally an i1, we don't need to mask it.
-    // TODO: Recursively examine selects, phis, and, or, xor, constants.
-    if (From == MVT::i1 && V != nullptr) {
-      if (isa<CmpInst>(V) ||
-          (isa<Argument>(V) && cast<Argument>(V)->hasZExtAttr()))
-        return copyValue(Reg);
-    }
+    // If the value is naturally an i1, we don't need to mask it. We only know
+    // if a value is naturally an i1 if it is definitely lowered by FastISel,
+    // not a DAG ISel fallback.
+    if (V != nullptr && isa<Argument>(V) && cast<Argument>(V)->hasZExtAttr())
+      return copyValue(Reg);
+    break;
   case MVT::i8:
   case MVT::i16:
     break;

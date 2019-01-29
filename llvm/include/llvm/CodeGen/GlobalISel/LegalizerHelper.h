@@ -1,9 +1,8 @@
 //== llvm/CodeGen/GlobalISel/LegalizerHelper.h ---------------- -*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -32,6 +31,7 @@ namespace llvm {
 class LegalizerInfo;
 class Legalizer;
 class MachineRegisterInfo;
+class GISelChangeObserver;
 
 class LegalizerHelper {
 public:
@@ -48,8 +48,10 @@ public:
     UnableToLegalize,
   };
 
-  LegalizerHelper(MachineFunction &MF);
-  LegalizerHelper(MachineFunction &MF, const LegalizerInfo &LI);
+  LegalizerHelper(MachineFunction &MF, GISelChangeObserver &Observer,
+                  MachineIRBuilder &B);
+  LegalizerHelper(MachineFunction &MF, const LegalizerInfo &LI,
+                  GISelChangeObserver &Observer, MachineIRBuilder &B);
 
   /// Replace \p MI by a sequence of legal instructions that can implement the
   /// same operation. Note that this means \p MI may be deleted, so any iterator
@@ -88,7 +90,7 @@ public:
 
   /// Expose MIRBuilder so clients can set their own RecordInsertInstruction
   /// functions
-  MachineIRBuilder MIRBuilder;
+  MachineIRBuilder &MIRBuilder;
 
   /// Expose LegalizerInfo so the clients can re-use.
   const LegalizerInfo &getLegalizerInfo() const { return LI; }
@@ -102,6 +104,11 @@ private:
                       unsigned ExtOpcode);
 
   /// Legalize a single operand \p OpIdx of the machine instruction \p MI as a
+  /// Use by truncating the operand's type to \p NarrowTy using G_TRUNC, and
+  /// replacing the vreg of the operand in place.
+  void narrowScalarSrc(MachineInstr &MI, LLT NarrowTy, unsigned OpIdx);
+
+  /// Legalize a single operand \p OpIdx of the machine instruction \p MI as a
   /// Def by extending the operand's type to \p WideTy and truncating it back
   /// with the \p TruncOpcode, and replacing the vreg of the operand in place.
   void widenScalarDst(MachineInstr &MI, LLT WideTy, unsigned OpIdx = 0,
@@ -113,10 +120,31 @@ private:
   void extractParts(unsigned Reg, LLT Ty, int NumParts,
                     SmallVectorImpl<unsigned> &VRegs);
 
+  LegalizeResult fewerElementsVectorImplicitDef(MachineInstr &MI,
+                                                unsigned TypeIdx, LLT NarrowTy);
+
+  /// Legalize a simple vector instruction where all operands are the same type
+  /// by splitting into multiple components.
+  LegalizeResult fewerElementsVectorBasic(MachineInstr &MI, unsigned TypeIdx,
+                                          LLT NarrowTy);
+
+  LegalizeResult fewerElementsVectorCasts(MachineInstr &MI, unsigned TypeIdx,
+                                          LLT NarrowTy);
+
+  LegalizeResult
+  fewerElementsVectorCmp(MachineInstr &MI, unsigned TypeIdx, LLT NarrowTy);
+
+  LegalizeResult
+  fewerElementsVectorLoadStore(MachineInstr &MI, unsigned TypeIdx, LLT NarrowTy);
+
+  LegalizeResult narrowScalarMul(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
+
   LegalizeResult lowerBitCount(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
 
   MachineRegisterInfo &MRI;
   const LegalizerInfo &LI;
+  /// To keep track of changes made by the LegalizerHelper.
+  GISelChangeObserver &Observer;
 };
 
 /// Helper function that creates the given libcall.

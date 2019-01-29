@@ -1,9 +1,8 @@
 //===- AsmParser.cpp - Parser for Assembly Files --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -159,9 +158,10 @@ private:
   /// The values from the last parsed cpp hash file line comment if any.
   struct CppHashInfoTy {
     StringRef Filename;
-    int64_t LineNumber = 0;
+    int64_t LineNumber;
     SMLoc Loc;
-    unsigned Buf = 0;
+    unsigned Buf;
+    CppHashInfoTy() : Filename(), LineNumber(0), Loc(), Buf(0) {}
   };
   CppHashInfoTy CppHashInfo;
 
@@ -229,7 +229,9 @@ public:
 
   void setParsingInlineAsm(bool V) override {
     ParsingInlineAsm = V;
-    Lexer.setParsingMSInlineAsm(V);
+    // When parsing MS inline asm, we must lex 0b1101 and 0ABCH as binary and
+    // hex integer literals.
+    Lexer.setLexMasmIntegers(V);
   }
   bool isParsingInlineAsm() override { return ParsingInlineAsm; }
 
@@ -424,6 +426,7 @@ private:
     DK_WEAK_DEFINITION,
     DK_WEAK_REFERENCE,
     DK_WEAK_DEF_CAN_BE_HIDDEN,
+    DK_COLD,
     DK_COMM,
     DK_COMMON,
     DK_LCOMM,
@@ -493,6 +496,7 @@ private:
     DK_CFI_UNDEFINED,
     DK_CFI_REGISTER,
     DK_CFI_WINDOW_SAVE,
+    DK_CFI_B_KEY_FRAME,
     DK_MACROS_ON,
     DK_MACROS_OFF,
     DK_ALTMACRO,
@@ -673,6 +677,7 @@ namespace llvm {
 extern MCAsmParserExtension *createDarwinAsmParser();
 extern MCAsmParserExtension *createELFAsmParser();
 extern MCAsmParserExtension *createCOFFAsmParser();
+extern MCAsmParserExtension *createWasmAsmParser();
 
 } // end namespace llvm
 
@@ -703,10 +708,7 @@ AsmParser::AsmParser(SourceMgr &SM, MCContext &Ctx, MCStreamer &Out,
     PlatformParser.reset(createELFAsmParser());
     break;
   case MCObjectFileInfo::IsWasm:
-    // TODO: WASM will need its own MCAsmParserExtension implementation, but
-    // for now we can re-use the ELF one, since the directives can be the
-    // same for now.
-    PlatformParser.reset(createELFAsmParser());
+    PlatformParser.reset(createWasmAsmParser());
     break;
   }
 
@@ -897,6 +899,9 @@ bool AsmParser::Run(bool NoInitialTextSection, bool NoFinalize) {
     if (!getLexer().isAtStartOfStatement())
       eatToEndOfStatement();
   }
+
+  getTargetParser().onEndOfFile();
+  printPendingErrors();
 
   // All errors should have been emitted.
   assert(!hasPendingError() && "unexpected error from parseStatement");
@@ -1979,6 +1984,8 @@ bool AsmParser::parseStatement(ParseStatementInfo &Info,
       return parseDirectiveSymbolAttribute(MCSA_WeakReference);
     case DK_WEAK_DEF_CAN_BE_HIDDEN:
       return parseDirectiveSymbolAttribute(MCSA_WeakDefAutoPrivate);
+    case DK_COLD:
+      return parseDirectiveSymbolAttribute(MCSA_Cold);
     case DK_COMM:
     case DK_COMMON:
       return parseDirectiveComm(/*IsLocal=*/false);
@@ -2938,20 +2945,20 @@ bool AsmParser::parseDirectiveAscii(StringRef IDVal, bool ZeroTerminated) {
 bool AsmParser::parseDirectiveReloc(SMLoc DirectiveLoc) {
   const MCExpr *Offset;
   const MCExpr *Expr = nullptr;
-
-  SMLoc OffsetLoc = Lexer.getTok().getLoc();
   int64_t OffsetValue;
-  // We can only deal with constant expressions at the moment.
+  SMLoc OffsetLoc = Lexer.getTok().getLoc();
 
   if (parseExpression(Offset))
     return true;
 
-  if (check(!Offset->evaluateAsAbsolute(OffsetValue,
-                                        getStreamer().getAssemblerPtr()),
-            OffsetLoc, "expression is not a constant value") ||
-      check(OffsetValue < 0, OffsetLoc, "expression is negative") ||
-      parseToken(AsmToken::Comma, "expected comma") ||
-      check(getTok().isNot(AsmToken::Identifier), "expected relocation name"))
+  if ((Offset->evaluateAsAbsolute(OffsetValue,
+                                  getStreamer().getAssemblerPtr()) &&
+       check(OffsetValue < 0, OffsetLoc, "expression is negative")) ||
+      (check(Offset->getKind() != llvm::MCExpr::Constant &&
+             Offset->getKind() != llvm::MCExpr::SymbolRef,
+             OffsetLoc, "expected non-negative number or a label")) ||
+      (parseToken(AsmToken::Comma, "expected comma") ||
+       check(getTok().isNot(AsmToken::Identifier), "expected relocation name")))
     return true;
 
   SMLoc NameLoc = Lexer.getTok().getLoc();
@@ -3359,9 +3366,12 @@ bool AsmParser::parseDirectiveFile(SMLoc DirectiveLoc) {
     }
   }
 
-  if (FileNumber == -1)
+  if (FileNumber == -1) {
+    if (!getContext().getAsmInfo()->hasSingleParameterDotFile())
+      return Error(DirectiveLoc,
+                   "target does not support '.file' without a number");
     getStreamer().EmitFileDirective(Filename);
-  else {
+  } else {
     // In case there is a -g option as well as debug info from directive .file,
     // we turn off the -g option, directly use the existing debug info instead.
     // Also reset any implicit ".file 0" for the assembler source.
@@ -3919,7 +3929,7 @@ bool AsmParser::parseDirectiveCFIStartProc() {
         parseToken(AsmToken::EndOfStatement))
       return addErrorSuffix(" in '.cfi_startproc' directive");
   }
-  
+
   // TODO(kristina): Deal with a corner case of incorrect diagnostic context
   // being produced if this directive is emitted as part of preprocessor macro
   // expansion which can *ONLY* happen if Clang's cc1as is the API consumer.
@@ -5028,9 +5038,9 @@ bool AsmParser::parseDirectiveIfdef(SMLoc DirectiveLoc, bool expect_defined) {
     MCSymbol *Sym = getContext().lookupSymbol(Name);
 
     if (expect_defined)
-      TheCondState.CondMet = (Sym && !Sym->isUndefined());
+      TheCondState.CondMet = (Sym && !Sym->isUndefined(false));
     else
-      TheCondState.CondMet = (!Sym || Sym->isUndefined());
+      TheCondState.CondMet = (!Sym || Sym->isUndefined(false));
     TheCondState.Ignore = !TheCondState.CondMet;
   }
 
@@ -5216,6 +5226,7 @@ void AsmParser::initializeDirectiveKindMap() {
   DirectiveKindMap[".weak_definition"] = DK_WEAK_DEFINITION;
   DirectiveKindMap[".weak_reference"] = DK_WEAK_REFERENCE;
   DirectiveKindMap[".weak_def_can_be_hidden"] = DK_WEAK_DEF_CAN_BE_HIDDEN;
+  DirectiveKindMap[".cold"] = DK_COLD;
   DirectiveKindMap[".comm"] = DK_COMM;
   DirectiveKindMap[".common"] = DK_COMMON;
   DirectiveKindMap[".lcomm"] = DK_LCOMM;
@@ -5293,6 +5304,7 @@ void AsmParser::initializeDirectiveKindMap() {
   DirectiveKindMap[".cfi_undefined"] = DK_CFI_UNDEFINED;
   DirectiveKindMap[".cfi_register"] = DK_CFI_REGISTER;
   DirectiveKindMap[".cfi_window_save"] = DK_CFI_WINDOW_SAVE;
+  DirectiveKindMap[".cfi_b_key_frame"] = DK_CFI_B_KEY_FRAME;
   DirectiveKindMap[".macros_on"] = DK_MACROS_ON;
   DirectiveKindMap[".macros_off"] = DK_MACROS_OFF;
   DirectiveKindMap[".macro"] = DK_MACRO;

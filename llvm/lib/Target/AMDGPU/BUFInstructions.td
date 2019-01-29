@@ -1,9 +1,8 @@
 //===-- BUFInstructions.td - Buffer Instruction Defintions ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -286,6 +285,12 @@ multiclass MTBUF_Pseudo_Stores<string opName, RegisterClass vdataClass,
 // MUBUF classes
 //===----------------------------------------------------------------------===//
 
+class MUBUFGetBaseOpcode<string Op> {
+  string ret = !subst("DWORDX2", "DWORD",
+    !subst("DWORDX3", "DWORD",
+    !subst("DWORDX4", "DWORD", Op)));
+}
+
 class MUBUF_Pseudo <string opName, dag outs, dag ins,
                     string asmOps, list<dag> pattern=[]> :
   InstSI<outs, ins, "", pattern>,
@@ -298,6 +303,9 @@ class MUBUF_Pseudo <string opName, dag outs, dag ins,
 
   string Mnemonic = opName;
   string AsmOperands = asmOps;
+
+  Instruction Opcode = !cast<Instruction>(NAME);
+  Instruction BaseOpcode = !cast<Instruction>(MUBUFGetBaseOpcode<NAME>.ret);
 
   let VM_CNT = 1;
   let EXP_CNT = 1;
@@ -321,6 +329,7 @@ class MUBUF_Pseudo <string opName, dag outs, dag ins,
   bits<1> has_offset  = 1;
   bits<1> has_slc     = 1;
   bits<1> has_tfe     = 1;
+  bits<4> dwords      = 0;
 }
 
 class MUBUF_Real <bits<7> op, MUBUF_Pseudo ps> :
@@ -394,6 +403,16 @@ class getMUBUFInsDA<list<RegisterClass> vdataList,
              );
 }
 
+class getMUBUFDwords<RegisterClass regClass> {
+  string regClassAsInt = !cast<string>(regClass);
+  int ret =
+    !if(!eq(regClassAsInt, !cast<string>(VGPR_32)), 1,
+    !if(!eq(regClassAsInt, !cast<string>(VReg_64)), 2,
+    !if(!eq(regClassAsInt, !cast<string>(VReg_96)), 3,
+    !if(!eq(regClassAsInt, !cast<string>(VReg_128)), 4,
+    0))));
+}
+
 class getMUBUFIns<int addrKind, list<RegisterClass> vdataList=[], bit isLds = 0> {
   dag ret =
     !if(!eq(addrKind, BUFAddrKind.Offset), getMUBUFInsDA<vdataList, [], isLds>.ret,
@@ -454,6 +473,7 @@ class MUBUF_Load_Pseudo <string opName,
   let Uses = !if(isLds, [EXEC, M0], [EXEC]);
   let has_tfe = !if(isLds, 0, 1);
   let lds = isLds;
+  let dwords = getMUBUFDwords<vdataClass>.ret;
 }
 
 // FIXME: tfe can't be an operand because it requires a separate
@@ -517,6 +537,7 @@ class MUBUF_Store_Pseudo <string opName,
   let mayLoad = 0;
   let mayStore = 1;
   let maybeAtomic = 1;
+  let dwords = getMUBUFDwords<vdataClass>.ret;
 }
 
 multiclass MUBUF_Pseudo_Stores<string opName, RegisterClass vdataClass,
@@ -656,11 +677,10 @@ class MUBUF_AtomicRet_Pseudo<string opName, int addrKind,
   let AsmMatchConverter = "cvtMubufAtomicReturn";
 }
 
-multiclass MUBUF_Pseudo_Atomics <string opName,
-                                 RegisterClass vdataClass,
-                                 ValueType vdataType,
-                                 SDPatternOperator atomic> {
-
+multiclass MUBUF_Pseudo_Atomics_NO_RTN <string opName,
+                                        RegisterClass vdataClass,
+                                        ValueType vdataType,
+                                        SDPatternOperator atomic> {
   def _OFFSET : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.Offset, vdataClass>,
                 MUBUFAddr64Table <0, NAME>;
   def _ADDR64 : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.Addr64, vdataClass>,
@@ -668,7 +688,12 @@ multiclass MUBUF_Pseudo_Atomics <string opName,
   def _OFFEN  : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.OffEn,  vdataClass>;
   def _IDXEN  : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.IdxEn,  vdataClass>;
   def _BOTHEN : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.BothEn, vdataClass>;
+}
 
+multiclass MUBUF_Pseudo_Atomics_RTN <string opName,
+                                     RegisterClass vdataClass,
+                                     ValueType vdataType,
+                                     SDPatternOperator atomic> {
   def _OFFSET_RTN : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.Offset, vdataClass,
     [(set vdataType:$vdata,
      (atomic (MUBUFOffsetAtomic v4i32:$srsrc, i32:$soffset, i16:$offset, i1:$slc),
@@ -685,6 +710,13 @@ multiclass MUBUF_Pseudo_Atomics <string opName,
   def _IDXEN_RTN  : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.IdxEn,  vdataClass>;
   def _BOTHEN_RTN : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.BothEn, vdataClass>;
 }
+
+multiclass MUBUF_Pseudo_Atomics <string opName,
+                                 RegisterClass vdataClass,
+                                 ValueType vdataType,
+                                 SDPatternOperator atomic> :
+  MUBUF_Pseudo_Atomics_NO_RTN<opName, vdataClass, vdataType, atomic>,
+  MUBUF_Pseudo_Atomics_RTN<opName, vdataClass, vdataType, atomic>;
 
 
 //===----------------------------------------------------------------------===//
@@ -1411,54 +1443,6 @@ defm : MUBUFScratchLoadPat_Lo16<BUFFER_LOAD_SHORT_D16_OFFEN, BUFFER_LOAD_SHORT_D
 defm : MUBUFScratchLoadPat_Lo16<BUFFER_LOAD_UBYTE_D16_OFFEN, BUFFER_LOAD_UBYTE_D16_OFFSET, i16, az_extloadi8_private>;
 defm : MUBUFScratchLoadPat_Lo16<BUFFER_LOAD_SBYTE_D16_OFFEN, BUFFER_LOAD_SBYTE_D16_OFFSET, i16, sextloadi8_private>;
 }
-
-// BUFFER_LOAD_DWORD*, addr64=0
-multiclass MUBUF_Load_Dword <ValueType vt,
-                             MUBUF_Pseudo offset,
-                             MUBUF_Pseudo offen,
-                             MUBUF_Pseudo idxen,
-                             MUBUF_Pseudo bothen> {
-
-  def : GCNPat <
-    (vt (int_SI_buffer_load_dword v4i32:$rsrc, (i32 imm), i32:$soffset,
-                                  imm:$offset, 0, 0, imm:$glc, imm:$slc,
-                                  imm:$tfe)),
-    (offset $rsrc, $soffset, (as_i16imm $offset), (as_i1imm $glc),
-            (as_i1imm $slc), (as_i1imm $tfe))
-  >;
-
-  def : GCNPat <
-    (vt (int_SI_buffer_load_dword v4i32:$rsrc, i32:$vaddr, i32:$soffset,
-                                  imm:$offset, 1, 0, imm:$glc, imm:$slc,
-                                  imm:$tfe)),
-    (offen $vaddr, $rsrc, $soffset, (as_i16imm $offset), (as_i1imm $glc), (as_i1imm $slc),
-           (as_i1imm $tfe))
-  >;
-
-  def : GCNPat <
-    (vt (int_SI_buffer_load_dword v4i32:$rsrc, i32:$vaddr, i32:$soffset,
-                                  imm:$offset, 0, 1, imm:$glc, imm:$slc,
-                                  imm:$tfe)),
-    (idxen $vaddr, $rsrc, $soffset, (as_i16imm $offset), (as_i1imm $glc),
-           (as_i1imm $slc), (as_i1imm $tfe))
-  >;
-
-  def : GCNPat <
-    (vt (int_SI_buffer_load_dword v4i32:$rsrc, v2i32:$vaddr, i32:$soffset,
-                                  imm:$offset, 1, 1, imm:$glc, imm:$slc,
-                                  imm:$tfe)),
-    (bothen $vaddr, $rsrc, $soffset, (as_i16imm $offset), (as_i1imm $glc), (as_i1imm $slc),
-            (as_i1imm $tfe))
-  >;
-}
-
-defm : MUBUF_Load_Dword <i32, BUFFER_LOAD_DWORD_OFFSET, BUFFER_LOAD_DWORD_OFFEN,
-                         BUFFER_LOAD_DWORD_IDXEN, BUFFER_LOAD_DWORD_BOTHEN>;
-defm : MUBUF_Load_Dword <v2i32, BUFFER_LOAD_DWORDX2_OFFSET, BUFFER_LOAD_DWORDX2_OFFEN,
-                         BUFFER_LOAD_DWORDX2_IDXEN, BUFFER_LOAD_DWORDX2_BOTHEN>;
-defm : MUBUF_Load_Dword <v4i32, BUFFER_LOAD_DWORDX4_OFFSET, BUFFER_LOAD_DWORDX4_OFFEN,
-                         BUFFER_LOAD_DWORDX4_IDXEN, BUFFER_LOAD_DWORDX4_BOTHEN>;
-
 multiclass MUBUFStore_Atomic_Pattern <MUBUF_Pseudo Instr_ADDR64, MUBUF_Pseudo Instr_OFFSET,
                                       ValueType vt, PatFrag atomic_st> {
   // Store follows atomic op convention so address is forst
@@ -2105,3 +2089,22 @@ let SubtargetPredicate = HasPackedD16VMem in {
   defm TBUFFER_STORE_FORMAT_D16_XYZ  : MTBUF_Real_AllAddr_vi <0x0e>;
   defm TBUFFER_STORE_FORMAT_D16_XYZW : MTBUF_Real_AllAddr_vi <0x0f>;
 } // End HasUnpackedD16VMem.
+
+def MUBUFInfoTable : GenericTable {
+  let FilterClass = "MUBUF_Pseudo";
+  let CppTypeName = "MUBUFInfo";
+  let Fields = ["Opcode", "BaseOpcode", "dwords", "has_vaddr", "has_srsrc", "has_soffset"];
+
+  let PrimaryKey = ["Opcode"];
+  let PrimaryKeyName = "getMUBUFOpcodeHelper";
+}
+
+def getMUBUFInfoFromOpcode : SearchIndex {
+  let Table = MUBUFInfoTable;
+  let Key = ["Opcode"];
+}
+
+def getMUBUFInfoFromBaseOpcodeAndDwords : SearchIndex {
+  let Table = MUBUFInfoTable;
+  let Key = ["BaseOpcode", "dwords"];
+}

@@ -1,9 +1,8 @@
 //===- AMDGPUInline.cpp - Code to perform simple function inlining --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -44,7 +43,7 @@ ArgAllocaCost("amdgpu-inline-arg-alloca-cost", cl::Hidden, cl::init(2200),
               cl::desc("Cost of alloca argument"));
 
 // If the amount of scratch memory to eliminate exceeds our ability to allocate
-// it into registers we gain nothing by agressively inlining functions for that
+// it into registers we gain nothing by aggressively inlining functions for that
 // heuristic.
 static cl::opt<unsigned>
 ArgAllocaCutoff("amdgpu-inline-arg-alloca-cutoff", cl::Hidden, cl::init(256),

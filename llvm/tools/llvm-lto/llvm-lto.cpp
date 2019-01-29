@@ -1,9 +1,8 @@
 //===- llvm-lto: a simple command-line program to link modules with LTO ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -562,11 +561,14 @@ private:
 
     auto Index = loadCombinedIndex();
     for (auto &Filename : InputFilenames) {
+      LLVMContext Ctx;
+      auto TheModule = loadModule(Filename, Ctx);
+
       // Build a map of module to the GUIDs and summary objects that should
       // be written to its index.
       std::map<std::string, GVSummaryMapTy> ModuleToSummariesForIndex;
-      ThinLTOCodeGenerator::gatherImportedSummariesForModule(
-          Filename, *Index, ModuleToSummariesForIndex);
+      ThinGenerator.gatherImportedSummariesForModule(*TheModule, *Index,
+                                                     ModuleToSummariesForIndex);
 
       std::string OutputName = OutputFilename;
       if (OutputName.empty()) {
@@ -594,12 +596,14 @@ private:
 
     auto Index = loadCombinedIndex();
     for (auto &Filename : InputFilenames) {
+      LLVMContext Ctx;
+      auto TheModule = loadModule(Filename, Ctx);
       std::string OutputName = OutputFilename;
       if (OutputName.empty()) {
         OutputName = Filename + ".imports";
       }
       OutputName = getThinLTOOutputFile(OutputName, OldPrefix, NewPrefix);
-      ThinLTOCodeGenerator::emitImports(Filename, OutputName, *Index);
+      ThinGenerator.emitImports(*TheModule, OutputName, *Index);
     }
   }
 

@@ -1,9 +1,8 @@
 //===-- MipsAsmParser.cpp - Parse Mips assembly to MCInst instructions ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -39,6 +38,7 @@
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -63,6 +63,8 @@ namespace llvm {
 class MCInstrInfo;
 
 } // end namespace llvm
+
+extern cl::opt<bool> EmitJalrReloc;
 
 namespace {
 
@@ -767,13 +769,13 @@ public:
 
   ~MipsOperand() override {
     switch (Kind) {
-    case k_Immediate:
-      break;
     case k_Memory:
       delete Mem.Base;
       break;
     case k_RegList:
       delete RegList.List;
+      break;
+    case k_Immediate:
     case k_RegisterIndex:
     case k_Token:
       break;
@@ -1705,14 +1707,23 @@ static const MCInstrDesc &getInstDesc(unsigned Opcode) {
   return MipsInsts[Opcode];
 }
 
-static bool hasShortDelaySlot(unsigned Opcode) {
-  switch (Opcode) {
+static bool hasShortDelaySlot(MCInst &Inst) {
+  switch (Inst.getOpcode()) {
+    case Mips::BEQ_MM:
+    case Mips::BNE_MM:
+    case Mips::BLTZ_MM:
+    case Mips::BGEZ_MM:
+    case Mips::BLEZ_MM:
+    case Mips::BGTZ_MM:
+    case Mips::JRC16_MM:
     case Mips::JALS_MM:
     case Mips::JALRS_MM:
     case Mips::JALRS16_MM:
     case Mips::BGEZALS_MM:
     case Mips::BLTZALS_MM:
       return true;
+    case Mips::J_MM:
+      return !Inst.getOperand(0).isReg();
     default:
       return false;
   }
@@ -2065,9 +2076,21 @@ bool MipsAsmParser::processInstruction(MCInst &Inst, SMLoc IDLoc,
     JalrInst.addOperand(MCOperand::createReg(Mips::RA));
     JalrInst.addOperand(MCOperand::createReg(Mips::T9));
 
-    // FIXME: Add an R_(MICRO)MIPS_JALR relocation after the JALR.
-    // This relocation is supposed to be an optimization hint for the linker
-    // and is not necessary for correctness.
+    if (EmitJalrReloc) {
+      // As an optimization hint for the linker, before the JALR we add:
+      // .reloc tmplabel, R_{MICRO}MIPS_JALR, symbol
+      // tmplabel:
+      MCSymbol *TmpLabel = getContext().createTempSymbol();
+      const MCExpr *TmpExpr = MCSymbolRefExpr::create(TmpLabel, getContext());
+      const MCExpr *RelocJalrExpr =
+          MCSymbolRefExpr::create(JalSym, MCSymbolRefExpr::VK_None,
+                                  getContext(), IDLoc);
+
+      TOut.getStreamer().EmitRelocDirective(*TmpExpr,
+          inMicroMipsMode() ? "R_MICROMIPS_JALR" : "R_MIPS_JALR",
+          RelocJalrExpr, IDLoc, *STI);
+      TOut.getStreamer().EmitLabel(TmpLabel);
+    }
 
     Inst = JalrInst;
     ExpandedJalSym = true;
@@ -2284,7 +2307,7 @@ bool MipsAsmParser::processInstruction(MCInst &Inst, SMLoc IDLoc,
   // If this instruction has a delay slot and .set reorder is active,
   // emit a NOP after it.
   if (FillDelaySlot) {
-    TOut.emitEmptyDelaySlot(hasShortDelaySlot(Inst.getOpcode()), IDLoc, STI);
+    TOut.emitEmptyDelaySlot(hasShortDelaySlot(Inst), IDLoc, STI);
     TOut.emitDirectiveSetReorder();
   }
 
@@ -2296,7 +2319,7 @@ bool MipsAsmParser::processInstruction(MCInst &Inst, SMLoc IDLoc,
       // If .set reorder has been used, we've already emitted a NOP.
       // If .set noreorder has been used, we need to emit a NOP at this point.
       if (!AssemblerOptions.back()->isReorder())
-        TOut.emitEmptyDelaySlot(hasShortDelaySlot(Inst.getOpcode()), IDLoc,
+        TOut.emitEmptyDelaySlot(hasShortDelaySlot(Inst), IDLoc,
                                 STI);
 
       // Load the $gp from the stack.
@@ -2583,7 +2606,7 @@ bool MipsAsmParser::expandJalWithRegs(MCInst &Inst, SMLoc IDLoc,
   // emit a NOP after it.
   const MCInstrDesc &MCID = getInstDesc(JalrInst.getOpcode());
   if (MCID.hasDelaySlot() && AssemblerOptions.back()->isReorder())
-    TOut.emitEmptyDelaySlot(hasShortDelaySlot(JalrInst.getOpcode()), IDLoc,
+    TOut.emitEmptyDelaySlot(hasShortDelaySlot(JalrInst), IDLoc,
                             STI);
 
   return false;

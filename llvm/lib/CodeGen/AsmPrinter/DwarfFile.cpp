@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/DwarfFile.cpp - Dwarf Debug Framework -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -39,13 +38,17 @@ void DwarfFile::emitUnit(DwarfUnit *TheU, bool UseOffsets) {
   if (TheU->getCUNode()->isDebugDirectivesOnly())
     return;
 
-  DIE &Die = TheU->getUnitDie();
-  MCSection *USection = TheU->getSection();
-  Asm->OutStreamer->SwitchSection(USection);
+  MCSection *S = TheU->getSection();
 
+  if (!S)
+    return;
+
+  Asm->OutStreamer->SwitchSection(S);
   TheU->emitHeader(UseOffsets);
+  Asm->emitDwarfDIE(TheU->getUnitDie());
 
-  Asm->emitDwarfDIE(Die);
+  if (MCSymbol *EndLabel = TheU->getEndLabel())
+    Asm->OutStreamer->EmitLabel(EndLabel);
 }
 
 // Compute the size and offset for each DIE.
@@ -111,9 +114,8 @@ void DwarfFile::addScopeLabel(LexicalScope *LS, DbgLabel *Label) {
 }
 
 std::pair<uint32_t, RangeSpanList *>
-DwarfFile::addRange(const MCSymbol *&CUBaseAddress,
-                    SmallVector<RangeSpan, 2> R) {
-  CURangeLists.push_back(RangeSpanList(Asm->createTempSymbol("debug_ranges"),
-                                       CUBaseAddress, std::move(R)));
+DwarfFile::addRange(const DwarfCompileUnit &CU, SmallVector<RangeSpan, 2> R) {
+  CURangeLists.push_back(
+      RangeSpanList(Asm->createTempSymbol("debug_ranges"), CU, std::move(R)));
   return std::make_pair(CURangeLists.size() - 1, &CURangeLists.back());
 }

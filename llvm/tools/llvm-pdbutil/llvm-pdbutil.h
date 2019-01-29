@@ -1,9 +1,8 @@
 //===- llvm-pdbutil.h ----------------------------------------- *- C++ --*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -192,6 +191,7 @@ extern llvm::cl::opt<bool> PdbStream;
 extern llvm::cl::opt<bool> DbiStream;
 extern llvm::cl::opt<bool> TpiStream;
 extern llvm::cl::opt<bool> IpiStream;
+extern llvm::cl::opt<bool> PublicsStream;
 extern llvm::cl::list<std::string> InputFilename;
 extern llvm::cl::opt<bool> DumpModules;
 extern llvm::cl::opt<bool> DumpModuleFiles;

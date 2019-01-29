@@ -1,9 +1,8 @@
 //===- BlockVerifier.cpp - FDR Block Verifier -----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 #include "llvm/XRay/BlockVerifier.h"
@@ -43,6 +42,8 @@ StringRef recordToString(BlockVerifier::State R) {
     return "CallArg";
   case BlockVerifier::State::EndOfBuffer:
     return "EndOfBuffer";
+  case BlockVerifier::State::TypedEvent:
+    return "TypedEvent";
   case BlockVerifier::State::StateMax:
   case BlockVerifier::State::Unknown:
     return "Unknown";
@@ -75,27 +76,34 @@ Error BlockVerifier::transition(State To) {
                        {State::NewCPUId,
                         {mask(State::NewCPUId) | mask(State::TSCWrap) |
                          mask(State::CustomEvent) | mask(State::Function) |
-                         mask(State::EndOfBuffer)}},
+                         mask(State::EndOfBuffer) | mask(State::TypedEvent)}},
 
                        {State::TSCWrap,
                         {mask(State::TSCWrap) | mask(State::NewCPUId) |
                          mask(State::CustomEvent) | mask(State::Function) |
-                         mask(State::EndOfBuffer)}},
+                         mask(State::EndOfBuffer) | mask(State::TypedEvent)}},
 
                        {State::CustomEvent,
                         {mask(State::CustomEvent) | mask(State::TSCWrap) |
                          mask(State::NewCPUId) | mask(State::Function) |
-                         mask(State::EndOfBuffer)}},
+                         mask(State::EndOfBuffer) | mask(State::TypedEvent)}},
+
+                       {State::TypedEvent,
+                        {mask(State::TypedEvent) | mask(State::TSCWrap) |
+                         mask(State::NewCPUId) | mask(State::Function) |
+                         mask(State::EndOfBuffer) | mask(State::CustomEvent)}},
 
                        {State::Function,
                         {mask(State::Function) | mask(State::TSCWrap) |
                          mask(State::NewCPUId) | mask(State::CustomEvent) |
-                         mask(State::CallArg) | mask(State::EndOfBuffer)}},
+                         mask(State::CallArg) | mask(State::EndOfBuffer) |
+                         mask(State::TypedEvent)}},
 
                        {State::CallArg,
                         {mask(State::CallArg) | mask(State::Function) |
                          mask(State::TSCWrap) | mask(State::NewCPUId) |
-                         mask(State::CustomEvent) | mask(State::EndOfBuffer)}},
+                         mask(State::CustomEvent) | mask(State::EndOfBuffer) |
+                         mask(State::TypedEvent)}},
 
                        {State::EndOfBuffer, {}}}};
 
@@ -145,6 +153,14 @@ Error BlockVerifier::visit(CustomEventRecord &) {
   return transition(State::CustomEvent);
 }
 
+Error BlockVerifier::visit(CustomEventRecordV5 &) {
+  return transition(State::CustomEvent);
+}
+
+Error BlockVerifier::visit(TypedEventRecord &) {
+  return transition(State::TypedEvent);
+}
+
 Error BlockVerifier::visit(CallArgRecord &) {
   return transition(State::CallArg);
 }
@@ -169,6 +185,7 @@ Error BlockVerifier::verify() {
   case State::EndOfBuffer:
   case State::NewCPUId:
   case State::CustomEvent:
+  case State::TypedEvent:
   case State::Function:
   case State::CallArg:
   case State::TSCWrap:

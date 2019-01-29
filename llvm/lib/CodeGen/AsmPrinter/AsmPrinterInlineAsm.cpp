@@ -1,9 +1,8 @@
 //===-- AsmPrinterInlineAsm.cpp - AsmPrinter Inline Asm Handling ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -156,9 +155,10 @@ void AsmPrinter::EmitInlineAsm(StringRef Str, const MCSubtargetInfo &STI,
   Parser->setAssemblerDialect(Dialect);
   Parser->setTargetParser(*TAP.get());
   Parser->setEnablePrintSchedInfo(EnablePrintSchedInfo);
+  // Enable lexing Masm binary and hex integer literals in intel inline
+  // assembly.
   if (Dialect == InlineAsm::AD_Intel)
-    // We need this flag to be able to parse numbers like "0bH"
-    Parser->setParsingInlineAsm(true);
+    Parser->getLexer().setLexMasmIntegers(true);
   if (MF) {
     const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
     TAP->SetFrameRegister(TRI->getFrameRegister(*MF));

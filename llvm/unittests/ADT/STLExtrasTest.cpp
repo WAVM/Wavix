@@ -1,9 +1,8 @@
 //===- STLExtrasTest.cpp - Unit tests for STL extras ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -362,6 +361,23 @@ TEST(STLExtrasTest, ADLTest) {
   int count = 0;
   llvm::for_each(s, [&count](int) { ++count; });
   EXPECT_EQ(5, count);
+}
+
+TEST(STLExtrasTest, EmptyTest) {
+  std::vector<void*> V;
+  EXPECT_TRUE(llvm::empty(V));
+  V.push_back(nullptr);
+  EXPECT_FALSE(llvm::empty(V));
+
+  std::initializer_list<int> E = {};
+  std::initializer_list<int> NotE = {7, 13, 42};
+  EXPECT_TRUE(llvm::empty(E));
+  EXPECT_FALSE(llvm::empty(NotE));
+
+  auto R0 = make_range(V.begin(), V.begin());
+  EXPECT_TRUE(llvm::empty(R0));
+  auto R1 = make_range(V.begin(), V.end());
+  EXPECT_FALSE(llvm::empty(R1));
 }
 
 TEST(STLExtrasTest, EarlyIncrementTest) {

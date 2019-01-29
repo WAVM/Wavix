@@ -1,9 +1,8 @@
 //===- DebugInfoMetadata.cpp - Implement debug info metadata --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,6 +18,8 @@
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+
+#include <numeric>
 
 using namespace llvm;
 
@@ -112,6 +113,47 @@ const DILocation *DILocation::getMergedLocation(const DILocation *LocA,
     S = LocA->getScope();
   return DILocation::get(Result->getContext(), 0, 0, S, L);
 }
+
+Optional<unsigned> DILocation::encodeDiscriminator(unsigned BD, unsigned DF, unsigned CI) {
+  SmallVector<unsigned, 3> Components = {BD, DF, CI};
+  uint64_t RemainingWork = 0U;
+  // We use RemainingWork to figure out if we have no remaining components to
+  // encode. For example: if BD != 0 but DF == 0 && CI == 0, we don't need to
+  // encode anything for the latter 2.
+  // Since any of the input components is at most 32 bits, their sum will be
+  // less than 34 bits, and thus RemainingWork won't overflow.
+  RemainingWork = std::accumulate(Components.begin(), Components.end(), RemainingWork);
+
+  int I = 0;
+  unsigned Ret = 0;
+  unsigned NextBitInsertionIndex = 0;
+  while (RemainingWork > 0) {
+    unsigned C = Components[I++];
+    RemainingWork -= C;
+    unsigned EC = encodeComponent(C);
+    Ret |= (EC << NextBitInsertionIndex);
+    NextBitInsertionIndex += encodingBits(C);
+  }
+
+  // Encoding may be unsuccessful because of overflow. We determine success by
+  // checking equivalence of components before & after encoding. Alternatively,
+  // we could determine Success during encoding, but the current alternative is
+  // simpler.
+  unsigned TBD, TDF, TCI = 0;
+  decodeDiscriminator(Ret, TBD, TDF, TCI);
+  if (TBD == BD && TDF == DF && TCI == CI)
+    return Ret;
+  return None;
+}
+
+void DILocation::decodeDiscriminator(unsigned D, unsigned &BD, unsigned &DF,
+                                     unsigned &CI) {
+  BD = getUnsignedFromPrefixEncoding(D);
+  DF = getUnsignedFromPrefixEncoding(getNextComponentInDiscriminator(D));
+  CI = getUnsignedFromPrefixEncoding(
+      getNextComponentInDiscriminator(getNextComponentInDiscriminator(D)));
+}
+
 
 DINode::DIFlags DINode::getFlag(StringRef Flag) {
   return StringSwitch<DIFlags>(Flag)
@@ -470,7 +512,8 @@ DICompileUnit *DICompileUnit::getImpl(
     unsigned EmissionKind, Metadata *EnumTypes, Metadata *RetainedTypes,
     Metadata *GlobalVariables, Metadata *ImportedEntities, Metadata *Macros,
     uint64_t DWOId, bool SplitDebugInlining, bool DebugInfoForProfiling,
-    unsigned NameTableKind, StorageType Storage, bool ShouldCreate) {
+    unsigned NameTableKind, bool RangesBaseAddress, StorageType Storage,
+    bool ShouldCreate) {
   assert(Storage != Uniqued && "Cannot unique DICompileUnit");
   assert(isCanonical(Producer) && "Expected canonical MDString");
   assert(isCanonical(Flags) && "Expected canonical MDString");
@@ -483,7 +526,8 @@ DICompileUnit *DICompileUnit::getImpl(
   return storeImpl(new (array_lengthof(Ops)) DICompileUnit(
                        Context, Storage, SourceLanguage, IsOptimized,
                        RuntimeVersion, EmissionKind, DWOId, SplitDebugInlining,
-                       DebugInfoForProfiling, NameTableKind, Ops),
+                       DebugInfoForProfiling, NameTableKind, RangesBaseAddress,
+                       Ops),
                    Storage);
 }
 
@@ -540,21 +584,55 @@ DILocalScope *DILocalScope::getNonLexicalBlockFileScope() const {
   return const_cast<DILocalScope *>(this);
 }
 
+DISubprogram::DISPFlags DISubprogram::getFlag(StringRef Flag) {
+  return StringSwitch<DISPFlags>(Flag)
+#define HANDLE_DISP_FLAG(ID, NAME) .Case("DISPFlag" #NAME, SPFlag##NAME)
+#include "llvm/IR/DebugInfoFlags.def"
+      .Default(SPFlagZero);
+}
+
+StringRef DISubprogram::getFlagString(DISPFlags Flag) {
+  switch (Flag) {
+  // Appease a warning.
+  case SPFlagVirtuality:
+    return "";
+#define HANDLE_DISP_FLAG(ID, NAME)                                             \
+  case SPFlag##NAME:                                                           \
+    return "DISPFlag" #NAME;
+#include "llvm/IR/DebugInfoFlags.def"
+  }
+  return "";
+}
+
+DISubprogram::DISPFlags
+DISubprogram::splitFlags(DISPFlags Flags,
+                         SmallVectorImpl<DISPFlags> &SplitFlags) {
+  // Multi-bit fields can require special handling. In our case, however, the
+  // only multi-bit field is virtuality, and all its values happen to be
+  // single-bit values, so the right behavior just falls out.
+#define HANDLE_DISP_FLAG(ID, NAME)                                             \
+  if (DISPFlags Bit = Flags & SPFlag##NAME) {                                  \
+    SplitFlags.push_back(Bit);                                                 \
+    Flags &= ~Bit;                                                             \
+  }
+#include "llvm/IR/DebugInfoFlags.def"
+  return Flags;
+}
+
 DISubprogram *DISubprogram::getImpl(
     LLVMContext &Context, Metadata *Scope, MDString *Name,
     MDString *LinkageName, Metadata *File, unsigned Line, Metadata *Type,
-    bool IsLocalToUnit, bool IsDefinition, unsigned ScopeLine,
-    Metadata *ContainingType, unsigned Virtuality, unsigned VirtualIndex,
-    int ThisAdjustment, DIFlags Flags, bool IsOptimized, Metadata *Unit,
+    unsigned ScopeLine, Metadata *ContainingType, unsigned VirtualIndex,
+    int ThisAdjustment, DIFlags Flags, DISPFlags SPFlags, Metadata *Unit,
     Metadata *TemplateParams, Metadata *Declaration, Metadata *RetainedNodes,
     Metadata *ThrownTypes, StorageType Storage, bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
   assert(isCanonical(LinkageName) && "Expected canonical MDString");
-  DEFINE_GETIMPL_LOOKUP(
-      DISubprogram, (Scope, Name, LinkageName, File, Line, Type, IsLocalToUnit,
-                     IsDefinition, ScopeLine, ContainingType, Virtuality,
-                     VirtualIndex, ThisAdjustment, Flags, IsOptimized, Unit,
-                     TemplateParams, Declaration, RetainedNodes, ThrownTypes));
+  DEFINE_GETIMPL_LOOKUP(DISubprogram,
+                        (Scope, Name, LinkageName, File, Line, Type, ScopeLine,
+                         ContainingType, VirtualIndex, ThisAdjustment, Flags,
+                         SPFlags, Unit, TemplateParams, Declaration,
+                         RetainedNodes, ThrownTypes));
   SmallVector<Metadata *, 11> Ops = {
       File,        Scope,         Name,           LinkageName,    Type,       Unit,
       Declaration, RetainedNodes, ContainingType, TemplateParams, ThrownTypes};
@@ -566,11 +644,10 @@ DISubprogram *DISubprogram::getImpl(
         Ops.pop_back();
     }
   }
-  DEFINE_GETIMPL_STORE_N(DISubprogram,
-                         (Line, ScopeLine, Virtuality, VirtualIndex,
-                          ThisAdjustment, Flags, IsLocalToUnit, IsDefinition,
-                          IsOptimized),
-                         Ops, Ops.size());
+  DEFINE_GETIMPL_STORE_N(
+      DISubprogram,
+      (Line, ScopeLine, VirtualIndex, ThisAdjustment, Flags, SPFlags), Ops,
+      Ops.size());
 }
 
 bool DISubprogram::describes(const Function *F) const {

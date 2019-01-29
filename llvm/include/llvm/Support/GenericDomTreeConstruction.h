@@ -1,9 +1,8 @@
 //===- GenericDomTreeConstruction.h - Dominator Calculation ------*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -1190,6 +1189,20 @@ struct SemiNCAInfo {
       dbgs() << "\n";
     });
     LLVM_DEBUG(dbgs() << "\n");
+
+    // Recalculate the DominatorTree when the number of updates
+    // exceeds a threshold, which usually makes direct updating slower than
+    // recalculation. We select this threshold proportional to the
+    // size of the DominatorTree. The constant is selected
+    // by choosing the one with an acceptable performance on some real-world
+    // inputs.
+
+    // Make unittests of the incremental algorithm work
+    if (DT.DomTreeNodes.size() <= 100) {
+      if (NumLegalized > DT.DomTreeNodes.size())
+        CalculateFromScratch(DT, &BUI);
+    } else if (NumLegalized > DT.DomTreeNodes.size() / 40)
+      CalculateFromScratch(DT, &BUI);
 
     // If the DominatorTree was recalculated at some point, stop the batch
     // updates. Full recalculations ignore batch updates and look at the actual

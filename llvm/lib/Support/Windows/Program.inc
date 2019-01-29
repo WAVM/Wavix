@@ -1,9 +1,8 @@
 //===- Win32/Program.cpp - Win32 Program Implementation ------- -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -103,6 +102,25 @@ ErrorOr<std::string> sys::findProgramByName(StringRef Name,
     return EC;
 
   return std::string(U8Result.begin(), U8Result.end());
+}
+
+bool MakeErrMsg(std::string *ErrMsg, const std::string &prefix) {
+  if (!ErrMsg)
+    return true;
+  char *buffer = NULL;
+  DWORD LastError = GetLastError();
+  DWORD R = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                               FORMAT_MESSAGE_FROM_SYSTEM |
+                               FORMAT_MESSAGE_MAX_WIDTH_MASK,
+                           NULL, LastError, 0, (LPSTR)&buffer, 1, NULL);
+  if (R)
+    *ErrMsg = prefix + ": " + buffer;
+  else
+    *ErrMsg = prefix + ": Unknown error";
+  *ErrMsg += " (0x" + llvm::utohexstr(LastError) + ")";
+
+  LocalFree(buffer);
+  return R != 0;
 }
 
 static HANDLE RedirectIO(Optional<StringRef> Path, int fd,

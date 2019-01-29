@@ -1,9 +1,8 @@
 //===- MachineVerifier.cpp - Machine Code Verifier ------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -250,6 +249,7 @@ namespace {
     void report_context(const LiveRange::Segment &S) const;
     void report_context(const VNInfo &VNI) const;
     void report_context(SlotIndex Pos) const;
+    void report_context(MCPhysReg PhysReg) const;
     void report_context_liverange(const LiveRange &LR) const;
     void report_context_lanemask(LaneBitmask LaneMask) const;
     void report_context_vreg(unsigned VReg) const;
@@ -540,6 +540,10 @@ void MachineVerifier::report_context_liverange(const LiveRange &LR) const {
   errs() << "- liverange:   " << LR << '\n';
 }
 
+void MachineVerifier::report_context(MCPhysReg PReg) const {
+  errs() << "- p. register: " << printReg(PReg, TRI) << '\n';
+}
+
 void MachineVerifier::report_context_vreg(unsigned VReg) const {
   errs() << "- v. register: " << printReg(VReg, TRI) << '\n';
 }
@@ -619,6 +623,7 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
       if (isAllocatable(LI.PhysReg) && !MBB->isEHPad() &&
           MBB->getIterator() != MBB->getParent()->begin()) {
         report("MBB has allocatable live-in, but isn't entry or landing-pad.", MBB);
+        report_context(LI.PhysReg);
       }
     }
   }
@@ -677,7 +682,7 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
         // out the bottom of the function.
       } else if (MBB->succ_size() == LandingPadSuccs.size()) {
         // It's possible that the block legitimately ends with a noreturn
-        // call or an unreachable, in which case it won't actuall fall
+        // call or an unreachable, in which case it won't actually fall
         // out of the block.
       } else if (MBB->succ_size() != 1+LandingPadSuccs.size()) {
         report("MBB exits via unconditional fall-through but doesn't have "
@@ -778,7 +783,7 @@ MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
                "isn't a terminator instruction!", MBB);
       }
       if (Cond.empty()) {
-        report("MBB exits via conditinal branch/branch but there's no "
+        report("MBB exits via conditional branch/branch but there's no "
                "condition!", MBB);
       }
     } else {
@@ -935,9 +940,12 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
     if (isFunctionSelected)
       report("Unexpected generic instruction in a Selected function", MI);
 
+    unsigned NumOps = MI->getNumOperands();
+
     // Check types.
     SmallVector<LLT, 4> Types;
-    for (unsigned I = 0; I < MCID.getNumOperands(); ++I) {
+    for (unsigned I = 0, E = std::min(MCID.getNumOperands(), NumOps);
+         I != E; ++I) {
       if (!MCID.OpInfo[I].isGenericType())
         continue;
       // Generic instructions specify type equality constraints between some of
@@ -968,6 +976,10 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
       if (MO->isReg() && TargetRegisterInfo::isPhysicalRegister(MO->getReg()))
         report("Generic instruction cannot have physical register", MO, I);
     }
+
+    // Avoid out of bounds in checks below. This was already reported earlier.
+    if (MI->getNumOperands() < MCID.getNumOperands())
+      return;
   }
 
   StringRef ErrorInfo;
@@ -978,14 +990,42 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
   switch(MI->getOpcode()) {
   default:
     break;
+  case TargetOpcode::G_CONSTANT:
+  case TargetOpcode::G_FCONSTANT: {
+    if (MI->getNumOperands() < MCID.getNumOperands())
+      break;
+
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    if (DstTy.isVector())
+      report("Instruction cannot use a vector result type", MI);
+    break;
+  }
   case TargetOpcode::G_LOAD:
   case TargetOpcode::G_STORE:
+  case TargetOpcode::G_ZEXTLOAD:
+  case TargetOpcode::G_SEXTLOAD: {
+    LLT PtrTy = MRI->getType(MI->getOperand(1).getReg());
+    if (!PtrTy.isPointer())
+      report("Generic memory instruction must access a pointer", MI);
+
     // Generic loads and stores must have a single MachineMemOperand
     // describing that access.
-    if (!MI->hasOneMemOperand())
+    if (!MI->hasOneMemOperand()) {
       report("Generic instruction accessing memory must have one mem operand",
              MI);
+    } else {
+      if (MI->getOpcode() == TargetOpcode::G_ZEXTLOAD ||
+          MI->getOpcode() == TargetOpcode::G_SEXTLOAD) {
+        const MachineMemOperand &MMO = **MI->memoperands_begin();
+        LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+        if (MMO.getSize() * 8 >= DstTy.getSizeInBits()) {
+          report("Generic extload must have a narrower memory type", MI);
+        }
+      }
+    }
+
     break;
+  }
   case TargetOpcode::G_PHI: {
     LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
     if (!DstTy.isValid() ||
@@ -1003,6 +1043,19 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
              MI);
     break;
   }
+  case TargetOpcode::G_BITCAST: {
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcTy = MRI->getType(MI->getOperand(1).getReg());
+    if (!DstTy.isValid() || !SrcTy.isValid())
+      break;
+
+    if (SrcTy.isPointer() != DstTy.isPointer())
+      report("bitcast cannot convert between pointers and other types", MI);
+
+    if (SrcTy.getSizeInBits() != DstTy.getSizeInBits())
+      report("bitcast sizes must match", MI);
+    break;
+  }
   case TargetOpcode::G_SEXT:
   case TargetOpcode::G_ZEXT:
   case TargetOpcode::G_ANYEXT:
@@ -1015,8 +1068,6 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
     // instructions aren't guaranteed to have the right number of operands or
     // types attached to them at this point
     assert(MCID.getNumOperands() == 2 && "Expected 2 operands G_*{EXT,TRUNC}");
-    if (MI->getNumOperands() < MCID.getNumOperands())
-      break;
     LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
     LLT SrcTy = MRI->getType(MI->getOperand(1).getReg());
     if (!DstTy.isValid() || !SrcTy.isValid())
@@ -1055,6 +1106,89 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
     }
     break;
   }
+  case TargetOpcode::G_MERGE_VALUES: {
+    // G_MERGE_VALUES should only be used to merge scalars into a larger scalar,
+    // e.g. s2N = MERGE sN, sN
+    // Merging multiple scalars into a vector is not allowed, should use
+    // G_BUILD_VECTOR for that.
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcTy = MRI->getType(MI->getOperand(1).getReg());
+    if (DstTy.isVector() || SrcTy.isVector())
+      report("G_MERGE_VALUES cannot operate on vectors", MI);
+    break;
+  }
+  case TargetOpcode::G_UNMERGE_VALUES: {
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcTy = MRI->getType(MI->getOperand(MI->getNumOperands()-1).getReg());
+    // For now G_UNMERGE can split vectors.
+    for (unsigned i = 0; i < MI->getNumOperands()-1; ++i) {
+      if (MRI->getType(MI->getOperand(i).getReg()) != DstTy)
+        report("G_UNMERGE_VALUES destination types do not match", MI);
+    }
+    if (SrcTy.getSizeInBits() !=
+        (DstTy.getSizeInBits() * (MI->getNumOperands() - 1))) {
+      report("G_UNMERGE_VALUES source operand does not cover dest operands",
+             MI);
+    }
+    break;
+  }
+  case TargetOpcode::G_BUILD_VECTOR: {
+    // Source types must be scalars, dest type a vector. Total size of scalars
+    // must match the dest vector size.
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcEltTy = MRI->getType(MI->getOperand(1).getReg());
+    if (!DstTy.isVector() || SrcEltTy.isVector())
+      report("G_BUILD_VECTOR must produce a vector from scalar operands", MI);
+    for (unsigned i = 2; i < MI->getNumOperands(); ++i) {
+      if (MRI->getType(MI->getOperand(1).getReg()) !=
+          MRI->getType(MI->getOperand(i).getReg()))
+        report("G_BUILD_VECTOR source operand types are not homogeneous", MI);
+    }
+    if (DstTy.getSizeInBits() !=
+        SrcEltTy.getSizeInBits() * (MI->getNumOperands() - 1))
+      report("G_BUILD_VECTOR src operands total size don't match dest "
+             "size.",
+             MI);
+    break;
+  }
+  case TargetOpcode::G_BUILD_VECTOR_TRUNC: {
+    // Source types must be scalars, dest type a vector. Scalar types must be
+    // larger than the dest vector elt type, as this is a truncating operation.
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcEltTy = MRI->getType(MI->getOperand(1).getReg());
+    if (!DstTy.isVector() || SrcEltTy.isVector())
+      report("G_BUILD_VECTOR_TRUNC must produce a vector from scalar operands",
+             MI);
+    for (unsigned i = 2; i < MI->getNumOperands(); ++i) {
+      if (MRI->getType(MI->getOperand(1).getReg()) !=
+          MRI->getType(MI->getOperand(i).getReg()))
+        report("G_BUILD_VECTOR_TRUNC source operand types are not homogeneous",
+               MI);
+    }
+    if (SrcEltTy.getSizeInBits() <= DstTy.getElementType().getSizeInBits())
+      report("G_BUILD_VECTOR_TRUNC source operand types are not larger than "
+             "dest elt type",
+             MI);
+    break;
+  }
+  case TargetOpcode::G_CONCAT_VECTORS: {
+    // Source types should be vectors, and total size should match the dest
+    // vector size.
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcTy = MRI->getType(MI->getOperand(1).getReg());
+    if (!DstTy.isVector() || !SrcTy.isVector())
+      report("G_CONCAT_VECTOR requires vector source and destination operands",
+             MI);
+    for (unsigned i = 2; i < MI->getNumOperands(); ++i) {
+      if (MRI->getType(MI->getOperand(1).getReg()) !=
+          MRI->getType(MI->getOperand(i).getReg()))
+        report("G_CONCAT_VECTOR source operand types are not homogeneous", MI);
+    }
+    if (DstTy.getNumElements() !=
+        SrcTy.getNumElements() * (MI->getNumOperands() - 1))
+      report("G_CONCAT_VECTOR num dest and source elements should match", MI);
+    break;
+  }
   case TargetOpcode::COPY: {
     if (foundErrors)
       break;
@@ -1083,6 +1217,17 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
                  << "\n";
         }
     }
+    break;
+  }
+  case TargetOpcode::G_ICMP:
+  case TargetOpcode::G_FCMP: {
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcTy = MRI->getType(MI->getOperand(2).getReg());
+
+    if ((DstTy.isVector() != SrcTy.isVector()) ||
+        (DstTy.isVector() && DstTy.getNumElements() != SrcTy.getNumElements()))
+      report("Generic vector icmp/fcmp must preserve number of lanes", MI);
+
     break;
   }
   case TargetOpcode::STATEPOINT:

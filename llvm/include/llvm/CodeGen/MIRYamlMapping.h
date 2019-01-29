@@ -1,9 +1,8 @@
 //===- MIRYAMLMapping.h - Describes the mapping between MIR and YAML ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -494,6 +493,7 @@ struct MachineFunction {
   bool FailedISel = false;
   // Register information
   bool TracksRegLiveness = false;
+  bool HasWinCFI = false;
   std::vector<VirtualRegisterDefinition> VirtualRegisters;
   std::vector<MachineFunctionLiveIn> LiveIns;
   Optional<std::vector<FlowStringValue>> CalleeSavedRegisters;
@@ -517,6 +517,7 @@ template <> struct MappingTraits<MachineFunction> {
     YamlIO.mapOptional("selected", MF.Selected, false);
     YamlIO.mapOptional("failedISel", MF.FailedISel, false);
     YamlIO.mapOptional("tracksRegLiveness", MF.TracksRegLiveness, false);
+    YamlIO.mapOptional("hasWinCFI", MF.HasWinCFI, false);
     YamlIO.mapOptional("registers", MF.VirtualRegisters,
                        std::vector<VirtualRegisterDefinition>());
     YamlIO.mapOptional("liveins", MF.LiveIns,

@@ -1,9 +1,8 @@
 //===- CopyConfig.h -------------------------------------------------------===//
 //
-//                      The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -38,6 +37,11 @@ struct SectionRename {
   Optional<uint64_t> NewFlags;
 };
 
+struct SectionFlagsUpdate {
+  StringRef Name;
+  uint64_t NewFlags;
+};
+
 // Configuration for copying/stripping a single file.
 struct CopyConfig {
   // Main input/output options
@@ -46,19 +50,24 @@ struct CopyConfig {
   StringRef OutputFilename;
   StringRef OutputFormat;
 
-  // Only applicable for --input-format=Binary
+  // Only applicable for --input-format=binary
   MachineInfo BinaryArch;
+  // Only applicable when --output-format!=binary (e.g. elf64-x86-64).
+  Optional<MachineInfo> OutputArch;
 
   // Advanced options
   StringRef AddGnuDebugLink;
+  StringRef BuildIdLinkDir;
+  Optional<StringRef> BuildIdLinkInput;
+  Optional<StringRef> BuildIdLinkOutput;
   StringRef SplitDWO;
   StringRef SymbolsPrefix;
 
   // Repeated options
   std::vector<StringRef> AddSection;
   std::vector<StringRef> DumpSection;
-  std::vector<StringRef> Keep;
-  std::vector<StringRef> OnlyKeep;
+  std::vector<StringRef> KeepSection;
+  std::vector<StringRef> OnlySection;
   std::vector<StringRef> SymbolsToGlobalize;
   std::vector<StringRef> SymbolsToKeep;
   std::vector<StringRef> SymbolsToLocalize;
@@ -69,9 +78,11 @@ struct CopyConfig {
 
   // Map options
   StringMap<SectionRename> SectionsToRename;
+  StringMap<SectionFlagsUpdate> SetSectionFlags;
   StringMap<StringRef> SymbolsToRename;
 
   // Boolean options
+  bool DeterministicArchives = true;
   bool DiscardAll = false;
   bool ExtractDWO = false;
   bool KeepFileSymbols = false;

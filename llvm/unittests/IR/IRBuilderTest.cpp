@@ -1,9 +1,8 @@
 //===- llvm/unittest/IR/IRBuilderTest.cpp - IRBuilder tests ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -481,14 +480,16 @@ TEST_F(IRBuilderTest, createFunction) {
   auto CU =
       DIB.createCompileUnit(dwarf::DW_LANG_Swift, File, "swiftc", true, "", 0);
   auto Type = DIB.createSubroutineType(DIB.getOrCreateTypeArray(None));
-  auto NoErr = DIB.createFunction(CU, "noerr", "", File, 1, Type, false, true, 1,
-                               DINode::FlagZero, true);
+  auto NoErr = DIB.createFunction(
+      CU, "noerr", "", File, 1, Type, 1, DINode::FlagZero,
+      DISubprogram::SPFlagDefinition | DISubprogram::SPFlagOptimized);
   EXPECT_TRUE(!NoErr->getThrownTypes());
   auto Int = DIB.createBasicType("Int", 64, dwarf::DW_ATE_signed);
   auto Error = DIB.getOrCreateArray({Int});
-  auto Err =
-      DIB.createFunction(CU, "err", "", File, 1, Type, false, true, 1,
-      DINode::FlagZero, true, nullptr, nullptr, Error.get());
+  auto Err = DIB.createFunction(
+      CU, "err", "", File, 1, Type, 1, DINode::FlagZero,
+      DISubprogram::SPFlagDefinition | DISubprogram::SPFlagOptimized, nullptr,
+      nullptr, Error.get());
   EXPECT_TRUE(Err->getThrownTypes().get() == Error.get());
   DIB.finalize();
 }
@@ -501,12 +502,14 @@ TEST_F(IRBuilderTest, DIBuilder) {
                                   DIB.createFile("F.CBL", "/"), "llvm-cobol74",
                                   true, "", 0);
   auto Type = DIB.createSubroutineType(DIB.getOrCreateTypeArray(None));
-  auto SP = DIB.createFunction(CU, "foo", "", File, 1, Type, false, true, 1,
-                               DINode::FlagZero, true);
+  auto SP = DIB.createFunction(
+      CU, "foo", "", File, 1, Type, 1, DINode::FlagZero,
+      DISubprogram::SPFlagDefinition | DISubprogram::SPFlagOptimized);
   F->setSubprogram(SP);
   AllocaInst *I = Builder.CreateAlloca(Builder.getInt8Ty());
-  auto BarSP = DIB.createFunction(CU, "bar", "", File, 1, Type, false, true, 1,
-                                  DINode::FlagZero, true);
+  auto BarSP = DIB.createFunction(
+      CU, "bar", "", File, 1, Type, 1, DINode::FlagZero,
+      DISubprogram::SPFlagDefinition | DISubprogram::SPFlagOptimized);
   auto BadScope = DIB.createLexicalBlockFile(BarSP, File, 0);
   I->setDebugLoc(DebugLoc::get(2, 0, BadScope));
   DIB.finalize();
@@ -521,10 +524,10 @@ TEST_F(IRBuilderTest, createArtificialSubprogram) {
                                   /*isOptimized=*/true, /*Flags=*/"",
                                   /*Runtime Version=*/0);
   auto Type = DIB.createSubroutineType(DIB.getOrCreateTypeArray(None));
-  auto SP = DIB.createFunction(CU, "foo", /*LinkageName=*/"", File,
-                               /*LineNo=*/1, Type, /*isLocalToUnit=*/false,
-                               /*isDefinition=*/true, /*ScopeLine=*/2,
-                               DINode::FlagZero, /*isOptimized=*/true);
+  auto SP = DIB.createFunction(
+      CU, "foo", /*LinkageName=*/"", File,
+      /*LineNo=*/1, Type, /*ScopeLine=*/2, DINode::FlagZero,
+      DISubprogram::SPFlagDefinition | DISubprogram::SPFlagOptimized);
   EXPECT_TRUE(SP->isDistinct());
 
   F->setSubprogram(SP);
@@ -611,7 +614,8 @@ TEST_F(IRBuilderTest, DebugLoc) {
                                   0);
   auto SPType = DIB.createSubroutineType(DIB.getOrCreateTypeArray(None));
   auto SP =
-      DIB.createFunction(CU, "foo", "foo", File, 1, SPType, false, true, 1);
+      DIB.createFunction(CU, "foo", "foo", File, 1, SPType, 1, DINode::FlagZero,
+                         DISubprogram::SPFlagDefinition);
   DebugLoc DL1 = DILocation::get(Ctx, 2, 0, SP);
   DebugLoc DL2 = DILocation::get(Ctx, 3, 0, SP);
 

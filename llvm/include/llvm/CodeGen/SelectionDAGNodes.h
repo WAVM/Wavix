@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/SelectionDAGNodes.h - SelectionDAG Nodes ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -232,7 +231,6 @@ template<> struct DenseMapInfo<SDValue> {
     return LHS == RHS;
   }
 };
-template <> struct isPodLike<SDValue> { static const bool value = true; };
 
 /// Allow casting operators to work directly on
 /// SDValues as if they were SDNode*'s.
@@ -672,6 +670,12 @@ public:
       case ISD::STRICT_FLOG2:
       case ISD::STRICT_FRINT:
       case ISD::STRICT_FNEARBYINT:
+      case ISD::STRICT_FMAXNUM:
+      case ISD::STRICT_FMINNUM:
+      case ISD::STRICT_FCEIL:
+      case ISD::STRICT_FFLOOR:
+      case ISD::STRICT_FROUND:
+      case ISD::STRICT_FTRUNC:
         return true;
     }
   }
@@ -891,6 +895,11 @@ public:
 
   /// Return the number of values used by this operation.
   unsigned getNumOperands() const { return NumOperands; }
+
+  /// Return the maximum number of operands that a SDNode can hold.
+  static constexpr size_t getMaxNumOperands() {
+    return std::numeric_limits<decltype(SDNode::NumOperands)>::max();
+  }
 
   /// Helper method returns the integer value of a ConstantSDNode operand.
   inline uint64_t getConstantOperandVal(unsigned Num) const;
@@ -1350,6 +1359,8 @@ public:
            N->getOpcode() == ISD::ATOMIC_LOAD_MAX     ||
            N->getOpcode() == ISD::ATOMIC_LOAD_UMIN    ||
            N->getOpcode() == ISD::ATOMIC_LOAD_UMAX    ||
+           N->getOpcode() == ISD::ATOMIC_LOAD_FADD    ||
+           N->getOpcode() == ISD::ATOMIC_LOAD_FSUB    ||
            N->getOpcode() == ISD::ATOMIC_LOAD         ||
            N->getOpcode() == ISD::ATOMIC_STORE        ||
            N->getOpcode() == ISD::MLOAD               ||
@@ -1402,6 +1413,8 @@ public:
            N->getOpcode() == ISD::ATOMIC_LOAD_MAX     ||
            N->getOpcode() == ISD::ATOMIC_LOAD_UMIN    ||
            N->getOpcode() == ISD::ATOMIC_LOAD_UMAX    ||
+           N->getOpcode() == ISD::ATOMIC_LOAD_FADD    ||
+           N->getOpcode() == ISD::ATOMIC_LOAD_FSUB    ||
            N->getOpcode() == ISD::ATOMIC_LOAD         ||
            N->getOpcode() == ISD::ATOMIC_STORE;
   }
@@ -1606,6 +1619,21 @@ ConstantSDNode *isConstOrConstSplat(SDValue N, bool AllowUndefs = false);
 
 /// Returns the SDNode if it is a constant splat BuildVector or constant float.
 ConstantFPSDNode *isConstOrConstSplatFP(SDValue N, bool AllowUndefs = false);
+
+/// Return true if the value is a constant 0 integer or a splatted vector of
+/// a constant 0 integer (with no undefs).
+/// Build vector implicit truncation is not an issue for null values.
+bool isNullOrNullSplat(SDValue V);
+
+/// Return true if the value is a constant 1 integer or a splatted vector of a
+/// constant 1 integer (with no undefs).
+/// Does not permit build vector implicit truncation.
+bool isOneOrOneSplat(SDValue V);
+
+/// Return true if the value is a constant -1 integer or a splatted vector of a
+/// constant -1 integer (with no undefs).
+/// Does not permit build vector implicit truncation.
+bool isAllOnesOrAllOnesSplat(SDValue V);
 
 class GlobalAddressSDNode : public SDNode {
   friend class SelectionDAG;
@@ -2466,15 +2494,18 @@ namespace ISD {
 
   /// Attempt to match a unary predicate against a scalar/splat constant or
   /// every element of a constant BUILD_VECTOR.
+  /// If AllowUndef is true, then UNDEF elements will pass nullptr to Match.
   bool matchUnaryPredicate(SDValue Op,
-                           std::function<bool(ConstantSDNode *)> Match);
+                           std::function<bool(ConstantSDNode *)> Match,
+                           bool AllowUndefs = false);
 
   /// Attempt to match a binary predicate against a pair of scalar/splat
   /// constants or every element of a pair of constant BUILD_VECTORs.
+  /// If AllowUndef is true, then UNDEF elements will pass nullptr to Match.
   bool matchBinaryPredicate(
       SDValue LHS, SDValue RHS,
-      std::function<bool(ConstantSDNode *, ConstantSDNode *)> Match);
-
+      std::function<bool(ConstantSDNode *, ConstantSDNode *)> Match,
+      bool AllowUndefs = false);
 } // end namespace ISD
 
 } // end namespace llvm

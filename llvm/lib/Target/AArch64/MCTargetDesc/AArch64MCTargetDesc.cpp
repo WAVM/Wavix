@@ -1,9 +1,8 @@
 //===-- AArch64MCTargetDesc.cpp - AArch64 Target Descriptions ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,6 +15,7 @@
 #include "AArch64MCAsmInfo.h"
 #include "AArch64WinCOFFStreamer.h"
 #include "InstPrinter/AArch64InstPrinter.h"
+#include "MCTargetDesc/AArch64AddressingModes.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCInstrAnalysis.h"
@@ -31,6 +31,7 @@
 using namespace llvm;
 
 #define GET_INSTRINFO_MC_DESC
+#define GET_INSTRINFO_MC_HELPERS
 #include "AArch64GenInstrInfo.inc"
 
 #define GET_SUBTARGETINFO_MC_DESC

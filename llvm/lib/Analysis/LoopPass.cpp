@@ -1,9 +1,8 @@
 //===- LoopPass.cpp - Loop Pass and Loop Pass Manager ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -216,10 +215,12 @@ bool LPPassManager::runOnFunction(Function &F) {
 
       initializeAnalysisImpl(P);
 
+      bool LocalChanged = false;
       {
         PassManagerPrettyStackEntry X(P, *CurrentLoop->getHeader());
         TimeRegion PassTimer(getPassTimer(P));
-        Changed |= P->runOnLoop(CurrentLoop, *this);
+        LocalChanged = P->runOnLoop(CurrentLoop, *this);
+        Changed |= LocalChanged;
         if (EmitICRemark) {
           unsigned NewSize = F.getInstructionCount();
           // Update the size of the function, emit a remark, and update the
@@ -235,7 +236,7 @@ bool LPPassManager::runOnFunction(Function &F) {
         }
       }
 
-      if (Changed)
+      if (LocalChanged)
         dumpPassInfo(P, MODIFICATION_MSG, ON_LOOP_MSG,
                      CurrentLoopDeleted ? "<deleted loop>"
                                         : CurrentLoop->getName());

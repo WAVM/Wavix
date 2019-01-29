@@ -1,9 +1,8 @@
 //===--- lib/CodeGen/DIE.cpp - DWARF Info Entries -------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -465,7 +464,7 @@ void DIEInteger::print(raw_ostream &O) const {
 /// EmitValue - Emit expression value.
 ///
 void DIEExpr::EmitValue(const AsmPrinter *AP, dwarf::Form Form) const {
-  AP->EmitDebugThreadLocal(Expr, SizeOf(AP, Form));
+  AP->EmitDebugValue(Expr, SizeOf(AP, Form));
 }
 
 /// SizeOf - Determine size of expression value in bytes.
@@ -589,8 +588,7 @@ void DIEString::print(raw_ostream &O) const {
 //===----------------------------------------------------------------------===//
 void DIEInlineString::EmitValue(const AsmPrinter *AP, dwarf::Form Form) const {
   if (Form == dwarf::DW_FORM_string) {
-    for (char ch : S)
-      AP->emitInt8(ch);
+    AP->OutStreamer->EmitBytes(S);
     AP->emitInt8(0);
     return;
   }

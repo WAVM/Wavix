@@ -1,9 +1,8 @@
 //===-- RuntimeDyldCOFFX86_64.h --- COFF/X86_64 specific code ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -125,6 +124,13 @@ public:
 
     case COFF::IMAGE_REL_AMD64_ADDR64: {
       writeBytesUnaligned(Value + RE.Addend, Target, 8);
+      break;
+    }
+
+    case COFF::IMAGE_REL_AMD64_SECREL: {
+      assert(static_cast<int64_t>(RE.Addend) <= INT32_MAX && "Relocation overflow");
+      assert(static_cast<int64_t>(RE.Addend) >= INT32_MIN && "Relocation underflow");
+      writeBytesUnaligned(RE.Addend, Target, 4);
       break;
     }
 

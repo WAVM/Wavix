@@ -1,9 +1,8 @@
 //===-- X86InstrInfo.td - Main X86 Instruction Definition --*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,10 +15,6 @@
 //===----------------------------------------------------------------------===//
 // X86 specific DAG Nodes.
 //
-
-def SDTIntShiftDOp: SDTypeProfile<1, 3,
-                                  [SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>,
-                                   SDTCisInt<0>, SDTCisInt<3>]>;
 
 def SDTX86CmpTest : SDTypeProfile<1, 2, [SDTCisVT<0, i32>, SDTCisSameAs<1, 2>]>;
 
@@ -257,8 +252,6 @@ def X86umul_flag : SDNode<"X86ISD::UMUL", SDT2ResultBinaryArithWithFlags,
 def X86adc_flag  : SDNode<"X86ISD::ADC",  SDTBinaryArithWithFlagsInOut>;
 def X86sbb_flag  : SDNode<"X86ISD::SBB",  SDTBinaryArithWithFlagsInOut>;
 
-def X86inc_flag  : SDNode<"X86ISD::INC",  SDTUnaryArithWithFlags>;
-def X86dec_flag  : SDNode<"X86ISD::DEC",  SDTUnaryArithWithFlags>;
 def X86or_flag   : SDNode<"X86ISD::OR",   SDTBinaryArithWithFlags,
                           [SDNPCommutative]>;
 def X86xor_flag  : SDNode<"X86ISD::XOR",  SDTBinaryArithWithFlags,
@@ -279,13 +272,6 @@ def X86lock_xor  : SDNode<"X86ISD::LXOR",  SDTLockBinaryArithWithFlags,
                           [SDNPHasChain, SDNPMayStore, SDNPMayLoad,
                            SDNPMemOperand]>;
 def X86lock_and  : SDNode<"X86ISD::LAND",  SDTLockBinaryArithWithFlags,
-                          [SDNPHasChain, SDNPMayStore, SDNPMayLoad,
-                           SDNPMemOperand]>;
-
-def X86lock_inc  : SDNode<"X86ISD::LINC",  SDTLockUnaryArithWithFlags,
-                          [SDNPHasChain, SDNPMayStore, SDNPMayLoad,
-                           SDNPMemOperand]>;
-def X86lock_dec  : SDNode<"X86ISD::LDEC",  SDTLockUnaryArithWithFlags,
                           [SDNPHasChain, SDNPMayStore, SDNPMayLoad,
                            SDNPMemOperand]>;
 
@@ -1493,7 +1479,7 @@ def MOV64rr : RI<0x89, MRMDestReg, (outs GR64:$dst), (ins GR64:$src),
                  "mov{q}\t{$src, $dst|$dst, $src}", []>;
 }
 
-let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
+let isReMaterializable = 1, isAsCheapAsAMove = 1, isMoveImm = 1 in {
 def MOV8ri  : Ii8 <0xB0, AddRegFrm, (outs GR8 :$dst), (ins i8imm :$src),
                    "mov{b}\t{$src, $dst|$dst, $src}",
                    [(set GR8:$dst, imm:$src)]>;
@@ -1507,7 +1493,7 @@ def MOV64ri32 : RIi32S<0xC7, MRM0r, (outs GR64:$dst), (ins i64i32imm:$src),
                        "mov{q}\t{$src, $dst|$dst, $src}",
                        [(set GR64:$dst, i64immSExt32:$src)]>;
 }
-let isReMaterializable = 1 in {
+let isReMaterializable = 1, isMoveImm = 1 in {
 def MOV64ri : RIi64<0xB8, AddRegFrm, (outs GR64:$dst), (ins i64imm:$src),
                     "movabs{q}\t{$src, $dst|$dst, $src}",
                     [(set GR64:$dst, relocImm:$src)]>;
@@ -2391,6 +2377,21 @@ let Predicates = [HasBMI], Defs = [EFLAGS] in {
 // Pattern fragments to auto generate BMI instructions.
 //===----------------------------------------------------------------------===//
 
+def or_flag_nocf : PatFrag<(ops node:$lhs, node:$rhs),
+                           (X86or_flag node:$lhs, node:$rhs), [{
+  return hasNoCarryFlagUses(SDValue(N, 1));
+}]>;
+
+def xor_flag_nocf : PatFrag<(ops node:$lhs, node:$rhs),
+                            (X86xor_flag node:$lhs, node:$rhs), [{
+  return hasNoCarryFlagUses(SDValue(N, 1));
+}]>;
+
+def and_flag_nocf : PatFrag<(ops node:$lhs, node:$rhs),
+                            (X86and_flag node:$lhs, node:$rhs), [{
+  return hasNoCarryFlagUses(SDValue(N, 1));
+}]>;
+
 let Predicates = [HasBMI] in {
   // FIXME: patterns for the load versions are not implemented
   def : Pat<(and GR32:$src, (add GR32:$src, -1)),
@@ -2407,6 +2408,17 @@ let Predicates = [HasBMI] in {
             (BLSI32rr GR32:$src)>;
   def : Pat<(and GR64:$src, (ineg GR64:$src)),
             (BLSI64rr GR64:$src)>;
+
+  // Versions to match flag producing ops.
+  def : Pat<(xor_flag_nocf GR32:$src, (add GR32:$src, -1)),
+            (BLSMSK32rr GR32:$src)>;
+  def : Pat<(xor_flag_nocf GR64:$src, (add GR64:$src, -1)),
+            (BLSMSK64rr GR64:$src)>;
+
+  def : Pat<(and_flag_nocf GR32:$src, (add GR32:$src, -1)),
+            (BLSR32rr GR32:$src)>;
+  def : Pat<(and_flag_nocf GR64:$src, (add GR64:$src, -1)),
+            (BLSR64rr GR64:$src)>;
 }
 
 multiclass bmi_bextr<bits<8> opc, string mnemonic, RegisterClass RC,
@@ -2498,46 +2510,6 @@ let Predicates = [HasBMI2, NoTBM] in {
               (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
                              (MOV8ri (CountTrailingOnes imm:$mask)), sub_8bit))>;
 }
-
-let Predicates = [HasBMI2] in {
-  multiclass _bmi_bzhi_pattern<dag regpattern, dag mempattern, RegisterClass RC,
-                               ValueType VT, Instruction DstInst,
-                               Instruction DstMemInst> {
-    def : Pat<regpattern,
-              (DstInst RC:$src,
-                (INSERT_SUBREG (VT (IMPLICIT_DEF)), GR8:$lz, sub_8bit))>;
-    def : Pat<mempattern,
-              (DstMemInst addr:$src,
-                (INSERT_SUBREG (VT (IMPLICIT_DEF)), GR8:$lz, sub_8bit))>;
-  }
-
-  multiclass bmi_bzhi_patterns<RegisterClass RC, int bitwidth, ValueType VT,
-                               Instruction DstInst, X86MemOperand x86memop,
-                               Instruction DstMemInst> {
-    // x & (-1 >> (bitwidth - y))
-    defm : _bmi_bzhi_pattern<(and RC:$src, (srl -1, (sub bitwidth, GR8:$lz))),
-                             (and (x86memop addr:$src),
-                                  (srl -1, (sub bitwidth, GR8:$lz))),
-                             RC, VT, DstInst, DstMemInst>;
-  }
-
-  defm : bmi_bzhi_patterns<GR32, 32, i32, BZHI32rr, loadi32, BZHI32rm>;
-  defm : bmi_bzhi_patterns<GR64, 64, i64, BZHI64rr, loadi64, BZHI64rm>;
-
-  // x & (-1 >> (32 - y))
-  def : Pat<(and GR32:$src, (srl -1, (i8 (trunc (sub 32, GR32:$lz))))),
-            (BZHI32rr GR32:$src, GR32:$lz)>;
-  def : Pat<(and (loadi32 addr:$src), (srl -1, (i8 (trunc (sub 32, GR32:$lz))))),
-            (BZHI32rm addr:$src, GR32:$lz)>;
-
-  // x & (-1 >> (64 - y))
-  def : Pat<(and GR64:$src, (srl -1, (i8 (trunc (sub 64, GR32:$lz))))),
-            (BZHI64rr GR64:$src,
-              (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GR32:$lz, sub_32bit))>;
-  def : Pat<(and (loadi64 addr:$src), (srl -1, (i8 (trunc (sub 64, GR32:$lz))))),
-            (BZHI64rm addr:$src,
-              (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GR32:$lz, sub_32bit))>;
-} // HasBMI2
 
 multiclass bmi_pdep_pext<string mnemonic, RegisterClass RC,
                          X86MemOperand x86memop, Intrinsic Int,
@@ -2845,6 +2817,45 @@ let Predicates = [HasTBM] in {
             (TZMSK32rr GR32:$src)>;
   def : Pat<(and (not GR64:$src), (add GR64:$src, -1)),
             (TZMSK64rr GR64:$src)>;
+
+  // Patterns to match flag producing ops.
+  // X86and_flag nodes are rarely created. Those should use CMP+AND. We do
+  // TESTrr matching in PostProcessISelDAG to allow BLSR/BLSI to be formed.
+  def : Pat<(or_flag_nocf GR32:$src, (not (add GR32:$src, 1))),
+            (BLCI32rr GR32:$src)>;
+  def : Pat<(or_flag_nocf GR64:$src, (not (add GR64:$src, 1))),
+            (BLCI64rr GR64:$src)>;
+
+  // Extra patterns because opt can optimize the above patterns to this.
+  def : Pat<(or_flag_nocf GR32:$src, (sub -2, GR32:$src)),
+            (BLCI32rr GR32:$src)>;
+  def : Pat<(or_flag_nocf GR64:$src, (sub -2, GR64:$src)),
+            (BLCI64rr GR64:$src)>;
+
+  def : Pat<(xor_flag_nocf GR32:$src, (add GR32:$src, 1)),
+            (BLCMSK32rr GR32:$src)>;
+  def : Pat<(xor_flag_nocf GR64:$src, (add GR64:$src, 1)),
+            (BLCMSK64rr GR64:$src)>;
+
+  def : Pat<(or_flag_nocf GR32:$src, (add GR32:$src, 1)),
+            (BLCS32rr GR32:$src)>;
+  def : Pat<(or_flag_nocf GR64:$src, (add GR64:$src, 1)),
+            (BLCS64rr GR64:$src)>;
+
+  def : Pat<(or_flag_nocf GR32:$src, (add GR32:$src, -1)),
+            (BLSFILL32rr GR32:$src)>;
+  def : Pat<(or_flag_nocf GR64:$src, (add GR64:$src, -1)),
+            (BLSFILL64rr GR64:$src)>;
+
+  def : Pat<(or_flag_nocf (not GR32:$src), (add GR32:$src, -1)),
+            (BLSIC32rr GR32:$src)>;
+  def : Pat<(or_flag_nocf (not GR64:$src), (add GR64:$src, -1)),
+            (BLSIC64rr GR64:$src)>;
+
+  def : Pat<(or_flag_nocf (not GR32:$src), (add GR32:$src, 1)),
+            (T1MSKC32rr GR32:$src)>;
+  def : Pat<(or_flag_nocf (not GR64:$src), (add GR64:$src, 1)),
+            (T1MSKC64rr GR64:$src)>;
 } // HasTBM
 
 //===----------------------------------------------------------------------===//

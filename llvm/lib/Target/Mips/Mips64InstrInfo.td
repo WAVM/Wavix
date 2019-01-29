@@ -1,9 +1,8 @@
 //===- Mips64InstrInfo.td - Mips64 Instruction Information -*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -415,6 +414,13 @@ let isCodeGenOnly = 1, rs = 0, shamt = 0 in {
 // We need the following pseudo instruction to avoid offset calculation for
 // long branches.  See the comment in file MipsLongBranch.cpp for detailed
 // explanation.
+
+// Expands to: lui $dst, %highest/%higher/%hi/%lo($tgt)
+def LONG_BRANCH_LUi2Op_64 : PseudoSE<(outs GPR64Opnd:$dst),
+  (ins brtarget:$tgt), []>, GPR_64;
+// Expands to: addiu $dst, %highest/%higher/%hi/%lo($tgt)
+def LONG_BRANCH_DADDiu2Op : PseudoSE<(outs GPR64Opnd:$dst),
+  (ins GPR64Opnd:$src, brtarget:$tgt), []>, GPR_64;
 
 // Expands to: daddiu $dst, $src, %PART($tgt - $baltgt)
 // where %PART may be %hi or %lo, depending on the relocation kind

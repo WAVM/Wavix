@@ -1,18 +1,31 @@
 //===- HotColdSplitting.cpp -- Outline Cold Regions -------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Outline cold regions to a separate function.
-// TODO: Update BFI and BPI
-// TODO: Add all the outlined functions to a separate section.
-//
+///
+/// \file
+/// The goal of hot/cold splitting is to improve the memory locality of code.
+/// The splitting pass does this by identifying cold blocks and moving them into
+/// separate functions.
+///
+/// When the splitting pass finds a cold block (referred to as "the sink"), it
+/// grows a maximal cold region around that block. The maximal region contains
+/// all blocks (post-)dominated by the sink [*]. In theory, these blocks are as
+/// cold as the sink. Once a region is found, it's split out of the original
+/// function provided it's profitable to do so.
+///
+/// [*] In practice, there is some added complexity because some blocks are not
+/// safe to extract.
+///
+/// TODO: Use the PM to get domtrees, and preserve BFI/BPI.
+/// TODO: Reorder outlined functions.
+///
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -25,12 +38,14 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
@@ -50,56 +65,31 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/CodeExtractor.h"
 #include "llvm/Transforms/Utils/Local.h"
-#include "llvm/Transforms/Utils/SSAUpdater.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <algorithm>
 #include <cassert>
 
 #define DEBUG_TYPE "hotcoldsplit"
 
-STATISTIC(NumColdSESEFound,
-          "Number of cold single entry single exit (SESE) regions found.");
-STATISTIC(NumColdSESEOutlined,
-          "Number of cold single entry single exit (SESE) regions outlined.");
+STATISTIC(NumColdRegionsFound, "Number of cold regions found.");
+STATISTIC(NumColdRegionsOutlined, "Number of cold regions outlined.");
 
 using namespace llvm;
 
 static cl::opt<bool> EnableStaticAnalyis("hot-cold-static-analysis",
                               cl::init(true), cl::Hidden);
 
+static cl::opt<int>
+    SplittingThreshold("hotcoldsplit-threshold", cl::init(2), cl::Hidden,
+                       cl::desc("Base penalty for splitting cold code (as a "
+                                "multiple of TCC_Basic)"));
 
 namespace {
 
-struct PostDomTree : PostDomTreeBase<BasicBlock> {
-  PostDomTree(Function &F) { recalculate(F); }
-};
-
-typedef DenseSet<const BasicBlock *> DenseSetBB;
-typedef DenseMap<const BasicBlock *, uint64_t> DenseMapBBInt;
-
-// From: https://reviews.llvm.org/D22558
-// Exit is not part of the region.
-static bool isSingleEntrySingleExit(BasicBlock *Entry, const BasicBlock *Exit,
-                                    DominatorTree *DT, PostDomTree *PDT,
-                                    SmallVectorImpl<BasicBlock *> &Region) {
-  if (!DT->dominates(Entry, Exit))
-    return false;
-
-  if (!PDT->dominates(Exit, Entry))
-    return false;
-
-  for (auto I = df_begin(Entry), E = df_end(Entry); I != E;) {
-    if (*I == Exit) {
-      I.skipChildren();
-      continue;
-    }
-    if (!DT->dominates(Entry, *I))
-      return false;
-    Region.push_back(*I);
-    ++I;
-  }
-  return true;
-}
+/// A sequence of basic blocks.
+///
+/// A 0-sized SmallVector is slightly cheaper to move than a std::vector.
+using BlockSequence = SmallVector<BasicBlock *, 0>;
 
 // Same as blockEndsInUnreachable in CodeGen/BranchFolding.cpp. Do not modify
 // this function unless you modify the MBB version as well.
@@ -116,138 +106,53 @@ bool blockEndsInUnreachable(const BasicBlock &BB) {
   return !(isa<ReturnInst>(I) || isa<IndirectBrInst>(I));
 }
 
-static bool exceptionHandlingFunctions(const CallInst *CI) {
-  auto F = CI->getCalledFunction();
-  if (!F)
-    return false;
-  auto FName = F->getName();
-  return FName == "__cxa_begin_catch" ||
-         FName == "__cxa_free_exception" ||
-         FName == "__cxa_allocate_exception" ||
-         FName == "__cxa_begin_catch" ||
-         FName == "__cxa_end_catch";
-}
-
-static bool unlikelyExecuted(const BasicBlock &BB) {
-  if (blockEndsInUnreachable(BB))
-    return true;
+bool unlikelyExecuted(BasicBlock &BB) {
   // Exception handling blocks are unlikely executed.
-  if (BB.isEHPad())
+  if (BB.isEHPad() || isa<ResumeInst>(BB.getTerminator()))
     return true;
-  for (const Instruction &I : BB)
-    if (const CallInst *CI = dyn_cast<CallInst>(&I)) {
-      // The block is cold if it calls functions tagged as cold or noreturn.
-      if (CI->hasFnAttr(Attribute::Cold) ||
-          CI->hasFnAttr(Attribute::NoReturn) ||
-          exceptionHandlingFunctions(CI))
+
+  // The block is cold if it calls/invokes a cold function.
+  for (Instruction &I : BB)
+    if (auto CS = CallSite(&I))
+      if (CS.hasFnAttr(Attribute::Cold))
         return true;
 
-      // Assume that inline assembly is hot code.
-      if (isa<InlineAsm>(CI->getCalledValue()))
-        return false;
-    }
-  return false;
-}
-
-static bool returnsOrHasSideEffects(const BasicBlock &BB) {
-  const Instruction *I = BB.getTerminator();
-  if (isa<ReturnInst>(I) || isa<IndirectBrInst>(I) || isa<InvokeInst>(I))
-    return true;
-
-  for (const Instruction &I : BB)
-    if (const CallInst *CI = dyn_cast<CallInst>(&I)) {
+  // The block is cold if it has an unreachable terminator, unless it's
+  // preceded by a call to a (possibly warm) noreturn call (e.g. longjmp).
+  if (blockEndsInUnreachable(BB)) {
+    if (auto *CI =
+            dyn_cast_or_null<CallInst>(BB.getTerminator()->getPrevNode()))
       if (CI->hasFnAttr(Attribute::NoReturn))
-        return true;
-
-      if (isa<InlineAsm>(CI->getCalledValue()))
-        return true;
-    }
+        return false;
+    return true;
+  }
 
   return false;
 }
 
-static DenseSetBB getHotBlocks(Function &F) {
+/// Check whether it's safe to outline \p BB.
+static bool mayExtractBlock(const BasicBlock &BB) {
+  // EH pads are unsafe to outline because doing so breaks EH type tables. It
+  // follows that invoke instructions cannot be extracted, because CodeExtractor
+  // requires unwind destinations to be within the extraction region.
+  return !BB.hasAddressTaken() && !BB.isEHPad() &&
+         !isa<InvokeInst>(BB.getTerminator());
+}
 
-  // Mark all cold basic blocks.
-  DenseSetBB ColdBlocks;
-  for (BasicBlock &BB : F)
-    if (unlikelyExecuted(BB)) {
-      LLVM_DEBUG(llvm::dbgs() << "\nForward propagation marks cold: " << BB);
-      ColdBlocks.insert((const BasicBlock *)&BB);
-    }
-
-  // Forward propagation: basic blocks are hot when they are reachable from the
-  // beginning of the function through a path that does not contain cold blocks.
-  SmallVector<const BasicBlock *, 8> WL;
-  DenseSetBB HotBlocks;
-
-  const BasicBlock *It = &F.front();
-  if (!ColdBlocks.count(It)) {
-    HotBlocks.insert(It);
-    // Breadth First Search to mark edges reachable from hot.
-    WL.push_back(It);
-    while (WL.size() > 0) {
-      It = WL.pop_back_val();
-
-      for (const BasicBlock *Succ : successors(It)) {
-        // Do not visit blocks that are cold.
-        if (!ColdBlocks.count(Succ) && !HotBlocks.count(Succ)) {
-          HotBlocks.insert(Succ);
-          WL.push_back(Succ);
-        }
-      }
-    }
+/// Mark \p F cold. Based on this assumption, also optimize it for minimum size.
+/// Return true if the function is changed.
+static bool markFunctionCold(Function &F) {
+  assert(!F.hasFnAttribute(Attribute::OptimizeNone) && "Can't mark this cold");
+  bool Changed = false;
+  if (!F.hasFnAttribute(Attribute::Cold)) {
+    F.addFnAttr(Attribute::Cold);
+    Changed = true;
   }
-
-  assert(WL.empty() && "work list should be empty");
-
-  DenseMapBBInt NumHotSuccessors;
-  // Back propagation: when all successors of a basic block are cold, the
-  // basic block is cold as well.
-  for (BasicBlock &BBRef : F) {
-    const BasicBlock *BB = &BBRef;
-    if (HotBlocks.count(BB)) {
-      // Keep a count of hot successors for every hot block.
-      NumHotSuccessors[BB] = 0;
-      for (const BasicBlock *Succ : successors(BB))
-        if (!ColdBlocks.count(Succ))
-          NumHotSuccessors[BB] += 1;
-
-      // Add to work list the blocks with all successors cold. Those are the
-      // root nodes in the next loop, where we will move those blocks from
-      // HotBlocks to ColdBlocks and iterate over their predecessors.
-      if (NumHotSuccessors[BB] == 0)
-        WL.push_back(BB);
-    }
+  if (!F.hasFnAttribute(Attribute::MinSize)) {
+    F.addFnAttr(Attribute::MinSize);
+    Changed = true;
   }
-
-  while (WL.size() > 0) {
-    It = WL.pop_back_val();
-    if (ColdBlocks.count(It))
-      continue;
-
-    // Do not back-propagate to blocks that return or have side effects.
-    if (returnsOrHasSideEffects(*It))
-      continue;
-
-    // Move the block from HotBlocks to ColdBlocks.
-    LLVM_DEBUG(llvm::dbgs() << "\nBack propagation marks cold: " << *It);
-    HotBlocks.erase(It);
-    ColdBlocks.insert(It);
-
-    // Iterate over the predecessors.
-    for (const BasicBlock *Pred : predecessors(It)) {
-      if (HotBlocks.count(Pred)) {
-        NumHotSuccessors[Pred] -= 1;
-
-        // If Pred has no more hot successors, add it to the work list.
-        if (NumHotSuccessors[Pred] == 0)
-          WL.push_back(Pred);
-      }
-    }
-  }
-
-  return HotBlocks;
+  return Changed;
 }
 
 class HotColdSplitting {
@@ -260,25 +165,12 @@ public:
   bool run(Module &M);
 
 private:
+  bool isFunctionCold(const Function &F) const;
   bool shouldOutlineFrom(const Function &F) const;
-  const Function *outlineColdBlocks(Function &F, const DenseSetBB &ColdBlock,
-                                    DominatorTree *DT, PostDomTree *PDT);
-  Function *extractColdRegion(const SmallVectorImpl<BasicBlock *> &Region,
-                              DominatorTree *DT, BlockFrequencyInfo *BFI,
-                              OptimizationRemarkEmitter &ORE);
-  bool isOutlineCandidate(const SmallVectorImpl<BasicBlock *> &Region,
-                          const BasicBlock *Exit) const {
-    if (!Exit)
-      return false;
-
-    // Regions with landing pads etc.
-    for (const BasicBlock *BB : Region) {
-      if (BB->isEHPad() || BB->hasAddressTaken())
-        return false;
-    }
-    return true;
-  }
-  SmallPtrSet<const Function *, 2> OutlinedFunctions;
+  bool outlineColdRegions(Function &F, bool HasProfileSummary);
+  Function *extractColdRegion(const BlockSequence &Region, DominatorTree &DT,
+                              BlockFrequencyInfo *BFI, TargetTransformInfo &TTI,
+                              OptimizationRemarkEmitter &ORE, unsigned Count);
   ProfileSummaryInfo *PSI;
   function_ref<BlockFrequencyInfo *(Function &)> GetBFI;
   function_ref<TargetTransformInfo &(Function &)> GetTTI;
@@ -304,49 +196,132 @@ public:
 
 } // end anonymous namespace
 
+/// Check whether \p F is inherently cold.
+bool HotColdSplitting::isFunctionCold(const Function &F) const {
+  if (F.hasFnAttribute(Attribute::Cold))
+    return true;
+
+  if (F.getCallingConv() == CallingConv::Cold)
+    return true;
+
+  if (PSI->isFunctionEntryCold(&F))
+    return true;
+
+  return false;
+}
+
 // Returns false if the function should not be considered for hot-cold split
 // optimization.
 bool HotColdSplitting::shouldOutlineFrom(const Function &F) const {
-  // Do not try to outline again from an already outlined cold function.
-  if (OutlinedFunctions.count(&F))
-    return false;
-
-  if (F.size() <= 2)
-    return false;
-
-  if (F.hasAddressTaken())
-    return false;
-
   if (F.hasFnAttribute(Attribute::AlwaysInline))
     return false;
 
   if (F.hasFnAttribute(Attribute::NoInline))
     return false;
 
-  if (F.getCallingConv() == CallingConv::Cold)
-    return false;
-
-  if (PSI->isFunctionEntryCold(&F))
-    return false;
   return true;
 }
 
-Function *
-HotColdSplitting::extractColdRegion(const SmallVectorImpl<BasicBlock *> &Region,
-                                    DominatorTree *DT, BlockFrequencyInfo *BFI,
-                                    OptimizationRemarkEmitter &ORE) {
+/// Get the benefit score of outlining \p Region.
+static int getOutliningBenefit(ArrayRef<BasicBlock *> Region,
+                               TargetTransformInfo &TTI) {
+  // Sum up the code size costs of non-terminator instructions. Tight coupling
+  // with \ref getOutliningPenalty is needed to model the costs of terminators.
+  int Benefit = 0;
+  for (BasicBlock *BB : Region)
+    for (Instruction &I : BB->instructionsWithoutDebug())
+      if (&I != BB->getTerminator())
+        Benefit +=
+            TTI.getInstructionCost(&I, TargetTransformInfo::TCK_CodeSize);
+
+  return Benefit;
+}
+
+/// Get the penalty score for outlining \p Region.
+static int getOutliningPenalty(ArrayRef<BasicBlock *> Region,
+                               unsigned NumInputs, unsigned NumOutputs) {
+  int Penalty = SplittingThreshold;
+  LLVM_DEBUG(dbgs() << "Applying penalty for splitting: " << Penalty << "\n");
+
+  // If the splitting threshold is set at or below zero, skip the usual
+  // profitability check.
+  if (SplittingThreshold <= 0)
+    return Penalty;
+
+  // The typical code size cost for materializing an argument for the outlined
+  // call.
+  LLVM_DEBUG(dbgs() << "Applying penalty for: " << NumInputs << " inputs\n");
+  const int CostForArgMaterialization = TargetTransformInfo::TCC_Basic;
+  Penalty += CostForArgMaterialization * NumInputs;
+
+  // The typical code size cost for an output alloca, its associated store, and
+  // its associated reload.
+  LLVM_DEBUG(dbgs() << "Applying penalty for: " << NumOutputs << " outputs\n");
+  const int CostForRegionOutput = 3 * TargetTransformInfo::TCC_Basic;
+  Penalty += CostForRegionOutput * NumOutputs;
+
+  // Find the number of distinct exit blocks for the region. Use a conservative
+  // check to determine whether control returns from the region.
+  bool NoBlocksReturn = true;
+  SmallPtrSet<BasicBlock *, 2> SuccsOutsideRegion;
+  for (BasicBlock *BB : Region) {
+    // If a block has no successors, only assume it does not return if it's
+    // unreachable.
+    if (succ_empty(BB)) {
+      NoBlocksReturn &= isa<UnreachableInst>(BB->getTerminator());
+      continue;
+    }
+
+    for (BasicBlock *SuccBB : successors(BB)) {
+      if (find(Region, SuccBB) == Region.end()) {
+        NoBlocksReturn = false;
+        SuccsOutsideRegion.insert(SuccBB);
+      }
+    }
+  }
+
+  // Apply a `noreturn` bonus.
+  if (NoBlocksReturn) {
+    LLVM_DEBUG(dbgs() << "Applying bonus for: " << Region.size()
+                      << " non-returning terminators\n");
+    Penalty -= Region.size();
+  }
+
+  // Apply a penalty for having more than one successor outside of the region.
+  // This penalty accounts for the switch needed in the caller.
+  if (!SuccsOutsideRegion.empty()) {
+    LLVM_DEBUG(dbgs() << "Applying penalty for: " << SuccsOutsideRegion.size()
+                      << " non-region successors\n");
+    Penalty += (SuccsOutsideRegion.size() - 1) * TargetTransformInfo::TCC_Basic;
+  }
+
+  return Penalty;
+}
+
+Function *HotColdSplitting::extractColdRegion(const BlockSequence &Region,
+                                              DominatorTree &DT,
+                                              BlockFrequencyInfo *BFI,
+                                              TargetTransformInfo &TTI,
+                                              OptimizationRemarkEmitter &ORE,
+                                              unsigned Count) {
   assert(!Region.empty());
-  LLVM_DEBUG(for (auto *BB : Region)
-          llvm::dbgs() << "\nExtracting: " << *BB;);
 
   // TODO: Pass BFI and BPI to update profile information.
-  CodeExtractor CE(Region, DT);
+  CodeExtractor CE(Region, &DT, /* AggregateArgs */ false, /* BFI */ nullptr,
+                   /* BPI */ nullptr, /* AllowVarArgs */ false,
+                   /* AllowAlloca */ false,
+                   /* Suffix */ "cold." + std::to_string(Count));
 
+  // Perform a simple cost/benefit analysis to decide whether or not to permit
+  // splitting.
   SetVector<Value *> Inputs, Outputs, Sinks;
   CE.findInputsOutputs(Inputs, Outputs, Sinks);
-
-  // Do not extract regions that have live exit variables.
-  if (Outputs.size() > 0)
+  int OutliningBenefit = getOutliningBenefit(Region, TTI);
+  int OutliningPenalty =
+      getOutliningPenalty(Region, Inputs.size(), Outputs.size());
+  LLVM_DEBUG(dbgs() << "Split profitability: benefit = " << OutliningBenefit
+                    << ", penalty = " << OutliningPenalty << "\n");
+  if (OutliningBenefit <= OutliningPenalty)
     return nullptr;
 
   Function *OrigF = Region[0]->getParent();
@@ -354,12 +329,15 @@ HotColdSplitting::extractColdRegion(const SmallVectorImpl<BasicBlock *> &Region,
     User *U = *OutF->user_begin();
     CallInst *CI = cast<CallInst>(U);
     CallSite CS(CI);
-    NumColdSESEOutlined++;
-    if (GetTTI(*OutF).useColdCCForColdCall(*OutF)) {
+    NumColdRegionsOutlined++;
+    if (TTI.useColdCCForColdCall(*OutF)) {
       OutF->setCallingConv(CallingConv::Cold);
       CS.setCallingConv(CallingConv::Cold);
     }
     CI->setIsNoInline();
+
+    markFunctionCold(*OutF);
+
     LLVM_DEBUG(llvm::dbgs() << "Outlined Region: " << *OutF);
     ORE.emit([&]() {
       return OptimizationRemark(DEBUG_TYPE, "HotColdSplit",
@@ -379,76 +357,322 @@ HotColdSplitting::extractColdRegion(const SmallVectorImpl<BasicBlock *> &Region,
   return nullptr;
 }
 
-// Return the function created after outlining, nullptr otherwise.
-const Function *HotColdSplitting::outlineColdBlocks(Function &F,
-                                                    const DenseSetBB &HotBlocks,
-                                                    DominatorTree *DT,
-                                                    PostDomTree *PDT) {
-  auto BFI = GetBFI(F);
-  auto &ORE = (*GetORE)(F);
-  // Walking the dominator tree allows us to find the largest
-  // cold region.
-  BasicBlock *Begin = DT->getRootNode()->getBlock();
+/// A pair of (basic block, score).
+using BlockTy = std::pair<BasicBlock *, unsigned>;
 
-  // Early return if the beginning of the function has been marked cold,
-  // otherwise all the function gets outlined.
-  if (PSI->isColdBB(Begin, BFI) || !HotBlocks.count(Begin))
-    return nullptr;
+namespace {
+/// A maximal outlining region. This contains all blocks post-dominated by a
+/// sink block, the sink block itself, and all blocks dominated by the sink.
+/// If sink-predecessors and sink-successors cannot be extracted in one region,
+/// the static constructor returns a list of suitable extraction regions.
+class OutliningRegion {
+  /// A list of (block, score) pairs. A block's score is non-zero iff it's a
+  /// viable sub-region entry point. Blocks with higher scores are better entry
+  /// points (i.e. they are more distant ancestors of the sink block).
+  SmallVector<BlockTy, 0> Blocks = {};
 
-  for (auto I = df_begin(Begin), E = df_end(Begin); I != E; ++I) {
-    BasicBlock *BB = *I;
-    if (PSI->isColdBB(BB, BFI) || !HotBlocks.count(BB)) {
-      SmallVector<BasicBlock *, 4> ValidColdRegion, Region;
-      BasicBlock *Exit = (*PDT)[BB]->getIDom()->getBlock();
-      BasicBlock *ExitColdRegion = nullptr;
+  /// The suggested entry point into the region. If the region has multiple
+  /// entry points, all blocks within the region may not be reachable from this
+  /// entry point.
+  BasicBlock *SuggestedEntryPoint = nullptr;
 
-      // Estimated cold region between a BB and its dom-frontier.
-      while (Exit && isSingleEntrySingleExit(BB, Exit, DT, PDT, Region) &&
-             isOutlineCandidate(Region, Exit)) {
-        ExitColdRegion = Exit;
-        ValidColdRegion = Region;
-        Region.clear();
-        // Update Exit recursively to its dom-frontier.
-        Exit = (*PDT)[Exit]->getIDom()->getBlock();
+  /// Whether the entire function is cold.
+  bool EntireFunctionCold = false;
+
+  /// If \p BB is a viable entry point, return \p Score. Return 0 otherwise.
+  static unsigned getEntryPointScore(BasicBlock &BB, unsigned Score) {
+    return mayExtractBlock(BB) ? Score : 0;
+  }
+
+  /// These scores should be lower than the score for predecessor blocks,
+  /// because regions starting at predecessor blocks are typically larger.
+  static constexpr unsigned ScoreForSuccBlock = 1;
+  static constexpr unsigned ScoreForSinkBlock = 1;
+
+  OutliningRegion(const OutliningRegion &) = delete;
+  OutliningRegion &operator=(const OutliningRegion &) = delete;
+
+public:
+  OutliningRegion() = default;
+  OutliningRegion(OutliningRegion &&) = default;
+  OutliningRegion &operator=(OutliningRegion &&) = default;
+
+  static std::vector<OutliningRegion> create(BasicBlock &SinkBB,
+                                             const DominatorTree &DT,
+                                             const PostDominatorTree &PDT) {
+    std::vector<OutliningRegion> Regions;
+    SmallPtrSet<BasicBlock *, 4> RegionBlocks;
+
+    Regions.emplace_back();
+    OutliningRegion *ColdRegion = &Regions.back();
+
+    auto addBlockToRegion = [&](BasicBlock *BB, unsigned Score) {
+      RegionBlocks.insert(BB);
+      ColdRegion->Blocks.emplace_back(BB, Score);
+    };
+
+    // The ancestor farthest-away from SinkBB, and also post-dominated by it.
+    unsigned SinkScore = getEntryPointScore(SinkBB, ScoreForSinkBlock);
+    ColdRegion->SuggestedEntryPoint = (SinkScore > 0) ? &SinkBB : nullptr;
+    unsigned BestScore = SinkScore;
+
+    // Visit SinkBB's ancestors using inverse DFS.
+    auto PredIt = ++idf_begin(&SinkBB);
+    auto PredEnd = idf_end(&SinkBB);
+    while (PredIt != PredEnd) {
+      BasicBlock &PredBB = **PredIt;
+      bool SinkPostDom = PDT.dominates(&SinkBB, &PredBB);
+
+      // If the predecessor is cold and has no predecessors, the entire
+      // function must be cold.
+      if (SinkPostDom && pred_empty(&PredBB)) {
+        ColdRegion->EntireFunctionCold = true;
+        return Regions;
       }
-      if (ExitColdRegion) {
-        // Do not outline a region with only one block.
-        if (ValidColdRegion.size() == 1)
-          continue;
 
-        ++NumColdSESEFound;
-        ValidColdRegion.push_back(ExitColdRegion);
-        // Candidate for outlining. FIXME: Continue outlining.
-        return extractColdRegion(ValidColdRegion, DT, BFI, ORE);
+      // If SinkBB does not post-dominate a predecessor, do not mark the
+      // predecessor (or any of its predecessors) cold.
+      if (!SinkPostDom || !mayExtractBlock(PredBB)) {
+        PredIt.skipChildren();
+        continue;
       }
+
+      // Keep track of the post-dominated ancestor farthest away from the sink.
+      // The path length is always >= 2, ensuring that predecessor blocks are
+      // considered as entry points before the sink block.
+      unsigned PredScore = getEntryPointScore(PredBB, PredIt.getPathLength());
+      if (PredScore > BestScore) {
+        ColdRegion->SuggestedEntryPoint = &PredBB;
+        BestScore = PredScore;
+      }
+
+      addBlockToRegion(&PredBB, PredScore);
+      ++PredIt;
+    }
+
+    // If the sink can be added to the cold region, do so. It's considered as
+    // an entry point before any sink-successor blocks.
+    //
+    // Otherwise, split cold sink-successor blocks using a separate region.
+    // This satisfies the requirement that all extraction blocks other than the
+    // first have predecessors within the extraction region.
+    if (mayExtractBlock(SinkBB)) {
+      addBlockToRegion(&SinkBB, SinkScore);
+    } else {
+      Regions.emplace_back();
+      ColdRegion = &Regions.back();
+      BestScore = 0;
+    }
+
+    // Find all successors of SinkBB dominated by SinkBB using DFS.
+    auto SuccIt = ++df_begin(&SinkBB);
+    auto SuccEnd = df_end(&SinkBB);
+    while (SuccIt != SuccEnd) {
+      BasicBlock &SuccBB = **SuccIt;
+      bool SinkDom = DT.dominates(&SinkBB, &SuccBB);
+
+      // Don't allow the backwards & forwards DFSes to mark the same block.
+      bool DuplicateBlock = RegionBlocks.count(&SuccBB);
+
+      // If SinkBB does not dominate a successor, do not mark the successor (or
+      // any of its successors) cold.
+      if (DuplicateBlock || !SinkDom || !mayExtractBlock(SuccBB)) {
+        SuccIt.skipChildren();
+        continue;
+      }
+
+      unsigned SuccScore = getEntryPointScore(SuccBB, ScoreForSuccBlock);
+      if (SuccScore > BestScore) {
+        ColdRegion->SuggestedEntryPoint = &SuccBB;
+        BestScore = SuccScore;
+      }
+
+      addBlockToRegion(&SuccBB, SuccScore);
+      ++SuccIt;
+    }
+
+    return Regions;
+  }
+
+  /// Whether this region has nothing to extract.
+  bool empty() const { return !SuggestedEntryPoint; }
+
+  /// The blocks in this region.
+  ArrayRef<std::pair<BasicBlock *, unsigned>> blocks() const { return Blocks; }
+
+  /// Whether the entire function containing this region is cold.
+  bool isEntireFunctionCold() const { return EntireFunctionCold; }
+
+  /// Remove a sub-region from this region and return it as a block sequence.
+  BlockSequence takeSingleEntrySubRegion(DominatorTree &DT) {
+    assert(!empty() && !isEntireFunctionCold() && "Nothing to extract");
+
+    // Remove blocks dominated by the suggested entry point from this region.
+    // During the removal, identify the next best entry point into the region.
+    // Ensure that the first extracted block is the suggested entry point.
+    BlockSequence SubRegion = {SuggestedEntryPoint};
+    BasicBlock *NextEntryPoint = nullptr;
+    unsigned NextScore = 0;
+    auto RegionEndIt = Blocks.end();
+    auto RegionStartIt = remove_if(Blocks, [&](const BlockTy &Block) {
+      BasicBlock *BB = Block.first;
+      unsigned Score = Block.second;
+      bool InSubRegion =
+          BB == SuggestedEntryPoint || DT.dominates(SuggestedEntryPoint, BB);
+      if (!InSubRegion && Score > NextScore) {
+        NextEntryPoint = BB;
+        NextScore = Score;
+      }
+      if (InSubRegion && BB != SuggestedEntryPoint)
+        SubRegion.push_back(BB);
+      return InSubRegion;
+    });
+    Blocks.erase(RegionStartIt, RegionEndIt);
+
+    // Update the suggested entry point.
+    SuggestedEntryPoint = NextEntryPoint;
+
+    return SubRegion;
+  }
+};
+} // namespace
+
+bool HotColdSplitting::outlineColdRegions(Function &F, bool HasProfileSummary) {
+  bool Changed = false;
+
+  // The set of cold blocks.
+  SmallPtrSet<BasicBlock *, 4> ColdBlocks;
+
+  // The worklist of non-intersecting regions left to outline.
+  SmallVector<OutliningRegion, 2> OutliningWorklist;
+
+  // Set up an RPO traversal. Experimentally, this performs better (outlines
+  // more) than a PO traversal, because we prevent region overlap by keeping
+  // the first region to contain a block.
+  ReversePostOrderTraversal<Function *> RPOT(&F);
+
+  // Calculate domtrees lazily. This reduces compile-time significantly.
+  std::unique_ptr<DominatorTree> DT;
+  std::unique_ptr<PostDominatorTree> PDT;
+
+  // Calculate BFI lazily (it's only used to query ProfileSummaryInfo). This
+  // reduces compile-time significantly. TODO: When we *do* use BFI, we should
+  // be able to salvage its domtrees instead of recomputing them.
+  BlockFrequencyInfo *BFI = nullptr;
+  if (HasProfileSummary)
+    BFI = GetBFI(F);
+
+  TargetTransformInfo &TTI = GetTTI(F);
+  OptimizationRemarkEmitter &ORE = (*GetORE)(F);
+
+  // Find all cold regions.
+  for (BasicBlock *BB : RPOT) {
+    // This block is already part of some outlining region.
+    if (ColdBlocks.count(BB))
+      continue;
+
+    bool Cold = (BFI && PSI->isColdBlock(BB, BFI)) ||
+                (EnableStaticAnalyis && unlikelyExecuted(*BB));
+    if (!Cold)
+      continue;
+
+    LLVM_DEBUG({
+      dbgs() << "Found a cold block:\n";
+      BB->dump();
+    });
+
+    if (!DT)
+      DT = make_unique<DominatorTree>(F);
+    if (!PDT)
+      PDT = make_unique<PostDominatorTree>(F);
+
+    auto Regions = OutliningRegion::create(*BB, *DT, *PDT);
+    for (OutliningRegion &Region : Regions) {
+      if (Region.empty())
+        continue;
+
+      if (Region.isEntireFunctionCold()) {
+        LLVM_DEBUG(dbgs() << "Entire function is cold\n");
+        return markFunctionCold(F);
+      }
+
+      // If this outlining region intersects with another, drop the new region.
+      //
+      // TODO: It's theoretically possible to outline more by only keeping the
+      // largest region which contains a block, but the extra bookkeeping to do
+      // this is tricky/expensive.
+      bool RegionsOverlap = any_of(Region.blocks(), [&](const BlockTy &Block) {
+        return !ColdBlocks.insert(Block.first).second;
+      });
+      if (RegionsOverlap)
+        continue;
+
+      OutliningWorklist.emplace_back(std::move(Region));
+      ++NumColdRegionsFound;
     }
   }
-  return nullptr;
+
+  // Outline single-entry cold regions, splitting up larger regions as needed.
+  unsigned OutlinedFunctionID = 1;
+  while (!OutliningWorklist.empty()) {
+    OutliningRegion Region = OutliningWorklist.pop_back_val();
+    assert(!Region.empty() && "Empty outlining region in worklist");
+    do {
+      BlockSequence SubRegion = Region.takeSingleEntrySubRegion(*DT);
+      LLVM_DEBUG({
+        dbgs() << "Hot/cold splitting attempting to outline these blocks:\n";
+        for (BasicBlock *BB : SubRegion)
+          BB->dump();
+      });
+
+      Function *Outlined =
+          extractColdRegion(SubRegion, *DT, BFI, TTI, ORE, OutlinedFunctionID);
+      if (Outlined) {
+        ++OutlinedFunctionID;
+        Changed = true;
+      }
+    } while (!Region.empty());
+  }
+
+  return Changed;
 }
 
 bool HotColdSplitting::run(Module &M) {
-  for (auto &F : M) {
-    if (!shouldOutlineFrom(F))
-      continue;
-    DominatorTree DT(F);
-    PostDomTree PDT(F);
-    PDT.recalculate(F);
-    DenseSetBB HotBlocks;
-    if (EnableStaticAnalyis) // Static analysis of cold blocks.
-      HotBlocks = getHotBlocks(F);
+  bool Changed = false;
+  bool HasProfileSummary = M.getProfileSummary();
+  for (auto It = M.begin(), End = M.end(); It != End; ++It) {
+    Function &F = *It;
 
-    const Function *Outlined = outlineColdBlocks(F, HotBlocks, &DT, &PDT);
-    if (Outlined)
-      OutlinedFunctions.insert(Outlined);
+    // Do not touch declarations.
+    if (F.isDeclaration())
+      continue;
+
+    // Do not modify `optnone` functions.
+    if (F.hasFnAttribute(Attribute::OptimizeNone))
+      continue;
+
+    // Detect inherently cold functions and mark them as such.
+    if (isFunctionCold(F)) {
+      Changed |= markFunctionCold(F);
+      continue;
+    }
+
+    if (!shouldOutlineFrom(F)) {
+      LLVM_DEBUG(llvm::dbgs() << "Skipping " << F.getName() << "\n");
+      continue;
+    }
+
+    LLVM_DEBUG(llvm::dbgs() << "Outlining in " << F.getName() << "\n");
+    Changed |= outlineColdRegions(F, HasProfileSummary);
   }
-  return true;
+  return Changed;
 }
 
 bool HotColdSplittingLegacyPass::runOnModule(Module &M) {
   if (skipModule(M))
     return false;
   ProfileSummaryInfo *PSI =
-      getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
+      &getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
   auto GTTI = [this](Function &F) -> TargetTransformInfo & {
     return this->getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
   };

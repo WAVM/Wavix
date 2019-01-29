@@ -1,9 +1,8 @@
 //===-- PPCFastISel.cpp - PowerPC FastISel implementation -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -187,7 +186,6 @@ class PPCFastISel final : public FastISel {
                          unsigned &NumBytes,
                          bool IsVarArg);
     bool finishCall(MVT RetVT, CallLoweringInfo &CLI, unsigned &NumBytes);
-    LLVM_ATTRIBUTE_UNUSED CCAssignFn *usePPC32CCs(unsigned Flag);
 
   private:
   #include "PPCGenFastISel.inc"
@@ -195,23 +193,6 @@ class PPCFastISel final : public FastISel {
 };
 
 } // end anonymous namespace
-
-#include "PPCGenCallingConv.inc"
-
-// Function whose sole purpose is to kill compiler warnings
-// stemming from unused functions included from PPCGenCallingConv.inc.
-CCAssignFn *PPCFastISel::usePPC32CCs(unsigned Flag) {
-  if (Flag == 1)
-    return CC_PPC32_SVR4;
-  else if (Flag == 2)
-    return CC_PPC32_SVR4_ByVal;
-  else if (Flag == 3)
-    return CC_PPC32_SVR4_VarArg;
-  else if (Flag == 4)
-    return RetCC_PPC_Cold;
-  else
-    return RetCC_PPC;
-}
 
 static Optional<PPC::Predicate> getComparePred(CmpInst::Predicate Pred) {
   switch (Pred) {
@@ -861,8 +842,23 @@ bool PPCFastISel::PPCEmitCmp(const Value *SrcValue1, const Value *SrcValue2,
     }
   }
 
+  unsigned SrcReg1 = getRegForValue(SrcValue1);
+  if (SrcReg1 == 0)
+    return false;
+
+  unsigned SrcReg2 = 0;
+  if (!UseImm) {
+    SrcReg2 = getRegForValue(SrcValue2);
+    if (SrcReg2 == 0)
+      return false;
+  }
+
   unsigned CmpOpc;
   bool NeedsExt = false;
+
+  auto RC1 = MRI.getRegClass(SrcReg1);
+  auto RC2 = SrcReg2 != 0 ? MRI.getRegClass(SrcReg2) : nullptr;
+
   switch (SrcVT.SimpleTy) {
     default: return false;
     case MVT::f32:
@@ -879,8 +875,21 @@ bool PPCFastISel::PPCEmitCmp(const Value *SrcValue1, const Value *SrcValue2,
             CmpOpc = PPC::EFSCMPGT;
             break;
         }
-      } else
+      } else {
         CmpOpc = PPC::FCMPUS;
+        if (isVSSRCRegClass(RC1)) {
+          unsigned TmpReg = createResultReg(&PPC::F4RCRegClass);
+          BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+                  TII.get(TargetOpcode::COPY), TmpReg).addReg(SrcReg1);
+          SrcReg1 = TmpReg;
+        }
+        if (RC2 && isVSSRCRegClass(RC2)) {
+          unsigned TmpReg = createResultReg(&PPC::F4RCRegClass);
+          BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+                  TII.get(TargetOpcode::COPY), TmpReg).addReg(SrcReg2);
+          SrcReg2 = TmpReg;
+        }
+      }
       break;
     case MVT::f64:
       if (HasSPE) {
@@ -896,14 +905,17 @@ bool PPCFastISel::PPCEmitCmp(const Value *SrcValue1, const Value *SrcValue2,
             CmpOpc = PPC::EFDCMPGT;
             break;
         }
-      } else
+      } else if (isVSFRCRegClass(RC1) || (RC2 && isVSFRCRegClass(RC2))) {
+        CmpOpc = PPC::XSCMPUDP;
+      } else {
         CmpOpc = PPC::FCMPUD;
+      }
       break;
     case MVT::i1:
     case MVT::i8:
     case MVT::i16:
       NeedsExt = true;
-      // Intentional fall-through.
+      LLVM_FALLTHROUGH;
     case MVT::i32:
       if (!UseImm)
         CmpOpc = IsZExt ? PPC::CMPLW : PPC::CMPW;
@@ -916,17 +928,6 @@ bool PPCFastISel::PPCEmitCmp(const Value *SrcValue1, const Value *SrcValue2,
       else
         CmpOpc = IsZExt ? PPC::CMPLDI : PPC::CMPDI;
       break;
-  }
-
-  unsigned SrcReg1 = getRegForValue(SrcValue1);
-  if (SrcReg1 == 0)
-    return false;
-
-  unsigned SrcReg2 = 0;
-  if (!UseImm) {
-    SrcReg2 = getRegForValue(SrcValue2);
-    if (SrcReg2 == 0)
-      return false;
   }
 
   if (NeedsExt) {
@@ -2354,7 +2355,8 @@ bool PPCFastISel::tryToFoldLoadIntoMI(MachineInstr *MI, unsigned OpNo,
         PPCSubTarget->hasSPE() ? PPC::EVLDD : PPC::LFD))
     return false;
 
-  MI->eraseFromParent();
+  MachineBasicBlock::iterator I(MI);
+  removeDeadCode(I, std::next(I));
   return true;
 }
 

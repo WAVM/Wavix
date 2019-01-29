@@ -1,9 +1,8 @@
 //===- LowerTypeTests.cpp - type metadata lowering pass -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -989,6 +988,7 @@ void LowerTypeTestsModule::importFunction(Function *F, bool isDefinition) {
     if (F->isDSOLocal()) {
       Function *RealF = Function::Create(F->getFunctionType(),
                                          GlobalValue::ExternalLinkage,
+                                         F->getAddressSpace(),
                                          Name + ".cfi", &M);
       RealF->setVisibility(GlobalVariable::HiddenVisibility);
       replaceDirectCalls(F, RealF);
@@ -1000,13 +1000,13 @@ void LowerTypeTestsModule::importFunction(Function *F, bool isDefinition) {
   if (F->isDeclarationForLinker() && !isDefinition) {
     // Declaration of an external function.
     FDecl = Function::Create(F->getFunctionType(), GlobalValue::ExternalLinkage,
-                             Name + ".cfi_jt", &M);
+                             F->getAddressSpace(), Name + ".cfi_jt", &M);
     FDecl->setVisibility(GlobalValue::HiddenVisibility);
   } else if (isDefinition) {
     F->setName(Name + ".cfi");
     F->setLinkage(GlobalValue::ExternalLinkage);
     FDecl = Function::Create(F->getFunctionType(), GlobalValue::ExternalLinkage,
-                             Name, &M);
+                             F->getAddressSpace(), Name, &M);
     FDecl->setVisibility(Visibility);
     Visibility = GlobalValue::HiddenVisibility;
 
@@ -1016,7 +1016,8 @@ void LowerTypeTestsModule::importFunction(Function *F, bool isDefinition) {
     for (auto &U : F->uses()) {
       if (auto *A = dyn_cast<GlobalAlias>(U.getUser())) {
         Function *AliasDecl = Function::Create(
-            F->getFunctionType(), GlobalValue::ExternalLinkage, "", &M);
+            F->getFunctionType(), GlobalValue::ExternalLinkage,
+            F->getAddressSpace(), "", &M);
         AliasDecl->takeName(A);
         A->replaceAllUsesWith(AliasDecl);
         ToErase.push_back(A);
@@ -1191,7 +1192,9 @@ void LowerTypeTestsModule::moveInitializerToModuleConstructor(
     WeakInitializerFn = Function::Create(
         FunctionType::get(Type::getVoidTy(M.getContext()),
                           /* IsVarArg */ false),
-        GlobalValue::InternalLinkage, "__cfi_global_var_init", &M);
+        GlobalValue::InternalLinkage,
+        M.getDataLayout().getProgramAddressSpace(),
+        "__cfi_global_var_init", &M);
     BasicBlock *BB =
         BasicBlock::Create(M.getContext(), "entry", WeakInitializerFn);
     ReturnInst::Create(M.getContext(), BB);
@@ -1234,7 +1237,8 @@ void LowerTypeTestsModule::replaceWeakDeclarationWithJumpTablePtr(
   // placeholder first.
   Function *PlaceholderFn =
       Function::Create(cast<FunctionType>(F->getValueType()),
-                       GlobalValue::ExternalWeakLinkage, "", &M);
+                       GlobalValue::ExternalWeakLinkage,
+                       F->getAddressSpace(), "", &M);
   replaceCfiUses(F, PlaceholderFn, IsDefinition);
 
   Constant *Target = ConstantExpr::getSelect(
@@ -1424,7 +1428,9 @@ void LowerTypeTestsModule::buildBitSetsFromFunctionsNative(
   Function *JumpTableFn =
       Function::Create(FunctionType::get(Type::getVoidTy(M.getContext()),
                                          /* IsVarArg */ false),
-                       GlobalValue::PrivateLinkage, ".cfi.jumptable", &M);
+                       GlobalValue::PrivateLinkage,
+                       M.getDataLayout().getProgramAddressSpace(),
+                       ".cfi.jumptable", &M);
   ArrayType *JumpTableType =
       ArrayType::get(getJumpTableEntryType(), Functions.size());
   auto JumpTable =
@@ -1695,6 +1701,13 @@ bool LowerTypeTestsModule::lower() {
       !ExportSummary && !ImportSummary)
     return false;
 
+  // If only some of the modules were split, we cannot correctly handle
+  // code that contains type tests.
+  if (TypeTestFunc && !TypeTestFunc->use_empty() &&
+      ((ExportSummary && ExportSummary->partiallySplitLTOUnits()) ||
+       (ImportSummary && ImportSummary->partiallySplitLTOUnits())))
+    report_fatal_error("inconsistent LTO Unit splitting with llvm.type.test");
+
   if (ImportSummary) {
     if (TypeTestFunc) {
       for (auto UI = TypeTestFunc->use_begin(), UE = TypeTestFunc->use_end();
@@ -1813,7 +1826,8 @@ bool LowerTypeTestsModule::lower() {
         if (!F)
           F = Function::Create(
               FunctionType::get(Type::getVoidTy(M.getContext()), false),
-              GlobalVariable::ExternalLinkage, FunctionName, &M);
+              GlobalVariable::ExternalLinkage,
+              M.getDataLayout().getProgramAddressSpace(), FunctionName, &M);
 
         // If the function is available_externally, remove its definition so
         // that it is handled the same way as a declaration. Later we will try

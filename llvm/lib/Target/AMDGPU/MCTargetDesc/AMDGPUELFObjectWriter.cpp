@@ -1,9 +1,8 @@
 //===- AMDGPUELFObjectWriter.cpp - AMDGPU ELF Writer ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -46,11 +45,9 @@ unsigned AMDGPUELFObjectWriter::getRelocType(MCContext &Ctx,
   if (const auto *SymA = Target.getSymA()) {
     // SCRATCH_RSRC_DWORD[01] is a special global variable that represents
     // the scratch buffer.
-    if (SymA->getSymbol().getName() == "SCRATCH_RSRC_DWORD0")
+    if (SymA->getSymbol().getName() == "SCRATCH_RSRC_DWORD0" ||
+        SymA->getSymbol().getName() == "SCRATCH_RSRC_DWORD1")
       return ELF::R_AMDGPU_ABS32_LO;
-
-    if (SymA->getSymbol().getName() == "SCRATCH_RSRC_DWORD1")
-      return ELF::R_AMDGPU_ABS32_HI;
   }
 
   switch (Target.getAccessVariant()) {

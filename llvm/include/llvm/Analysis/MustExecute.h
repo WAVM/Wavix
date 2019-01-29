@@ -1,9 +1,8 @@
 //===- MustExecute.h - Is an instruction known to execute--------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -48,13 +47,6 @@ class Loop;
 class LoopSafetyInfo {
   // Used to update funclet bundle operands.
   DenseMap<BasicBlock *, ColorVector> BlockColors;
-
-  /// Collect all blocks from \p CurLoop which lie on all possible paths from
-  /// the header of \p CurLoop (inclusive) to BB (exclusive) into the set
-  /// \p Predecessors. If \p BB is the header, \p Predecessors will be empty.
-  void collectTransitivePredecessors(
-      const Loop *CurLoop, const BasicBlock *BB,
-      SmallPtrSetImpl<const BasicBlock *> &Predecessors) const;
 
 protected:
   /// Computes block colors.
@@ -125,13 +117,16 @@ public:
 
 /// This implementation of LoopSafetyInfo use ImplicitControlFlowTracking to
 /// give precise answers on "may throw" queries. This implementation uses cache
-/// that should be invalidated by calling the method dropCachedInfo whenever we
-/// modify a basic block's contents by adding or removing instructions.
+/// that should be invalidated by calling the methods insertInstructionTo and
+/// removeInstruction whenever we modify a basic block's contents by adding or
+/// removing instructions.
 class ICFLoopSafetyInfo: public LoopSafetyInfo {
   bool MayThrow = false;       // The current loop contains an instruction which
                                // may throw.
   // Contains information about implicit control flow in this loop's blocks.
   mutable ImplicitControlFlowTracking ICF;
+  // Contains information about instruction that may possibly write memory.
+  mutable MemoryWriteTracking MW;
 
 public:
   virtual bool blockMayThrow(const BasicBlock *BB) const;
@@ -144,12 +139,27 @@ public:
                                      const DominatorTree *DT,
                                      const Loop *CurLoop) const;
 
-  /// Drops cached information regarding the implicit control flow in block
-  /// \p BB. It should be called for every block in which we add or remove any
-  /// instructions  to a block before we make queries to it.
-  void dropCachedInfo(const BasicBlock *BB);
+  /// Returns true if we could not execute a memory-modifying instruction before
+  /// we enter \p BB under assumption that \p CurLoop is entered.
+  bool doesNotWriteMemoryBefore(const BasicBlock *BB, const Loop *CurLoop)
+      const;
 
-  ICFLoopSafetyInfo(DominatorTree *DT) : LoopSafetyInfo(), ICF(DT) {};
+  /// Returns true if we could not execute a memory-modifying instruction before
+  /// we execute \p I under assumption that \p CurLoop is entered.
+  bool doesNotWriteMemoryBefore(const Instruction &I, const Loop *CurLoop)
+      const;
+
+  /// Inform the safety info that we are planning to insert a new instruction
+  /// \p Inst into the basic block \p BB. It will make all cache updates to keep
+  /// it correct after this insertion.
+  void insertInstructionTo(const Instruction *Inst, const BasicBlock *BB);
+
+  /// Inform safety info that we are planning to remove the instruction \p Inst
+  /// from its block. It will make all cache updates to keep it correct after
+  /// this removal.
+  void removeInstruction(const Instruction *Inst);
+
+  ICFLoopSafetyInfo(DominatorTree *DT) : LoopSafetyInfo(), ICF(DT), MW(DT) {};
 
   virtual ~ICFLoopSafetyInfo() {};
 };

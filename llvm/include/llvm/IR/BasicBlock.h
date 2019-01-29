@@ -1,9 +1,8 @@
 //===- llvm/BasicBlock.h - Represent a basic block in the VM ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -236,6 +235,12 @@ public:
     return const_cast<BasicBlock *>(
                  static_cast<const BasicBlock *>(this)->getUniquePredecessor());
   }
+
+  /// Return true if this block has exactly N predecessors.
+  bool hasNPredecessors(unsigned N) const;
+
+  /// Return true if this block has N predecessors or more.
+  bool hasNPredecessorsOrMore(unsigned N) const;
 
   /// Return the successor of this block if it has a single successor.
   /// Otherwise return a null pointer.

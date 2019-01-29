@@ -1,5 +1,6 @@
 ; RUN: not llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -wasm-keep-registers -exception-model=wasm
-; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -wasm-keep-registers -exception-model=wasm -mattr=+exception-handling | FileCheck -allow-deprecated-dag-overlap %s
+; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -wasm-keep-registers -exception-model=wasm -mattr=+exception-handling -verify-machineinstrs | FileCheck -allow-deprecated-dag-overlap %s
+; RUN: llc < %s -disable-wasm-fallthrough-return-opt -wasm-keep-registers -exception-model=wasm -mattr=+exception-handling
 
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
 target triple = "wasm32-unknown-unknown"
@@ -11,19 +12,20 @@ target triple = "wasm32-unknown-unknown"
 declare void @llvm.wasm.throw(i32, i8*)
 
 ; CHECK-LABEL: test_throw:
-; CHECK-NEXT: i32.const $push0=, 0
-; CHECK-NEXT: throw 0, $pop0
-define void @test_throw() {
-  call void @llvm.wasm.throw(i32 0, i8* null)
+; CHECK:      local.get $push0=, 0
+; CHECK-NEXT: throw __cpp_exception@EVENT, $pop0
+; CHECK-NOT:  unreachable
+define void @test_throw(i8* %p) {
+  call void @llvm.wasm.throw(i32 0, i8* %p)
   ret void
 }
 
 ; CHECK-LABEL: test_catch_rethrow:
-; CHECK:   get_global  $push{{.+}}=, __stack_pointer@GLOBAL
+; CHECK:   global.get  $push{{.+}}=, __stack_pointer@GLOBAL
 ; CHECK:   try
 ; CHECK:   call      foo@FUNCTION
 ; CHECK:   i32.catch     $push{{.+}}=, 0
-; CHECK:   set_global  __stack_pointer@GLOBAL
+; CHECK:   global.set  __stack_pointer@GLOBAL
 ; CHECK-DAG:   i32.store  __wasm_lpad_context
 ; CHECK-DAG:   i32.store  __wasm_lpad_context+4
 ; CHECK:   i32.call  $push{{.+}}=, _Unwind_CallPersonality@FUNCTION
@@ -65,7 +67,7 @@ try.cont:                                         ; preds = %entry, %catch
 ; CHECK:   try
 ; CHECK:   call      foo@FUNCTION
 ; CHECK:   catch_all
-; CHECK:   set_global  __stack_pointer@GLOBAL
+; CHECK:   global.set  __stack_pointer@GLOBAL
 ; CHECK:   i32.call  $push{{.+}}=, _ZN7CleanupD1Ev@FUNCTION
 ; CHECK:   rethrow
 ; CHECK:   end_try
@@ -163,17 +165,17 @@ terminate10:                                      ; preds = %ehcleanup7
 ; CHECK:  try
 ; CHECK:  call      foo@FUNCTION
 ; CHECK:  i32.catch
-; CHECK-NOT:  get_global  $push{{.+}}=, __stack_pointer@GLOBAL
-; CHECK:  set_global  __stack_pointer@GLOBAL
+; CHECK-NOT:  global.get  $push{{.+}}=, __stack_pointer@GLOBAL
+; CHECK:  global.set  __stack_pointer@GLOBAL
 ; CHECK:  try
 ; CHECK:  call      foo@FUNCTION
 ; CHECK:  catch_all
-; CHECK-NOT:  get_global  $push{{.+}}=, __stack_pointer@GLOBAL
-; CHECK:  set_global  __stack_pointer@GLOBAL
+; CHECK-NOT:  global.get  $push{{.+}}=, __stack_pointer@GLOBAL
+; CHECK:  global.set  __stack_pointer@GLOBAL
 ; CHECK:  call      __cxa_end_catch@FUNCTION
-; CHECK-NOT:  set_global  __stack_pointer@GLOBAL, $pop{{.+}}
+; CHECK-NOT:  global.set  __stack_pointer@GLOBAL, $pop{{.+}}
 ; CHECK:  end_try
-; CHECK-NOT:  set_global  __stack_pointer@GLOBAL, $pop{{.+}}
+; CHECK-NOT:  global.set  __stack_pointer@GLOBAL, $pop{{.+}}
 ; CHECK:  end_try
 define void @test_no_prolog_epilog_in_ehpad() personality i8* bitcast (i32 (...)* @__gxx_wasm_personality_v0 to i8*) {
 entry:
@@ -224,7 +226,7 @@ ehcleanup:                                        ; preds = %catch
 ; CHECK:  try
 ; CHECK:  call foo@FUNCTION
 ; CHECK:  end_try
-; CHECK-NOT:  set_global  __stack_pointer@GLOBAL
+; CHECK-NOT:  global.set  __stack_pointer@GLOBAL
 ; CHECK:  return
 define void @no_sp_writeback() personality i8* bitcast (i32 (...)* @__gxx_wasm_personality_v0 to i8*) {
 entry:
@@ -258,3 +260,6 @@ declare void @__cxa_rethrow()
 declare void @__clang_call_terminate(i8*)
 declare void @_ZSt9terminatev()
 declare %struct.Cleanup* @_ZN7CleanupD1Ev(%struct.Cleanup* returned)
+
+; CHECK: __cpp_exception:
+; CHECK: .eventtype  __cpp_exception i32

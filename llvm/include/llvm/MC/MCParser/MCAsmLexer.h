@@ -1,9 +1,8 @@
 //===- llvm/MC/MCAsmLexer.h - Abstract Asm Lexer Interface ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -50,6 +49,7 @@ protected: // Can only create subclasses.
   bool SkipSpace = true;
   bool AllowAtInIdentifier;
   bool IsAtStartOfStatement = true;
+  bool LexMasmIntegers = false;
   AsmCommentConsumer *CommentConsumer = nullptr;
 
   MCAsmLexer();
@@ -146,6 +146,10 @@ public:
   void setCommentConsumer(AsmCommentConsumer *CommentConsumer) {
     this->CommentConsumer = CommentConsumer;
   }
+
+  /// Set whether to lex masm-style binary and hex literals. They look like
+  /// 0b1101 and 0ABCh respectively.
+  void setLexMasmIntegers(bool V) { LexMasmIntegers = V; }
 };
 
 } // end namespace llvm

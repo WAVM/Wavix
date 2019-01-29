@@ -1,9 +1,8 @@
 //===- DivergenceAnalysis.cpp --------- Divergence Analysis Implementation -==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -421,4 +420,37 @@ void DivergenceAnalysis::print(raw_ostream &OS, const Module *) const {
     if (isDivergent(I))
       OS << "DIVERGENT:" << I << '\n';
   }
+}
+
+// class GPUDivergenceAnalysis
+GPUDivergenceAnalysis::GPUDivergenceAnalysis(Function &F,
+                                             const DominatorTree &DT,
+                                             const PostDominatorTree &PDT,
+                                             const LoopInfo &LI,
+                                             const TargetTransformInfo &TTI)
+    : SDA(DT, PDT, LI), DA(F, nullptr, DT, LI, SDA, false) {
+  for (auto &I : instructions(F)) {
+    if (TTI.isSourceOfDivergence(&I)) {
+      DA.markDivergent(I);
+    } else if (TTI.isAlwaysUniform(&I)) {
+      DA.addUniformOverride(I);
+    }
+  }
+  for (auto &Arg : F.args()) {
+    if (TTI.isSourceOfDivergence(&Arg)) {
+      DA.markDivergent(Arg);
+    }
+  }
+
+  DA.compute();
+}
+
+bool GPUDivergenceAnalysis::isDivergent(const Value &val) const {
+  return DA.isDivergent(val);
+}
+
+void GPUDivergenceAnalysis::print(raw_ostream &OS, const Module *mod) const {
+  OS << "Divergence of kernel " << DA.getFunction().getName() << " {\n";
+  DA.print(OS, mod);
+  OS << "}\n";
 }

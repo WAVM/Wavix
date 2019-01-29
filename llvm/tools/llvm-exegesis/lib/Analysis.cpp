@@ -1,9 +1,8 @@
 //===-- Analysis.cpp --------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -12,6 +11,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/FormatVariadic.h"
+#include <limits>
 #include <unordered_set>
 #include <vector>
 
@@ -95,7 +95,21 @@ writeClusterId(llvm::raw_ostream &OS,
 
 template <EscapeTag Tag>
 static void writeMeasurementValue(llvm::raw_ostream &OS, const double Value) {
-  writeEscaped<Tag>(OS, llvm::formatv("{0:F}", Value).str());
+  // Given Value, if we wanted to serialize it to a string,
+  // how many base-10 digits will we need to store, max?
+  static constexpr auto MaxDigitCount =
+      std::numeric_limits<decltype(Value)>::max_digits10;
+  // Also, we will need a decimal separator.
+  static constexpr auto DecimalSeparatorLen = 1; // '.' e.g.
+  // So how long of a string will the serialization produce, max?
+  static constexpr auto SerializationLen = MaxDigitCount + DecimalSeparatorLen;
+
+  // WARNING: when changing the format, also adjust the small-size estimate ^.
+  static constexpr StringLiteral SimpleFloatFormat = StringLiteral("{0:F}");
+
+  writeEscaped<Tag>(
+      OS,
+      llvm::formatv(SimpleFloatFormat.data(), Value).sstr<SerializationLen>());
 }
 
 template <typename EscapeTag, EscapeTag Tag>
@@ -114,13 +128,11 @@ void Analysis::writeSnippet(llvm::raw_ostream &OS,
       writeEscaped<Tag>(OS, "[error decoding asm snippet]");
       return;
     }
-    Lines.emplace_back();
-    std::string &Line = Lines.back();
-    llvm::raw_string_ostream OSS(Line);
+    llvm::SmallString<128> InstPrinterStr; // FIXME: magic number.
+    llvm::raw_svector_ostream OSS(InstPrinterStr);
     InstPrinter_->printInst(&MI, OSS, "", *SubtargetInfo_);
     Bytes = Bytes.drop_front(MISize);
-    OSS.flush();
-    Line = llvm::StringRef(Line).trim().str();
+    Lines.emplace_back(llvm::StringRef(InstPrinterStr).trim());
   }
   writeEscaped<Tag>(OS, llvm::join(Lines, Separator));
 }

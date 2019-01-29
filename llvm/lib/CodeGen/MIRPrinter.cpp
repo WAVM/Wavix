@@ -1,9 +1,8 @@
 //===- MIRPrinter.cpp - MIR serialization format printer ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -196,6 +195,7 @@ void MIRPrinter::print(const MachineFunction &MF) {
   YamlMF.Name = MF.getName();
   YamlMF.Alignment = MF.getAlignment();
   YamlMF.ExposesReturnsTwice = MF.exposesReturnsTwice();
+  YamlMF.HasWinCFI = MF.hasWinCFI();
 
   YamlMF.Legalized = MF.getProperties().hasProperty(
       MachineFunctionProperties::Property::Legalized);
@@ -400,18 +400,20 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &YMF,
   for (const auto &CSInfo : MFI.getCalleeSavedInfo()) {
     yaml::StringValue Reg;
     printRegMIR(CSInfo.getReg(), Reg, TRI);
-    auto StackObjectInfo = StackObjectOperandMapping.find(CSInfo.getFrameIdx());
-    assert(StackObjectInfo != StackObjectOperandMapping.end() &&
-           "Invalid stack object index");
-    const FrameIndexOperand &StackObject = StackObjectInfo->second;
-    if (StackObject.IsFixed) {
-      YMF.FixedStackObjects[StackObject.ID].CalleeSavedRegister = Reg;
-      YMF.FixedStackObjects[StackObject.ID].CalleeSavedRestored =
-        CSInfo.isRestored();
-    } else {
-      YMF.StackObjects[StackObject.ID].CalleeSavedRegister = Reg;
-      YMF.StackObjects[StackObject.ID].CalleeSavedRestored =
-        CSInfo.isRestored();
+    if (!CSInfo.isSpilledToReg()) {
+      auto StackObjectInfo = StackObjectOperandMapping.find(CSInfo.getFrameIdx());
+      assert(StackObjectInfo != StackObjectOperandMapping.end() &&
+             "Invalid stack object index");
+      const FrameIndexOperand &StackObject = StackObjectInfo->second;
+      if (StackObject.IsFixed) {
+        YMF.FixedStackObjects[StackObject.ID].CalleeSavedRegister = Reg;
+        YMF.FixedStackObjects[StackObject.ID].CalleeSavedRestored =
+          CSInfo.isRestored();
+      } else {
+        YMF.StackObjects[StackObject.ID].CalleeSavedRegister = Reg;
+        YMF.StackObjects[StackObject.ID].CalleeSavedRestored =
+          CSInfo.isRestored();
+      }
     }
   }
   for (unsigned I = 0, E = MFI.getLocalFrameObjectCount(); I < E; ++I) {

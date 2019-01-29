@@ -1,9 +1,8 @@
 //===- CodeGenTarget.cpp - CodeGen Target Class Wrapper -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -536,6 +535,7 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
   isCommutative = false;
   canThrow = false;
   isNoReturn = false;
+  isCold = false;
   isNoDuplicate = false;
   isConvergent = false;
   isSpeculatable = false;
@@ -633,7 +633,7 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
       // overloaded, all the types can be specified directly.
       assert(((!TyEl->isSubClassOf("LLVMExtendedType") &&
                !TyEl->isSubClassOf("LLVMTruncatedType") &&
-               !TyEl->isSubClassOf("LLVMVectorSameWidth")) ||
+               !TyEl->isSubClassOf("LLVMScalarOrSameVectorWidth")) ||
               VT == MVT::iAny || VT == MVT::vAny) &&
              "Expected iAny or vAny type");
     } else
@@ -682,6 +682,8 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
       isConvergent = true;
     else if (Property->getName() == "IntrNoReturn")
       isNoReturn = true;
+    else if (Property->getName() == "IntrCold")
+      isCold = true;
     else if (Property->getName() == "IntrSpeculatable")
       isSpeculatable = true;
     else if (Property->getName() == "IntrHasSideEffects")
@@ -711,4 +713,3 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
   // Sort the argument attributes for later benefit.
   llvm::sort(ArgumentAttributes);
 }
-

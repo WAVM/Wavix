@@ -1,9 +1,8 @@
 //===--------- LLJIT.cpp - An ORC-based JIT for compiling LLVM IR ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -76,7 +75,7 @@ Error LLJIT::addObjectFile(JITDylib &JD, std::unique_ptr<MemoryBuffer> Obj) {
 
 Expected<JITEvaluatedSymbol> LLJIT::lookupLinkerMangled(JITDylib &JD,
                                                         StringRef Name) {
-  return ES->lookup({&JD}, ES->intern(Name));
+  return ES->lookup(JITDylibSearchList({{&JD, true}}), ES->intern(Name));
 }
 
 LLJIT::LLJIT(std::unique_ptr<ExecutionSession> ES,
@@ -144,13 +143,13 @@ void LLJIT::recordCtorDtors(Module &M) {
 }
 
 Expected<std::unique_ptr<LLLazyJIT>>
-  LLLazyJIT::Create(JITTargetMachineBuilder JTMB, DataLayout DL,
-                    unsigned NumCompileThreads) {
+LLLazyJIT::Create(JITTargetMachineBuilder JTMB, DataLayout DL,
+                  JITTargetAddress ErrorAddr, unsigned NumCompileThreads) {
   auto ES = llvm::make_unique<ExecutionSession>();
 
   const Triple &TT = JTMB.getTargetTriple();
 
-  auto LCTMgr = createLocalLazyCallThroughManager(TT, *ES, 0);
+  auto LCTMgr = createLocalLazyCallThroughManager(TT, *ES, ErrorAddr);
   if (!LCTMgr)
     return LCTMgr.takeError();
 

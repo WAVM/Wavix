@@ -1,9 +1,8 @@
 //===- WebAssemblyDisassemblerEmitter.cpp - Disassembler tables -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,6 +17,8 @@
 #include "llvm/TableGen/Record.h"
 
 namespace llvm {
+
+static constexpr int WebAssemblyInstructionTableSize = 256;
 
 void emitWebAssemblyDisassemblerTables(
     raw_ostream &OS,
@@ -59,6 +60,8 @@ void emitWebAssemblyDisassemblerTables(
   OS << "#include \"MCTargetDesc/WebAssemblyMCTargetDesc.h\"\n";
   OS << "\n";
   OS << "namespace llvm {\n\n";
+  OS << "static constexpr int WebAssemblyInstructionTableSize = ";
+  OS << WebAssemblyInstructionTableSize << ";\n\n";
   OS << "enum EntryType : uint8_t { ";
   OS << "ET_Unused, ET_Prefix, ET_Instruction };\n\n";
   OS << "struct WebAssemblyInstruction {\n";
@@ -74,7 +77,7 @@ void emitWebAssemblyDisassemblerTables(
       continue;
     OS << "WebAssemblyInstruction InstructionTable" << PrefixPair.first;
     OS << "[] = {\n";
-    for (unsigned I = 0; I <= 0xFF; I++) {
+    for (unsigned I = 0; I < WebAssemblyInstructionTableSize; I++) {
       auto InstIt = PrefixPair.second.find(I);
       if (InstIt != PrefixPair.second.end()) {
         // Regular instruction.
@@ -88,6 +91,7 @@ void emitWebAssemblyDisassemblerTables(
         // Collect operand types for storage in a shared list.
         CurOperandList.clear();
         for (auto &Op : CGI.Operands.OperandList) {
+          assert(Op.OperandType != "MCOI::OPERAND_UNKNOWN");
           CurOperandList.push_back(Op.OperandType);
         }
         // See if we already have stored this sequence before. This is not

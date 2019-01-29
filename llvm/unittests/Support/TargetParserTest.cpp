@@ -1,9 +1,8 @@
 //===----------- TargetParser.cpp - Target Parser -------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -265,11 +264,12 @@ TEST(TargetParserTest, testARMCPU) {
                          ARM::AEK_VIRT | ARM::AEK_HWDIVARM |
                          ARM::AEK_HWDIVTHUMB | ARM::AEK_DSP,
                          "8-A"));
-  EXPECT_TRUE(testARMCPU("exynos-m4", "armv8-a", "crypto-neon-fp-armv8",
+  EXPECT_TRUE(testARMCPU("exynos-m4", "armv8.2-a", "crypto-neon-fp-armv8",
                          ARM::AEK_CRC | ARM::AEK_SEC | ARM::AEK_MP |
                          ARM::AEK_VIRT | ARM::AEK_HWDIVARM |
-                         ARM::AEK_HWDIVTHUMB | ARM::AEK_DSP,
-                         "8-A"));
+                         ARM::AEK_HWDIVTHUMB | ARM::AEK_DSP | ARM::AEK_DOTPROD |
+                         ARM::AEK_FP16 | ARM::AEK_RAS,
+                         "8.2-A"));
   EXPECT_TRUE(testARMCPU("cortex-m23", "armv8-m.base", "none",
                          ARM::AEK_HWDIVTHUMB, "8-M.Baseline"));
   EXPECT_TRUE(testARMCPU("cortex-m33", "armv8-m.main", "fpv5-sp-d16",
@@ -488,7 +488,7 @@ TEST(TargetParserTest, testARMExtension) {
                                 ARM::ArchKind::ARMV7EM, "crypto"));
   EXPECT_FALSE(testARMExtension("generic", ARM::ArchKind::ARMV8A, "ras"));
   EXPECT_FALSE(testARMExtension("generic", ARM::ArchKind::ARMV8_1A, "ras"));
-  EXPECT_FALSE(testARMExtension("generic", ARM::ArchKind::ARMV8_2A, "spe"));
+  EXPECT_FALSE(testARMExtension("generic", ARM::ArchKind::ARMV8_2A, "profile"));
   EXPECT_FALSE(testARMExtension("generic", ARM::ArchKind::ARMV8_2A, "fp16"));
   EXPECT_FALSE(testARMExtension("generic", ARM::ArchKind::ARMV8_2A, "fp16fml"));
   EXPECT_FALSE(testARMExtension("generic", ARM::ArchKind::ARMV8_3A, "fp16"));
@@ -508,7 +508,7 @@ TEST(TargetParserTest, testARMExtension) {
 }
 
 TEST(TargetParserTest, ARMFPUVersion) {
-  for (ARM::FPUKind FK = static_cast<ARM::FPUKind>(0); 
+  for (ARM::FPUKind FK = static_cast<ARM::FPUKind>(0);
        FK <= ARM::FPUKind::FK_LAST;
        FK = static_cast<ARM::FPUKind>(static_cast<unsigned>(FK) + 1))
     if (FK == ARM::FK_LAST || ARM::getFPUName(FK) == "invalid" ||
@@ -584,7 +584,8 @@ TEST(TargetParserTest, ARMArchExtFeature) {
                               {"iwmmxt", "noiwmmxt", nullptr, nullptr},
                               {"iwmmxt2", "noiwmmxt2", nullptr, nullptr},
                               {"maverick", "maverick", nullptr, nullptr},
-                              {"xscale", "noxscale", nullptr, nullptr}};
+                              {"xscale", "noxscale", nullptr, nullptr},
+                              {"sb", "nosb", "+sb", "-sb"}};
 
   for (unsigned i = 0; i < array_lengthof(ArchExt); i++) {
     EXPECT_EQ(StringRef(ArchExt[i][2]), ARM::getArchExtFeature(ArchExt[i][0]));
@@ -690,8 +691,6 @@ bool testAArch64CPU(StringRef CPUName, StringRef ExpectedArch,
                     StringRef CPUAttr) {
   AArch64::ArchKind AK = AArch64::parseCPUArch(CPUName);
   bool pass = AArch64::getArchName(AK).equals(ExpectedArch);
-  unsigned FPUKind = AArch64::getDefaultFPU(CPUName, AK);
-  pass &= AArch64::getFPUName(FPUKind).equals(ExpectedFPU);
 
   unsigned ExtKind = AArch64::getDefaultExtensions(CPUName, AK);
   if (ExtKind > 1 && (ExtKind & AArch64::AEK_NONE))
@@ -760,9 +759,11 @@ TEST(TargetParserTest, testAArch64CPU) {
       AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
       AArch64::AEK_SIMD, "8-A"));
   EXPECT_TRUE(testAArch64CPU(
-      "exynos-m4", "armv8-a", "crypto-neon-fp-armv8",
-      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
-      AArch64::AEK_SIMD, "8-A"));
+      "exynos-m4", "armv8.2-a", "crypto-neon-fp-armv8",
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO |
+      AArch64::AEK_DOTPROD | AArch64::AEK_FP | AArch64::AEK_FP16 |
+      AArch64::AEK_LSE | AArch64::AEK_RAS | AArch64::AEK_RDM |
+      AArch64::AEK_SIMD, "8.2-A"));
   EXPECT_TRUE(testAArch64CPU(
       "falkor", "armv8-a", "crypto-neon-fp-armv8",
       AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
@@ -795,9 +796,16 @@ TEST(TargetParserTest, testAArch64CPU) {
       AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_SIMD |
       AArch64::AEK_FP | AArch64::AEK_PROFILE,
       "8-A"));
+  EXPECT_TRUE(testAArch64CPU(
+      "tsv110", "armv8.2-a", "crypto-neon-fp-armv8",
+      AArch64::AEK_CRC | AArch64::AEK_CRYPTO | AArch64::AEK_FP |
+      AArch64::AEK_SIMD | AArch64::AEK_RAS | AArch64::AEK_LSE |
+      AArch64::AEK_RDM | AArch64::AEK_PROFILE | AArch64::AEK_FP16 |
+      AArch64::AEK_FP16FML | AArch64::AEK_DOTPROD,
+      "8.2-A"));
 }
 
-static constexpr unsigned NumAArch64CPUArchs = 20;
+static constexpr unsigned NumAArch64CPUArchs = 21;
 
 TEST(TargetParserTest, testAArch64CPUArchList) {
   SmallVector<StringRef, NumAArch64CPUArchs> List;
@@ -864,8 +872,16 @@ TEST(TargetParserTest, testAArch64Extension) {
                                     AArch64::ArchKind::INVALID, "ras"));
   EXPECT_FALSE(testAArch64Extension("exynos-m3",
                                     AArch64::ArchKind::INVALID, "ras"));
+  EXPECT_TRUE(testAArch64Extension("exynos-m4",
+                                   AArch64::ArchKind::INVALID, "lse"));
+  EXPECT_TRUE(testAArch64Extension("exynos-m4",
+                                   AArch64::ArchKind::INVALID, "rdm"));
+  EXPECT_TRUE(testAArch64Extension("exynos-m4",
+                                   AArch64::ArchKind::INVALID, "ras"));
   EXPECT_FALSE(testAArch64Extension("exynos-m4",
-                                    AArch64::ArchKind::INVALID, "ras"));
+                                    AArch64::ArchKind::INVALID, "fullfp16"));
+  EXPECT_TRUE(testAArch64Extension("exynos-m4",
+                                   AArch64::ArchKind::INVALID, "dotprod"));
   EXPECT_TRUE(testAArch64Extension("falkor",
                                    AArch64::ArchKind::INVALID, "rdm"));
   EXPECT_FALSE(testAArch64Extension("kryo",
@@ -888,10 +904,14 @@ TEST(TargetParserTest, testAArch64Extension) {
                                     AArch64::ArchKind::INVALID, "fp16"));
   EXPECT_FALSE(testAArch64Extension("cortex-a55",
                                     AArch64::ArchKind::INVALID, "fp16fml"));
+  EXPECT_TRUE(testAArch64Extension("cortex-a55",
+                                    AArch64::ArchKind::INVALID, "dotprod"));
   EXPECT_TRUE(testAArch64Extension("cortex-a75",
                                     AArch64::ArchKind::INVALID, "fp16"));
   EXPECT_FALSE(testAArch64Extension("cortex-a75",
                                     AArch64::ArchKind::INVALID, "fp16fml"));
+  EXPECT_TRUE(testAArch64Extension("cortex-a75",
+                                    AArch64::ArchKind::INVALID, "dotprod"));
   EXPECT_FALSE(testAArch64Extension("thunderx2t99",
                                     AArch64::ArchKind::INVALID, "ras"));
   EXPECT_FALSE(testAArch64Extension("thunderx",
@@ -902,13 +922,29 @@ TEST(TargetParserTest, testAArch64Extension) {
                                     AArch64::ArchKind::INVALID, "lse"));
   EXPECT_FALSE(testAArch64Extension("thunderxt88",
                                     AArch64::ArchKind::INVALID, "lse"));
+  EXPECT_TRUE(testAArch64Extension("tsv110",
+                                   AArch64::ArchKind::INVALID, "crypto"));
+  EXPECT_FALSE(testAArch64Extension("tsv110",
+                                    AArch64::ArchKind::INVALID, "sha3"));
+  EXPECT_FALSE(testAArch64Extension("tsv110",
+                                    AArch64::ArchKind::INVALID, "sm4"));
+  EXPECT_TRUE(testAArch64Extension("tsv110",
+                                   AArch64::ArchKind::INVALID, "ras"));
+  EXPECT_TRUE(testAArch64Extension("tsv110",
+                                   AArch64::ArchKind::INVALID, "profile"));
+  EXPECT_TRUE(testAArch64Extension("tsv110",
+                                   AArch64::ArchKind::INVALID, "fp16"));
+  EXPECT_TRUE(testAArch64Extension("tsv110",
+                                   AArch64::ArchKind::INVALID, "fp16fml"));
+  EXPECT_TRUE(testAArch64Extension("tsv110",
+                                   AArch64::ArchKind::INVALID, "dotprod"));
 
   EXPECT_FALSE(testAArch64Extension(
       "generic", AArch64::ArchKind::ARMV8A, "ras"));
   EXPECT_FALSE(testAArch64Extension(
       "generic", AArch64::ArchKind::ARMV8_1A, "ras"));
   EXPECT_FALSE(testAArch64Extension(
-      "generic", AArch64::ArchKind::ARMV8_2A, "spe"));
+      "generic", AArch64::ArchKind::ARMV8_2A, "profile"));
   EXPECT_FALSE(testAArch64Extension(
       "generic", AArch64::ArchKind::ARMV8_2A, "fp16"));
   EXPECT_FALSE(testAArch64Extension(
@@ -940,13 +976,8 @@ TEST(TargetParserTest, AArch64ExtensionFeatures) {
 
 TEST(TargetParserTest, AArch64ArchFeatures) {
   std::vector<StringRef> Features;
-  AArch64::ArchKind ArchKinds[] = {
-#define AARCH64_ARCH(NAME, ID, CPU_ATTR, SUB_ARCH, ARCH_ATTR, ARCH_FPU, ARCH_BASE_EXT)       \
-     AArch64::ArchKind::ID,
-#include "llvm/Support/AArch64TargetParser.def"
-  };
 
-  for (auto AK : ArchKinds)
+  for (auto AK : AArch64::ArchKinds)
     EXPECT_TRUE((AK == AArch64::ArchKind::INVALID)
                     ? !AArch64::getArchFeatures(AK, Features)
                     : AArch64::getArchFeatures(AK, Features));
@@ -967,7 +998,11 @@ TEST(TargetParserTest, AArch64ArchExtFeature) {
                               {"dotprod", "nodotprod", "+dotprod", "-dotprod"},
                               {"rcpc", "norcpc", "+rcpc", "-rcpc" },
                               {"rng", "norng", "+rand", "-rand"},
-                              {"memtag", "nomemtag", "+mte", "-mte"}};
+                              {"memtag", "nomemtag", "+mte", "-mte"},
+                              {"ssbs", "nossbs", "+ssbs", "-ssbs"},
+                              {"sb", "nosb", "+sb", "-sb"},
+                              {"predres", "nopredres", "+predres", "-predres"}
+};
 
   for (unsigned i = 0; i < array_lengthof(ArchExt); i++) {
     EXPECT_EQ(StringRef(ArchExt[i][2]),

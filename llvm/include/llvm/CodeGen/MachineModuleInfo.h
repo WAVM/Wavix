@@ -1,9 +1,8 @@
 //===-- llvm/CodeGen/MachineModuleInfo.h ------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -46,10 +45,10 @@ namespace llvm {
 class BasicBlock;
 class CallInst;
 class Function;
-class MachineFunction;
+class LLVMTargetMachine;
 class MMIAddrLabelMap;
+class MachineFunction;
 class Module;
-class TargetMachine;
 
 //===----------------------------------------------------------------------===//
 /// This class can be derived from and used by targets to hold private
@@ -76,7 +75,7 @@ protected:
 /// for specific use.
 ///
 class MachineModuleInfo : public ImmutablePass {
-  const TargetMachine &TM;
+  const LLVMTargetMachine &TM;
 
   /// This is the MCContext used for the entire code generator.
   MCContext Context;
@@ -114,10 +113,9 @@ class MachineModuleInfo : public ImmutablePass {
   /// True if debugging information is available in this module.
   bool DbgInfoAvailable;
 
-  /// True if this module calls VarArg function with floating-point arguments.
-  /// This is used to emit an undefined reference to _fltused on Windows
-  /// targets.
-  bool UsesVAFloatArgument;
+  /// True if this module is being built for windows/msvc, and uses floating
+  /// point.  This is used to emit an undefined reference to _fltused.
+  bool UsesMSVCFloatingPoint;
 
   /// True if the module calls the __morestack function indirectly, as is
   /// required under the large code model on x86. This is used to emit
@@ -145,7 +143,7 @@ class MachineModuleInfo : public ImmutablePass {
 public:
   static char ID; // Pass identification, replacement for typeid
 
-  explicit MachineModuleInfo(const TargetMachine *TM = nullptr);
+  explicit MachineModuleInfo(const LLVMTargetMachine *TM = nullptr);
   ~MachineModuleInfo() override;
 
   // Initialization and Finalization
@@ -187,13 +185,9 @@ public:
   bool hasDebugInfo() const { return DbgInfoAvailable; }
   void setDebugInfoAvailability(bool avail) { DbgInfoAvailable = avail; }
 
-  bool usesVAFloatArgument() const {
-    return UsesVAFloatArgument;
-  }
+  bool usesMSVCFloatingPoint() const { return UsesMSVCFloatingPoint; }
 
-  void setUsesVAFloatArgument(bool b) {
-    UsesVAFloatArgument = b;
-  }
+  void setUsesMSVCFloatingPoint(bool b) { UsesMSVCFloatingPoint = b; }
 
   bool usesMorestackAddr() const {
     return UsesMorestackAddr;
@@ -257,14 +251,6 @@ public:
   }
   /// \}
 }; // End class MachineModuleInfo
-
-//===- MMI building helpers -----------------------------------------------===//
-
-/// Determine if any floating-point values are being passed to this variadic
-/// function, and set the MachineModuleInfo's usesVAFloatArgument flag if so.
-/// This flag is used to emit an undefined reference to _fltused on Windows,
-/// which will link in MSVCRT's floating-point support.
-void computeUsesVAFloatArgument(const CallInst &I, MachineModuleInfo &MMI);
 
 } // end namespace llvm
 

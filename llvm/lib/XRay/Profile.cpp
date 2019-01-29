@@ -1,9 +1,8 @@
 //===- Profile.cpp - XRay Profile Abstraction -----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -373,6 +372,12 @@ Expected<Profile> profileFromTrace(const Trace &T) {
         // as well.
       }
 
+      break;
+
+    case RecordTypes::CUSTOM_EVENT:
+    case RecordTypes::TYPED_EVENT:
+      // TODO: Support an extension point to allow handling of custom and typed
+      // events in profiles.
       break;
     }
   }

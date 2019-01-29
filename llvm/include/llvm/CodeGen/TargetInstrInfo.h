@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/TargetInstrInfo.h - Instruction Info --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1136,11 +1135,11 @@ public:
     return false;
   }
 
-  /// Get the base register and byte offset of an instruction that reads/writes
+  /// Get the base operand and byte offset of an instruction that reads/writes
   /// memory.
-  virtual bool getMemOpBaseRegImmOfs(MachineInstr &MemOp, unsigned &BaseReg,
-                                     int64_t &Offset,
-                                     const TargetRegisterInfo *TRI) const {
+  virtual bool getMemOperandWithOffset(MachineInstr &MI,
+                                       MachineOperand *&BaseOp, int64_t &Offset,
+                                       const TargetRegisterInfo *TRI) const {
     return false;
   }
 
@@ -1164,8 +1163,8 @@ public:
   /// or
   ///   DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
   /// to TargetPassConfig::createMachineScheduler() to have an effect.
-  virtual bool shouldClusterMemOps(MachineInstr &FirstLdSt, unsigned BaseReg1,
-                                   MachineInstr &SecondLdSt, unsigned BaseReg2,
+  virtual bool shouldClusterMemOps(MachineOperand &BaseOp1,
+                                   MachineOperand &BaseOp2,
                                    unsigned NumLoads) const {
     llvm_unreachable("target did not implement shouldClusterMemOps()");
   }
@@ -1635,10 +1634,11 @@ public:
         "Target didn't implement TargetInstrInfo::getOutliningType!");
   }
 
-  /// Returns target-defined flags defining properties of the MBB for
-  /// the outliner.
-  virtual unsigned getMachineOutlinerMBBFlags(MachineBasicBlock &MBB) const {
-    return 0x0;
+  /// Optional target hook that returns true if \p MBB is safe to outline from,
+  /// and returns any target-specific information in \p Flags.
+  virtual bool isMBBSafeToOutlineFrom(MachineBasicBlock &MBB,
+                                      unsigned &Flags) const {
+    return true;
   }
 
   /// Insert a custom frame for outlined functions.

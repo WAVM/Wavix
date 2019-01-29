@@ -1,9 +1,8 @@
 //===- Debugify.cpp - Attach synthetic debug info to everything -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -96,11 +95,12 @@ bool applyDebugifyMetadata(Module &M,
       continue;
 
     auto SPType = DIB.createSubroutineType(DIB.getOrCreateTypeArray(None));
-    bool IsLocalToUnit = F.hasPrivateLinkage() || F.hasInternalLinkage();
-    auto SP =
-        DIB.createFunction(CU, F.getName(), F.getName(), File, NextLine, SPType,
-                           IsLocalToUnit, /*isDefinition=*/true, NextLine,
-                           DINode::FlagZero, /*isOptimized=*/true);
+    DISubprogram::DISPFlags SPFlags =
+        DISubprogram::SPFlagDefinition | DISubprogram::SPFlagOptimized;
+    if (F.hasPrivateLinkage() || F.hasInternalLinkage())
+      SPFlags |= DISubprogram::SPFlagLocalToUnit;
+    auto SP = DIB.createFunction(CU, F.getName(), F.getName(), File, NextLine,
+                                 SPType, NextLine, DINode::FlagZero, SPFlags);
     F.setSubprogram(SP);
     for (BasicBlock &BB : F) {
       // Attach debug locations.

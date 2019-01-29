@@ -1,9 +1,8 @@
 //===- MachineLICM.cpp - Machine Loop Invariant Code Motion Pass ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -463,8 +462,12 @@ void MachineLICMBase::ProcessMI(MachineInstr *MI,
     for (MCRegAliasIterator AS(Reg, TRI, true); AS.isValid(); ++AS) {
       if (PhysRegDefs.test(*AS))
         PhysRegClobbers.set(*AS);
-      PhysRegDefs.set(*AS);
     }
+    // Need a second loop because MCRegAliasIterator can visit the same
+    // register twice.
+    for (MCRegAliasIterator AS(Reg, TRI, true); AS.isValid(); ++AS)
+      PhysRegDefs.set(*AS);
+
     if (PhysRegClobbers.test(Reg))
       // MI defined register is seen defined by another instruction in
       // the loop, it cannot be a LICM candidate.

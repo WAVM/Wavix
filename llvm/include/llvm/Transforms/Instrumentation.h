@@ -1,9 +1,8 @@
 //===- Transforms/Instrumentation.h - Instrumentation passes ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,6 +23,7 @@
 
 namespace llvm {
 
+class Triple;
 class FunctionPass;
 class ModulePass;
 class OptimizationRemarkEmitter;
@@ -45,7 +45,8 @@ GlobalVariable *createPrivateGlobalForString(Module &M, StringRef Str,
 // Returns F.getComdat() if it exists.
 // Otherwise creates a new comdat, sets F's comdat, and returns it.
 // Returns nullptr on failure.
-Comdat *GetOrCreateFunctionComdat(Function &F, const std::string &ModuleId);
+Comdat *GetOrCreateFunctionComdat(Function &F, Triple &T,
+                                  const std::string &ModuleId);
 
 // Insert GCOV profiling instrumentation
 struct GCOVOptions {
@@ -75,6 +76,12 @@ struct GCOVOptions {
   // Emit the exit block immediately after the start block, rather than after
   // all of the function body's blocks.
   bool ExitBlockBeforeBody;
+
+  // Regexes separated by a semi-colon to filter the files to instrument.
+  std::string Filter;
+
+  // Regexes separated by a semi-colon to filter the files to not instrument.
+  std::string Exclude;
 };
 
 ModulePass *createGCOVProfilerPass(const GCOVOptions &Options =
@@ -141,18 +148,11 @@ FunctionPass *createAddressSanitizerFunctionPass(bool CompileKernel = false,
                                                  bool UseAfterScope = false);
 ModulePass *createAddressSanitizerModulePass(bool CompileKernel = false,
                                              bool Recover = false,
-                                             bool UseGlobalsGC = true);
-
-// Insert MemorySanitizer instrumentation (detection of uninitialized reads)
-FunctionPass *createMemorySanitizerPass(int TrackOrigins = 0,
-                                        bool Recover = false,
-                                        bool EnableKmsan = false);
+                                             bool UseGlobalsGC = true,
+                                             bool UseOdrIndicator = true);
 
 FunctionPass *createHWAddressSanitizerPass(bool CompileKernel = false,
                                            bool Recover = false);
-
-// Insert ThreadSanitizer (race detection) instrumentation
-FunctionPass *createThreadSanitizerPass();
 
 // Insert DataFlowSanitizer (dynamic data flow analysis) instrumentation
 ModulePass *createDataFlowSanitizerPass(
@@ -221,7 +221,6 @@ static inline uint32_t scaleBranchCount(uint64_t Count, uint64_t Scale) {
   assert(Scaled <= std::numeric_limits<uint32_t>::max() && "overflow 32-bits");
   return Scaled;
 }
-
 } // end namespace llvm
 
 #endif // LLVM_TRANSFORMS_INSTRUMENTATION_H

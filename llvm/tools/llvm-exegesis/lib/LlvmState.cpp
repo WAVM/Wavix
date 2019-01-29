@@ -1,9 +1,8 @@
 //===-- LlvmState.cpp -------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -22,27 +21,32 @@
 namespace llvm {
 namespace exegesis {
 
-LLVMState::LLVMState(const std::string &Triple, const std::string &CpuName) {
+LLVMState::LLVMState(const std::string &Triple, const std::string &CpuName,
+                     const std::string &Features) {
   std::string Error;
   const llvm::Target *const TheTarget =
       llvm::TargetRegistry::lookupTarget(Triple, Error);
   assert(TheTarget && "unknown target for host");
   const llvm::TargetOptions Options;
-  TargetMachine.reset(static_cast<llvm::LLVMTargetMachine *>(
-      TheTarget->createTargetMachine(Triple, CpuName, /*Features*/ "", Options,
-                                     llvm::Reloc::Model::Static)));
+  TargetMachine.reset(
+      static_cast<llvm::LLVMTargetMachine *>(TheTarget->createTargetMachine(
+          Triple, CpuName, Features, Options, llvm::Reloc::Model::Static)));
   TheExegesisTarget = ExegesisTarget::lookup(TargetMachine->getTargetTriple());
   if (!TheExegesisTarget) {
     llvm::errs() << "no exegesis target for " << Triple << ", using default\n";
     TheExegesisTarget = &ExegesisTarget::getDefault();
   }
+  PfmCounters = &TheExegesisTarget->getPfmCounters(CpuName);
+
   RATC.reset(new RegisterAliasingTrackerCache(
       getRegInfo(), getFunctionReservedRegs(getTargetMachine())));
+  IC.reset(new InstructionsCache(getInstrInfo(), getRATC()));
 }
 
-LLVMState::LLVMState()
+LLVMState::LLVMState(const std::string &CpuName)
     : LLVMState(llvm::sys::getProcessTriple(),
-                llvm::sys::getHostCPUName().str()) {}
+                CpuName.empty() ? llvm::sys::getHostCPUName().str() : CpuName,
+                "") {}
 
 std::unique_ptr<llvm::LLVMTargetMachine>
 LLVMState::createTargetMachine() const {

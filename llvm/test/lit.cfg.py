@@ -89,7 +89,6 @@ llvm_config.use_default_substitutions()
 config.substitutions.append(('%llvmshlibdir', config.llvm_shlib_dir))
 config.substitutions.append(('%shlibext', config.llvm_shlib_ext))
 config.substitutions.append(('%exeext', config.llvm_exe_ext))
-config.substitutions.append(('%host_cc', config.host_cc))
 
 
 lli_args = []
@@ -146,11 +145,11 @@ tools.extend([
     'llvm-isel-fuzzer', 'llvm-opt-fuzzer', 'llvm-lib', 'llvm-link', 'llvm-lto',
     'llvm-lto2', 'llvm-mc', 'llvm-mca', 'llvm-modextract', 'llvm-nm',
     'llvm-objcopy', 'llvm-objdump', 'llvm-pdbutil', 'llvm-profdata',
-    'llvm-ranlib', 'llvm-readobj', 'llvm-rtdyld', 'llvm-size', 'llvm-split',
-    'llvm-strings', 'llvm-strip', 'llvm-tblgen', 'llvm-undname', 'llvm-c-test',
-    'llvm-cxxfilt', 'llvm-xray', 'yaml2obj', 'obj2yaml', 'yaml-bench',
-    'verify-uselistorder', 'bugpoint', 'llc', 'llvm-symbolizer', 'opt',
-    'sancov', 'sanstats'])
+    'llvm-ranlib', 'llvm-readelf', 'llvm-readobj', 'llvm-rtdyld', 'llvm-size',
+    'llvm-split', 'llvm-strings', 'llvm-strip', 'llvm-tblgen', 'llvm-undname',
+    'llvm-c-test', 'llvm-cxxfilt', 'llvm-xray', 'yaml2obj', 'obj2yaml',
+    'yaml-bench', 'verify-uselistorder', 'bugpoint', 'llc', 'llvm-symbolizer',
+    'opt', 'sancov', 'sanstats'])
 
 # The following tools are optional
 tools.extend([
@@ -279,7 +278,10 @@ if have_ld_plugin_support():
 
 
 def have_ld64_plugin_support():
-    if not config.llvm_tool_lto_build or config.ld64_executable == '':
+    if not os.path.exists(os.path.join(config.llvm_shlib_dir, 'libLTO' + config.llvm_shlib_ext)):
+        return False
+
+    if config.ld64_executable == '':
         return False
 
     ld_cmd = subprocess.Popen(
@@ -322,7 +324,7 @@ if config.have_libxar:
 if config.enable_threads:
     config.available_features.add('thread_support')
 
-if config.llvm_libxml2_enabled == '1':
+if config.llvm_libxml2_enabled:
     config.available_features.add('libxml2')
 
 if config.have_opt_viewer_modules:

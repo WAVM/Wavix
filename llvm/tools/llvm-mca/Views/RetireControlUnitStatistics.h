@@ -1,9 +1,8 @@
 //===--------------------- RetireControlUnitStatistics.h --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -16,10 +15,13 @@
 ///
 /// Retire Control Unit - number of cycles where we saw N instructions retired:
 /// [# retired], [# cycles]
-///  0,           9  (6.9%)
-///  1,           6  (4.6%)
-///  2,           1  (0.8%)
-///  4,           3  (2.3%)
+///  0,           109  (17.9%)
+///  1,           102  (16.7%)
+///  2,           399  (65.4%)
+///
+/// Total ROB Entries:                64
+/// Max Used ROB Entries:             35  ( 54.7% )
+/// Average Used ROB Entries per cy:  32  ( 50.0% )
 ///
 //===----------------------------------------------------------------------===//
 
@@ -27,9 +29,10 @@
 #define LLVM_TOOLS_LLVM_MCA_RETIRECONTROLUNITSTATISTICS_H
 
 #include "Views/View.h"
-#include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCSchedule.h"
 #include <map>
 
+namespace llvm {
 namespace mca {
 
 class RetireControlUnitStatistics : public View {
@@ -38,23 +41,20 @@ class RetireControlUnitStatistics : public View {
 
   unsigned NumRetired;
   unsigned NumCycles;
-
-  void updateHistograms() {
-    RetiredPerCycle[NumRetired]++;
-    NumRetired = 0;
-  }
+  unsigned TotalROBEntries;
+  unsigned EntriesInUse;
+  unsigned MaxUsedEntries;
+  unsigned SumOfUsedEntries;
 
 public:
-  RetireControlUnitStatistics() : NumRetired(0), NumCycles(0) {}
+  RetireControlUnitStatistics(const MCSchedModel &SM);
 
   void onEvent(const HWInstructionEvent &Event) override;
-
-  void onCycleBegin() override { NumCycles++; }
-
-  void onCycleEnd() override { updateHistograms(); }
-
+  void onCycleEnd() override;
   void printView(llvm::raw_ostream &OS) const override;
 };
+
 } // namespace mca
+} // namespace llvm
 
 #endif

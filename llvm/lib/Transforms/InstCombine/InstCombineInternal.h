@@ -1,9 +1,8 @@
 //===- InstCombineInternal.h - InstCombine pass internals -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -589,6 +588,9 @@ private:
 
   Value *foldAndOrOfICmpsOfAndWithPow2(ICmpInst *LHS, ICmpInst *RHS,
                                        bool JoinedByAnd, Instruction &CxtI);
+  Value *matchSelectFromAndOr(Value *A, Value *B, Value *C, Value *D);
+  Value *getSelectCondition(Value *A, Value *B);
+
 public:
   /// Inserts an instruction \p New before instruction \p Old
   ///
@@ -799,7 +801,8 @@ private:
 
   Value *simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
                                                APInt DemandedElts,
-                                               int DmaskIdx = -1);
+                                               int DmaskIdx = -1,
+                                               int TFCIdx = -1);
 
   Value *SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
                                     APInt &UndefElts, unsigned Depth = 0);
@@ -854,6 +857,7 @@ private:
   Instruction *foldICmpWithCastAndCast(ICmpInst &ICI);
 
   Instruction *foldICmpUsingKnownBits(ICmpInst &Cmp);
+  Instruction *foldICmpWithDominatingICmp(ICmpInst &Cmp);
   Instruction *foldICmpWithConstant(ICmpInst &Cmp);
   Instruction *foldICmpInstWithConstant(ICmpInst &Cmp);
   Instruction *foldICmpInstWithConstantNotInt(ICmpInst &Cmp);
@@ -899,7 +903,10 @@ private:
   Instruction *foldICmpBinOpEqualityWithConstant(ICmpInst &Cmp,
                                                  BinaryOperator *BO,
                                                  const APInt &C);
-  Instruction *foldICmpIntrinsicWithConstant(ICmpInst &ICI, const APInt &C);
+  Instruction *foldICmpIntrinsicWithConstant(ICmpInst &ICI, IntrinsicInst *II,
+                                             const APInt &C);
+  Instruction *foldICmpEqIntrinsicWithConstant(ICmpInst &ICI, IntrinsicInst *II,
+                                               const APInt &C);
 
   // Helpers of visitSelectInst().
   Instruction *foldSelectExtConst(SelectInst &Sel);
@@ -916,8 +923,11 @@ private:
   Value *insertRangeTest(Value *V, const APInt &Lo, const APInt &Hi,
                          bool isSigned, bool Inside);
   Instruction *PromoteCastOfAllocation(BitCastInst &CI, AllocaInst &AI);
-  Instruction *MatchBSwap(BinaryOperator &I);
-  bool SimplifyStoreAtEndOfBlock(StoreInst &SI);
+  bool mergeStoreIntoSuccessor(StoreInst &SI);
+
+  /// Given an 'or' instruction, check to see if it is part of a bswap idiom.
+  /// If so, return the equivalent bswap intrinsic.
+  Instruction *matchBSwap(BinaryOperator &Or);
 
   Instruction *SimplifyAnyMemTransfer(AnyMemTransferInst *MI);
   Instruction *SimplifyAnyMemSet(AnyMemSetInst *MI);

@@ -1,9 +1,8 @@
 //===-LTOBackend.cpp - LLVM Link Time Optimizer Backend -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -490,7 +489,7 @@ Error lto::thinBackend(Config &Conf, unsigned Task, AddStreamFn AddStream,
 
   dropDeadSymbols(Mod, DefinedGlobals, CombinedIndex);
 
-  thinLTOResolveWeakForLinkerModule(Mod, DefinedGlobals);
+  thinLTOResolvePrevailingInModule(Mod, DefinedGlobals);
 
   if (Conf.PostPromoteModuleHook && !Conf.PostPromoteModuleHook(Task, Mod))
     return finalizeOptimizationRemarks(std::move(DiagnosticOutputFile));
