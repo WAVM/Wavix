@@ -1,9 +1,8 @@
 //===----- CGOpenMPRuntimeNVPTX.h - Interface to OpenMP NVPTX Runtimes ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -55,6 +54,11 @@ private:
   };
 
   ExecutionMode getExecutionMode() const;
+
+  bool requiresFullRuntime() const { return RequiresFullRuntime; }
+
+  /// Get barrier to synchronize all threads in a block.
+  void syncCTAThreads(CodeGenFunction &CGF);
 
   /// Emit the worker function for the current target region.
   void emitWorkerFunction(WorkerFunctionState &WST);
@@ -180,8 +184,19 @@ protected:
     return "__omp_outlined__";
   }
 
+  /// Check if the default location must be constant.
+  /// Constant for NVPTX for better optimization.
+  bool isDefaultLocationConstant() const override { return true; }
+
+  /// Returns additional flags that can be stored in reserved_2 field of the
+  /// default location.
+  /// For NVPTX target contains data about SPMD/Non-SPMD execution mode +
+  /// Full/Lightweight runtime mode. Used for better optimization.
+  unsigned getDefaultLocationReserved2Flags() const override;
+
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
+  void clear() override;
 
   /// Emit call to void __kmpc_push_proc_bind(ident_t *loc, kmp_int32
   /// global_tid, int proc_bind) to generate code for 'proc_bind' clause.
@@ -260,6 +275,18 @@ public:
                         llvm::Value *OutlinedFn,
                         ArrayRef<llvm::Value *> CapturedVars,
                         const Expr *IfCond) override;
+
+  /// Emit an implicit/explicit barrier for OpenMP threads.
+  /// \param Kind Directive for which this implicit barrier call must be
+  /// generated. Must be OMPD_barrier for explicit barrier generation.
+  /// \param EmitChecks true if need to emit checks for cancellation barriers.
+  /// \param ForceSimpleCall true simple barrier call must be emitted, false if
+  /// runtime class decides which one to emit (simple or with cancellation
+  /// checks).
+  ///
+  void emitBarrierCall(CodeGenFunction &CGF, SourceLocation Loc,
+                       OpenMPDirectiveKind Kind, bool EmitChecks = true,
+                       bool ForceSimpleCall = false) override;
 
   /// Emits a critical region.
   /// \param CriticalName Name of the critical region.
@@ -348,7 +375,17 @@ public:
   /// Choose a default value for the schedule clause.
   void getDefaultScheduleAndChunk(CodeGenFunction &CGF,
       const OMPLoopDirective &S, OpenMPScheduleClauseKind &ScheduleKind,
-      llvm::Value *&Chunk) const override;
+      const Expr *&ChunkExpr) const override;
+
+  /// Adjust some parameters for the target-based directives, like addresses of
+  /// the variables captured by reference in lambdas.
+  void adjustTargetSpecificDataForLambdas(
+      CodeGenFunction &CGF, const OMPExecutableDirective &D) const override;
+
+  /// Perform check on requires decl to ensure that target architecture
+  /// supports unified addressing
+  void checkArchForUnifiedAddressing(CodeGenModule &CGM,
+                                     const OMPRequiresDecl *D) const override;
 
 private:
   /// Track the execution mode when codegening directives within a target
@@ -356,6 +393,9 @@ private:
   /// target region and used by containing directives such as 'parallel'
   /// to emit optimized code.
   ExecutionMode CurrentExecutionMode = EM_Unknown;
+
+  /// Check if the full runtime is required (default - yes).
+  bool RequiresFullRuntime = true;
 
   /// true if we're emitting the code for the target region and next parallel
   /// region is L0 for sure.
@@ -408,6 +448,27 @@ private:
   /// Maps the function to the list of the globalized variables with their
   /// addresses.
   llvm::SmallDenseMap<llvm::Function *, FunctionData> FunctionGlobalizedDecls;
+  /// List of records for the globalized variables in target/teams/distribute
+  /// contexts. Inner records are going to be joined into the single record,
+  /// while those resulting records are going to be joined into the single
+  /// union. This resulting union (one per CU) is the entry point for the static
+  /// memory management runtime functions.
+  struct GlobalPtrSizeRecsTy {
+    llvm::GlobalVariable *UseSharedMemory = nullptr;
+    llvm::GlobalVariable *RecSize = nullptr;
+    llvm::GlobalVariable *Buffer = nullptr;
+    SourceLocation Loc;
+    llvm::SmallVector<const RecordDecl *, 2> Records;
+    unsigned RegionCounter = 0;
+  };
+  llvm::SmallVector<GlobalPtrSizeRecsTy, 8> GlobalizedRecords;
+  /// Shared pointer for the global memory in the global memory buffer used for
+  /// the given kernel.
+  llvm::GlobalVariable *KernelStaticGlobalized = nullptr;
+  /// Pair of the Non-SPMD team and all reductions variables in this team
+  /// region.
+  std::pair<const Decl *, llvm::SmallVector<const ValueDecl *, 4>>
+      TeamAndReductions;
 };
 
 } // CodeGen namespace.

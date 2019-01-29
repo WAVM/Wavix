@@ -1,9 +1,8 @@
 //===- HeaderSearch.cpp - Resolve Header File Locations -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1638,8 +1637,10 @@ void HeaderSearch::loadSubdirectoryModuleMaps(DirectoryLookup &SearchDir) {
     return;
 
   std::error_code EC;
+  SmallString<128> Dir = SearchDir.getDir()->getName();
+  FileMgr.makeAbsolutePath(Dir);
   SmallString<128> DirNative;
-  llvm::sys::path::native(SearchDir.getDir()->getName(), DirNative);
+  llvm::sys::path::native(Dir, DirNative);
   llvm::vfs::FileSystem &FS = *FileMgr.getVirtualFileSystem();
   for (llvm::vfs::directory_iterator Dir = FS.dir_begin(DirNative, EC), DirEnd;
        Dir != DirEnd && !EC; Dir.increment(EC)) {
@@ -1676,9 +1677,8 @@ std::string HeaderSearch::suggestPathToFileForDiagnostics(
     StringRef Dir = SearchDirs[I].getDir()->getName();
     llvm::SmallString<32> DirPath(Dir.begin(), Dir.end());
     if (!WorkingDir.empty() && !path::is_absolute(Dir)) {
-      auto err = fs::make_absolute(WorkingDir, DirPath);
-      if (!err)
-        path::remove_dots(DirPath, /*remove_dot_dot=*/true);
+      fs::make_absolute(WorkingDir, DirPath);
+      path::remove_dots(DirPath, /*remove_dot_dot=*/true);
       Dir = DirPath;
     }
     for (auto NI = path::begin(File), NE = path::end(File),

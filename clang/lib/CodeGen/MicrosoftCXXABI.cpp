@@ -1,9 +1,8 @@
 //===--- MicrosoftCXXABI.cpp - Emit LLVM Code from ASTs for a Module ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1552,9 +1551,9 @@ void MicrosoftCXXABI::EmitDestructorCall(CodeGenFunction &CGF,
   if (Type == Dtor_Complete && DD->getParent()->getNumVBases() == 0)
     Type = Dtor_Base;
 
-  CGCallee Callee = CGCallee::forDirect(
-                          CGM.getAddrOfCXXStructor(DD, getFromDtorType(Type)),
-                                        DD);
+  CGCallee Callee =
+      CGCallee::forDirect(CGM.getAddrOfCXXStructor(DD, getFromDtorType(Type)),
+                          GlobalDecl(DD, Type));
 
   if (DD->isVirtual()) {
     assert(Type != CXXDtorType::Dtor_Deleting &&
@@ -1872,7 +1871,7 @@ CGCallee MicrosoftCXXABI::getVirtualFunctionPointer(CodeGenFunction &CGF,
     VFunc = Builder.CreateAlignedLoad(VFuncPtr, CGF.getPointerAlign());
   }
 
-  CGCallee Callee(MethodDecl->getCanonicalDecl(), VFunc);
+  CGCallee Callee(GD, VFunc);
   return Callee;
 }
 
@@ -3929,7 +3928,7 @@ MicrosoftCXXABI::getAddrOfCXXCtorClosure(const CXXConstructorDecl *CD,
   CallArgList Args;
 
   // Push the this ptr.
-  Args.add(RValue::get(This), CD->getThisType(getContext()));
+  Args.add(RValue::get(This), CD->getThisType());
 
   // Push the src ptr.
   if (SrcVal)
@@ -3956,7 +3955,8 @@ MicrosoftCXXABI::getAddrOfCXXCtorClosure(const CXXConstructorDecl *CD,
   // Call the destructor with our arguments.
   llvm::Constant *CalleePtr =
     CGM.getAddrOfCXXStructor(CD, StructorType::Complete);
-  CGCallee Callee = CGCallee::forDirect(CalleePtr, CD);
+  CGCallee Callee =
+      CGCallee::forDirect(CalleePtr, GlobalDecl(CD, Ctor_Complete));
   const CGFunctionInfo &CalleeInfo = CGM.getTypes().arrangeCXXConstructorCall(
       Args, CD, Ctor_Complete, ExtraArgs.Prefix, ExtraArgs.Suffix);
   CGF.EmitCall(CalleeInfo, Callee, ReturnValueSlot(), Args);

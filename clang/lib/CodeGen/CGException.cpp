@@ -1,9 +1,8 @@
 //===--- CGException.cpp - Emit LLVM Code for C++ exceptions ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -66,7 +65,7 @@ llvm::Constant *CodeGenModule::getTerminateFn() {
       name = "__std_terminate";
     else
       name = "?terminate@@YAXXZ";
-  } else if (getLangOpts().ObjC1 &&
+  } else if (getLangOpts().ObjC &&
              getLangOpts().ObjCRuntime.hasTerminate())
     name = "objc_terminate";
   else
@@ -224,7 +223,7 @@ const EHPersonality &EHPersonality::get(CodeGenModule &CGM,
   if (FD && FD->usesSEHTry())
     return getSEHPersonalityMSVC(T);
 
-  if (L.ObjC1)
+  if (L.ObjC)
     return L.CPlusPlus ? getObjCXXPersonality(Target, L)
                        : getObjCPersonality(Target, L);
   return L.CPlusPlus ? getCXXPersonality(Target, L)
@@ -250,7 +249,11 @@ static llvm::Constant *getPersonalityFn(CodeGenModule &CGM,
 static llvm::Constant *getOpaquePersonalityFn(CodeGenModule &CGM,
                                         const EHPersonality &Personality) {
   llvm::Constant *Fn = getPersonalityFn(CGM, Personality);
-  return llvm::ConstantExpr::getBitCast(Fn, CGM.Int8PtrTy);
+  llvm::PointerType* Int8PtrTy = llvm::PointerType::get(
+      llvm::Type::getInt8Ty(CGM.getLLVMContext()),
+      CGM.getDataLayout().getProgramAddressSpace());
+
+  return llvm::ConstantExpr::getBitCast(Fn, Int8PtrTy);
 }
 
 /// Check whether a landingpad instruction only uses C++ features.
@@ -315,7 +318,7 @@ static bool PersonalityHasOnlyCXXUses(llvm::Constant *Fn) {
 /// when it really needs it.
 void CodeGenModule::SimplifyPersonality() {
   // If we're not in ObjC++ -fexceptions, there's nothing to do.
-  if (!LangOpts.CPlusPlus || !LangOpts.ObjC1 || !LangOpts.Exceptions)
+  if (!LangOpts.CPlusPlus || !LangOpts.ObjC || !LangOpts.Exceptions)
     return;
 
   // Both the problem this endeavors to fix and the way the logic
@@ -1623,8 +1626,16 @@ struct PerformSEHFinally final : EHScopeStack::Cleanup {
 
     // Compute the two argument values.
     QualType ArgTys[2] = {Context.UnsignedCharTy, Context.VoidPtrTy};
-    llvm::Value *LocalAddrFn = CGM.getIntrinsic(llvm::Intrinsic::localaddress);
-    llvm::Value *FP = CGF.Builder.CreateCall(LocalAddrFn);
+    llvm::Value *FP = nullptr;
+    // If CFG.IsOutlinedSEHHelper is true, then we are within a finally block.
+    if (CGF.IsOutlinedSEHHelper) {
+      FP = &CGF.CurFn->arg_begin()[1];
+    } else {
+      llvm::Value *LocalAddrFn =
+          CGM.getIntrinsic(llvm::Intrinsic::localaddress);
+      FP = CGF.Builder.CreateCall(LocalAddrFn);
+    }
+
     llvm::Value *IsForEH =
         llvm::ConstantInt::get(CGF.ConvertType(ArgTys[0]), F.isForEHCleanup());
     Args.add(RValue::get(IsForEH), ArgTys[0]);
@@ -1777,7 +1788,7 @@ void CodeGenFunction::EmitCapturedLocals(CodeGenFunction &ParentCGF,
     // frame pointer of the parent function. We only need to do this in filters,
     // since finally funclets recover the parent FP for us.
     llvm::Function *RecoverFPIntrin =
-        CGM.getIntrinsic(llvm::Intrinsic::x86_seh_recoverfp);
+        CGM.getIntrinsic(llvm::Intrinsic::eh_recoverfp);
     llvm::Constant *ParentI8Fn =
         llvm::ConstantExpr::getBitCast(ParentCGF.CurFn, Int8PtrTy);
     ParentFP = Builder.CreateCall(RecoverFPIntrin, {ParentI8Fn, EntryFP});
@@ -1874,7 +1885,7 @@ void CodeGenFunction::startOutlinedSEHHelper(CodeGenFunction &ParentCGF,
                 OutlinedStmt->getBeginLoc(), OutlinedStmt->getBeginLoc());
   CurSEHParent = ParentCGF.CurSEHParent;
 
-  CGM.SetLLVMFunctionAttributes(nullptr, FnInfo, CurFn);
+  CGM.SetLLVMFunctionAttributes(GlobalDecl(), FnInfo, CurFn);
   EmitCapturedLocals(ParentCGF, OutlinedStmt, IsFilter);
 }
 

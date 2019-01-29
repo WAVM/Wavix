@@ -1,9 +1,8 @@
 //===--- UnwrappedLineFormatter.cpp - Format C++ code ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -988,8 +987,7 @@ private:
       Path.push_front(Best);
       Best = Best->Previous;
     }
-    for (std::deque<StateNode *>::iterator I = Path.begin(), E = Path.end();
-         I != E; ++I) {
+    for (auto I = Path.begin(), E = Path.end(); I != E; ++I) {
       unsigned Penalty = 0;
       formatChildren(State, (*I)->NewLine, /*DryRun=*/false, Penalty);
       Penalty += Indenter->addTokenToState(State, (*I)->NewLine, false);
@@ -998,8 +996,8 @@ private:
         printLineState((*I)->Previous->State);
         if ((*I)->NewLine) {
           llvm::dbgs() << "Penalty for placing "
-                       << (*I)->Previous->State.NextToken->Tok.getName() << ": "
-                       << Penalty << "\n";
+                       << (*I)->Previous->State.NextToken->Tok.getName()
+                       << " on a new line: " << Penalty << "\n";
         }
       });
     }

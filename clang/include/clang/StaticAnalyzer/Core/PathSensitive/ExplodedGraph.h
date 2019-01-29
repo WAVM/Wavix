@@ -1,9 +1,8 @@
 //===- ExplodedGraph.h - Local, Path-Sens. "Exploded Graph" -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -210,8 +209,12 @@ public:
     return const_cast<ExplodedNode*>(this)->getFirstPred();
   }
 
-  const ExplodedNode *getFirstSucc() const {
+  ExplodedNode *getFirstSucc() {
     return succ_empty() ? nullptr : *(succ_begin());
+  }
+
+  const ExplodedNode *getFirstSucc() const {
+    return const_cast<ExplodedNode*>(this)->getFirstSucc();
   }
 
   // Iterators over successor and predecessor vertices.
@@ -243,8 +246,10 @@ public:
   int64_t getID(ExplodedGraph *G) const;
 
   /// The node is trivial if it has only one successor, only one predecessor,
+  /// it's predecessor has only one successor,
   /// and its program state is the same as the program state of the previous
   /// node.
+  /// Trivial nodes may be skipped while printing exploded graph.
   bool isTrivial() const;
 
 private:
@@ -460,7 +465,6 @@ public:
 // GraphTraits
 
 namespace llvm {
-
   template <> struct GraphTraits<clang::ento::ExplodedGraph *> {
     using GraphTy = clang::ento::ExplodedGraph *;
     using NodeRef = clang::ento::ExplodedNode *;
@@ -471,17 +475,19 @@ namespace llvm {
       return *G->roots_begin();
     }
 
+    static bool predecessorOfTrivial(NodeRef N) {
+      return N->succ_size() == 1 && N->getFirstSucc()->isTrivial();
+    }
+
     static ChildIteratorType child_begin(NodeRef N) {
-      if (N->succ_size() == 1 && (*N->succ_begin())->isTrivial()) {
+      if (predecessorOfTrivial(N))
         return child_begin(*N->succ_begin());
-      }
       return N->succ_begin();
     }
 
     static ChildIteratorType child_end(NodeRef N) {
-      if (N->succ_size() == 1 && (*N->succ_begin())->isTrivial()) {
-        return child_end(*N->succ_begin());
-      }
+      if (predecessorOfTrivial(N))
+        return child_end(N->getFirstSucc());
       return N->succ_end();
     }
 

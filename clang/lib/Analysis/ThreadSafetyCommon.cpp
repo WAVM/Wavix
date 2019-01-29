@@ -1,9 +1,8 @@
 //===- ThreadSafetyCommon.cpp ---------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -128,7 +127,8 @@ CapabilityExpr SExprBuilder::translateAttrExpr(const Expr *AttrExp,
   // Hack to handle constructors, where self cannot be recovered from
   // the expression.
   if (SelfDecl && !Ctx.SelfArg) {
-    DeclRefExpr SelfDRE(SelfDecl, false, SelfDecl->getType(), VK_LValue,
+    DeclRefExpr SelfDRE(SelfDecl->getASTContext(), SelfDecl, false,
+                        SelfDecl->getType(), VK_LValue,
                         SelfDecl->getLocation());
     Ctx.SelfArg = &SelfDRE;
 
@@ -235,6 +235,8 @@ til::SExpr *SExprBuilder::translate(const Stmt *S, CallingContext *Ctx) {
              cast<BinaryConditionalOperator>(S), Ctx);
 
   // We treat these as no-ops
+  case Stmt::ConstantExprClass:
+    return translate(cast<ConstantExpr>(S)->getSubExpr(), Ctx);
   case Stmt::ParenExprClass:
     return translate(cast<ParenExpr>(S)->getSubExpr(), Ctx);
   case Stmt::ExprWithCleanupsClass:

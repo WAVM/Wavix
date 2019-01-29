@@ -16,15 +16,12 @@ add_clang_library(clangAnalysis
   CodeInjector.cpp
   Dominators.cpp
   ExprMutationAnalyzer.cpp
-  FormatString.cpp
   LiveVariables.cpp
-  OSLog.cpp
   ObjCNoReturn.cpp
   PostOrderCFGView.cpp
-  PrintfFormatString.cpp
   ProgramPoint.cpp
   ReachableCode.cpp
-  ScanfFormatString.cpp
+  RetainSummaryManager.cpp
   ThreadSafety.cpp
   ThreadSafetyCommon.cpp
   ThreadSafetyLogical.cpp

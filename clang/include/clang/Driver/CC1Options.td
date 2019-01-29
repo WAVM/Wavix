@@ -1,9 +1,8 @@
 //===--- CC1Options.td - Options for clang -cc1 ---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -27,6 +26,8 @@ def triple : Separate<["-"], "triple">,
   HelpText<"Specify target triple (e.g. i686-apple-darwin9)">;
 def target_abi : Separate<["-"], "target-abi">,
   HelpText<"Target a particular ABI type">;
+def target_sdk_version_EQ : Joined<["-"], "target-sdk-version=">,
+  HelpText<"The version of target SDK used for compilation">;
 
 }
 
@@ -106,11 +107,11 @@ def analyzer_checker : Separate<["-"], "analyzer-checker">,
   ValuesCode<[{
     const char *Values =
     #define GET_CHECKERS
-    #define CHECKER(FULLNAME, CLASS, DESCFILE, HT, G, H)  FULLNAME ","
+    #define CHECKER(FULLNAME, CLASS, HT, DOC_URI)  FULLNAME ","
     #include "clang/StaticAnalyzer/Checkers/Checkers.inc"
     #undef GET_CHECKERS
     #define GET_PACKAGES
-    #define PACKAGE(FULLNAME, G, D)  FULLNAME ","
+    #define PACKAGE(FULLNAME)  FULLNAME ","
     #include "clang/StaticAnalyzer/Checkers/Checkers.inc"
     #undef GET_PACKAGES
     ;
@@ -129,11 +130,20 @@ def analyzer_disable_all_checks : Flag<["-"], "analyzer-disable-all-checks">,
 def analyzer_checker_help : Flag<["-"], "analyzer-checker-help">,
   HelpText<"Display the list of analyzer checkers that are available">;
 
+def analyzer_config_help : Flag<["-"], "analyzer-config-help">,
+  HelpText<"Display the list of -analyzer-config options">;
+
 def analyzer_list_enabled_checkers : Flag<["-"], "analyzer-list-enabled-checkers">,
   HelpText<"Display the list of enabled analyzer checkers">;
 
 def analyzer_config : Separate<["-"], "analyzer-config">,
   HelpText<"Choose analyzer options to enable">;
+
+def analyzer_config_compatibility_mode : Separate<["-"], "analyzer-config-compatibility-mode">,
+  HelpText<"Don't emit errors on invalid analyzer-config inputs">;
+
+def analyzer_config_compatibility_mode_EQ : Joined<["-"], "analyzer-config-compatibility-mode=">,
+  Alias<analyzer_config_compatibility_mode>;
 
 //===----------------------------------------------------------------------===//
 // Migrator Options
@@ -152,12 +162,16 @@ let Flags = [CC1Option, CC1AsOption, NoDriverOption] in {
 def debug_info_kind_EQ : Joined<["-"], "debug-info-kind=">;
 def debug_info_macro : Flag<["-"], "debug-info-macro">,
   HelpText<"Emit macro debug information">;
+def default_function_attr : Separate<["-"], "default-function-attr">,
+  HelpText<"Apply given attribute to all functions">;
 def dwarf_version_EQ : Joined<["-"], "dwarf-version=">;
 def debugger_tuning_EQ : Joined<["-"], "debugger-tuning=">;
 def fdebug_compilation_dir : Separate<["-"], "fdebug-compilation-dir">,
   HelpText<"The compilation directory to embed in the debug info.">;
 def dwarf_debug_flags : Separate<["-"], "dwarf-debug-flags">,
   HelpText<"The string to embed in the Dwarf debug flags record.">;
+def record_command_line : Separate<["-"], "record-command-line">,
+  HelpText<"The string to embed in the .LLVM.command.line section.">;
 def compress_debug_sections : Flag<["-", "--"], "compress-debug-sections">,
     HelpText<"DWARF debug sections compression">;
 def compress_debug_sections_EQ : Joined<["-"], "compress-debug-sections=">,
@@ -354,6 +368,13 @@ def fdebug_pass_manager : Flag<["-"], "fdebug-pass-manager">,
     HelpText<"Prints debug information for the new pass manager">;
 def fno_debug_pass_manager : Flag<["-"], "fno-debug-pass-manager">,
     HelpText<"Disables debug printing for the new pass manager">;
+// The driver option takes the key as a parameter to the -msign-return-address=
+// and -mbranch-protection= options, but CC1 has a separate option so we
+// don't have to parse the parameter twice.
+def msign_return_address_key_EQ : Joined<["-"], "msign-return-address-key=">,
+    Values<"a_key,b_key">;
+def mbranch_target_enforce : Flag<["-"], "mbranch-target-enforce">;
+def fno_dllexport_inlines : Flag<["-"], "fno-dllexport-inlines">;
 
 //===----------------------------------------------------------------------===//
 // Dependency Output Options
@@ -546,8 +567,6 @@ def emit_module_interface : Flag<["-"], "emit-module-interface">,
   HelpText<"Generate pre-compiled module file from a C++ module interface">;
 def emit_header_module : Flag<["-"], "emit-header-module">,
   HelpText<"Generate pre-compiled module file from a set of header files">;
-def emit_pth : Flag<["-"], "emit-pth">,
-  HelpText<"Generate pre-tokenized header file">;
 def emit_pch : Flag<["-"], "emit-pch">,
   HelpText<"Generate pre-compiled header file">;
 def emit_llvm_bc : Flag<["-"], "emit-llvm-bc">,
@@ -639,7 +658,9 @@ def fblocks_runtime_optional : Flag<["-"], "fblocks-runtime-optional">,
 def fexternc_nounwind : Flag<["-"], "fexternc-nounwind">,
   HelpText<"Assume all functions with C linkage do not unwind">;
 def enable_split_dwarf : Flag<["-"], "enable-split-dwarf">,
-  HelpText<"Use split dwarf/Fission">;
+  HelpText<"Use DWARF fission in 'split' mode">;
+def enable_split_dwarf_EQ : Joined<["-"], "enable-split-dwarf=">,
+  HelpText<"Set DWARF fission mode to either 'split' or 'single'">, Values<"split,single">;
 def fno_wchar : Flag<["-"], "fno-wchar">,
   HelpText<"Disable C++ builtin type wchar_t">;
 def fconstant_string_class : Separate<["-"], "fconstant-string-class">,
@@ -681,6 +702,8 @@ def fvisibility : Separate<["-"], "fvisibility">,
   HelpText<"Default type and symbol visibility">;
 def ftype_visibility : Separate<["-"], "ftype-visibility">,
   HelpText<"Default type visibility">;
+def fapply_global_visibility_to_externs : Flag<["-"], "fapply-global-visibility-to-externs">,
+  HelpText<"Apply global symbol visibility to external declarations without an explicit visibility">;
 def ftemplate_depth : Separate<["-"], "ftemplate-depth">,
   HelpText<"Maximum depth of recursive template instantiation">;
 def foperator_arrow_depth : Separate<["-"], "foperator-arrow-depth">,
@@ -776,15 +799,11 @@ def internal_externc_isystem : JoinedOrSeparate<["-"], "internal-externc-isystem
 // Preprocessor Options
 //===----------------------------------------------------------------------===//
 
-def include_pth : Separate<["-"], "include-pth">, MetaVarName<"<file>">,
-  HelpText<"Include file before parsing">;
 def chain_include : Separate<["-"], "chain-include">, MetaVarName<"<file>">,
   HelpText<"Include and chain a header file after turning it into PCH">;
 def preamble_bytes_EQ : Joined<["-"], "preamble-bytes=">,
   HelpText<"Assume that the precompiled header is a precompiled preamble "
            "covering the first N bytes of the main file">;
-def token_cache : Separate<["-"], "token-cache">, MetaVarName<"<path>">,
-  HelpText<"Use specified token cache file">;
 def detailed_preprocessing_record : Flag<["-"], "detailed-preprocessing-record">,
   HelpText<"include a detailed record of preprocessing actions">;
 

@@ -1,9 +1,8 @@
 //===--- CGExprConstant.cpp - Emit LLVM Code from Constant Expressions ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -47,7 +46,7 @@ class ConstStructBuilder {
 public:
   static llvm::Constant *BuildStruct(ConstantEmitter &Emitter,
                                      ConstExprEmitter *ExprEmitter,
-                                     llvm::ConstantStruct *Base,
+                                     llvm::Constant *Base,
                                      InitListExpr *Updater,
                                      QualType ValTy);
   static llvm::Constant *BuildStruct(ConstantEmitter &Emitter,
@@ -76,7 +75,7 @@ private:
   void ConvertStructToPacked();
 
   bool Build(InitListExpr *ILE);
-  bool Build(ConstExprEmitter *Emitter, llvm::ConstantStruct *Base,
+  bool Build(ConstExprEmitter *Emitter, llvm::Constant *Base,
              InitListExpr *Updater);
   bool Build(const APValue &Val, const RecordDecl *RD, bool IsPrimaryBase,
              const CXXRecordDecl *VTableClass, CharUnits BaseOffset);
@@ -566,7 +565,7 @@ llvm::Constant *ConstStructBuilder::Finalize(QualType Ty) {
 
 llvm::Constant *ConstStructBuilder::BuildStruct(ConstantEmitter &Emitter,
                                                 ConstExprEmitter *ExprEmitter,
-                                                llvm::ConstantStruct *Base,
+                                                llvm::Constant *Base,
                                                 InitListExpr *Updater,
                                                 QualType ValTy) {
   ConstStructBuilder Builder(Emitter);
@@ -721,6 +720,10 @@ public:
 
   llvm::Constant *VisitStmt(Stmt *S, QualType T) {
     return nullptr;
+  }
+
+  llvm::Constant *VisitConstantExpr(ConstantExpr *CE, QualType T) {
+    return Visit(CE->getSubExpr(), T);
   }
 
   llvm::Constant *VisitParenExpr(ParenExpr *PE, QualType T) {
@@ -1027,8 +1030,8 @@ public:
     }
 
     if (destType->isRecordType())
-      return ConstStructBuilder::BuildStruct(Emitter, this,
-                 dyn_cast<llvm::ConstantStruct>(Base), Updater, destType);
+      return ConstStructBuilder::BuildStruct(Emitter, this, Base, Updater,
+                                             destType);
 
     return nullptr;
   }
@@ -1103,7 +1106,7 @@ public:
 }  // end anonymous namespace.
 
 bool ConstStructBuilder::Build(ConstExprEmitter *ExprEmitter,
-                               llvm::ConstantStruct *Base,
+                               llvm::Constant *Base,
                                InitListExpr *Updater) {
   assert(Base && "base expression should not be empty");
 
@@ -1111,7 +1114,7 @@ bool ConstStructBuilder::Build(ConstExprEmitter *ExprEmitter,
   RecordDecl *RD = ExprType->getAs<RecordType>()->getDecl();
   const ASTRecordLayout &Layout = CGM.getContext().getASTRecordLayout(RD);
   const llvm::StructLayout *BaseLayout = CGM.getDataLayout().getStructLayout(
-                                           Base->getType());
+      cast<llvm::StructType>(Base->getType()));
   unsigned FieldNo = -1;
   unsigned ElementNo = 0;
 
@@ -1132,7 +1135,7 @@ bool ConstStructBuilder::Build(ConstExprEmitter *ExprEmitter,
     if (Field->isUnnamedBitfield())
       continue;
 
-    llvm::Constant *EltInit = Base->getOperand(ElementNo);
+    llvm::Constant *EltInit = Base->getAggregateElement(ElementNo);
 
     // Bail out if the type of the ConstantStruct does not have the same layout
     // as the type of the InitListExpr.
@@ -1451,6 +1454,7 @@ llvm::Constant *ConstantEmitter::tryEmitPrivateForVarInit(const VarDecl &D) {
         if (CD->isTrivial() && CD->isDefaultConstructor())
           return CGM.EmitNullConstant(D.getType());
       }
+    InConstantContext = true;
   }
 
   QualType destType = D.getType();
@@ -1548,7 +1552,7 @@ llvm::Constant *ConstantEmitter::tryEmitPrivate(const Expr *E,
   if (destType->isReferenceType())
     Success = E->EvaluateAsLValue(Result, CGM.getContext());
   else
-    Success = E->EvaluateAsRValue(Result, CGM.getContext());
+    Success = E->EvaluateAsRValue(Result, CGM.getContext(), InConstantContext);
 
   llvm::Constant *C;
   if (Success && !Result.HasSideEffects)
@@ -1601,6 +1605,7 @@ private:
   ConstantLValue tryEmitBase(const APValue::LValueBase &base);
 
   ConstantLValue VisitStmt(const Stmt *S) { return nullptr; }
+  ConstantLValue VisitConstantExpr(const ConstantExpr *E);
   ConstantLValue VisitCompoundLiteralExpr(const CompoundLiteralExpr *E);
   ConstantLValue VisitStringLiteral(const StringLiteral *E);
   ConstantLValue VisitObjCEncodeExpr(const ObjCEncodeExpr *E);
@@ -1756,6 +1761,11 @@ ConstantLValueEmitter::tryEmitBase(const APValue::LValueBase &base) {
 }
 
 ConstantLValue
+ConstantLValueEmitter::VisitConstantExpr(const ConstantExpr *E) {
+  return Visit(E->getSubExpr());
+}
+
+ConstantLValue
 ConstantLValueEmitter::VisitCompoundLiteralExpr(const CompoundLiteralExpr *E) {
   return tryEmitGlobalCompoundLiteral(CGM, Emitter.CGF, E);
 }
@@ -1778,17 +1788,7 @@ ConstantLValueEmitter::VisitObjCStringLiteral(const ObjCStringLiteral *E) {
 
 ConstantLValue
 ConstantLValueEmitter::VisitPredefinedExpr(const PredefinedExpr *E) {
-  if (auto CGF = Emitter.CGF) {
-    LValue Res = CGF->EmitPredefinedLValue(E);
-    return cast<ConstantAddress>(Res.getAddress());
-  }
-
-  auto kind = E->getIdentType();
-  if (kind == PredefinedExpr::PrettyFunction) {
-    return CGM.GetAddrOfConstantCString("top level", ".tmp");
-  }
-
-  return CGM.GetAddrOfConstantCString("", ".tmp");
+  return CGM.GetAddrOfConstantStringFromLiteral(E->getFunctionName());
 }
 
 ConstantLValue
@@ -1862,6 +1862,9 @@ llvm::Constant *ConstantEmitter::tryEmitPrivate(const APValue &Value,
     return ConstantLValueEmitter(*this, Value, DestType).tryEmit();
   case APValue::Int:
     return llvm::ConstantInt::get(CGM.getLLVMContext(), Value.getInt());
+  case APValue::FixedPoint:
+    return llvm::ConstantInt::get(CGM.getLLVMContext(),
+                                  Value.getFixedPoint().getValue());
   case APValue::ComplexInt: {
     llvm::Constant *Complex[2];
 

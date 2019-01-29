@@ -1,9 +1,8 @@
 //===--- CGClass.cpp - Emit LLVM Code for C++ classes -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,14 +15,15 @@
 #include "CGDebugInfo.h"
 #include "CGRecordLayout.h"
 #include "CodeGenFunction.h"
+#include "TargetInfo.h"
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/EvaluatedExprVisitor.h"
 #include "clang/AST/RecordLayout.h"
 #include "clang/AST/StmtCXX.h"
+#include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
-#include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Transforms/Utils/SanitizerStats.h"
@@ -2012,8 +2012,19 @@ void CodeGenFunction::EmitCXXConstructorCall(const CXXConstructorDecl *D,
                                              bool NewPointerIsChecked) {
   CallArgList Args;
 
+  LangAS SlotAS = E->getType().getAddressSpace();
+  QualType ThisType = D->getThisType();
+  LangAS ThisAS = ThisType.getTypePtr()->getPointeeType().getAddressSpace();
+  llvm::Value *ThisPtr = This.getPointer();
+  if (SlotAS != ThisAS) {
+    unsigned TargetThisAS = getContext().getTargetAddressSpace(ThisAS);
+    llvm::Type *NewType =
+        ThisPtr->getType()->getPointerElementType()->getPointerTo(TargetThisAS);
+    ThisPtr = getTargetHooks().performAddrSpaceCast(*this, This.getPointer(),
+                                                    ThisAS, SlotAS, NewType);
+  }
   // Push the this ptr.
-  Args.add(RValue::get(This.getPointer()), D->getThisType(getContext()));
+  Args.add(RValue::get(ThisPtr), D->getThisType());
 
   // If this is a trivial constructor, emit a memcpy now before we lose
   // the alignment information on the argument.
@@ -2122,7 +2133,7 @@ void CodeGenFunction::EmitCXXConstructorCall(const CXXConstructorDecl *D,
     CGM.getAddrOfCXXStructor(D, getFromCtorType(Type));
   const CGFunctionInfo &Info = CGM.getTypes().arrangeCXXConstructorCall(
       Args, D, Type, ExtraArgs.Prefix, ExtraArgs.Suffix, PassPrototypeArgs);
-  CGCallee Callee = CGCallee::forDirect(CalleePtr, D);
+  CGCallee Callee = CGCallee::forDirect(CalleePtr, GlobalDecl(D, Type));
   EmitCall(Info, Callee, ReturnValueSlot(), Args);
 
   // Generate vtable assumptions if we're constructing a complete object
@@ -2147,7 +2158,7 @@ void CodeGenFunction::EmitInheritedCXXConstructorCall(
     const CXXConstructorDecl *D, bool ForVirtualBase, Address This,
     bool InheritedFromVBase, const CXXInheritedCtorInitExpr *E) {
   CallArgList Args;
-  CallArg ThisArg(RValue::get(This.getPointer()), D->getThisType(getContext()));
+  CallArg ThisArg(RValue::get(This.getPointer()), D->getThisType());
 
   // Forward the parameters.
   if (InheritedFromVBase &&
@@ -2196,6 +2207,7 @@ void CodeGenFunction::EmitInlinedInheritingCXXConstructorCall(
   GlobalDecl GD(Ctor, CtorType);
   InlinedInheritingConstructorScope Scope(*this, GD);
   ApplyInlineDebugLocation DebugScope(*this, GD);
+  RunCleanupsScope RunCleanups(*this);
 
   // Save the arguments to be passed to the inherited constructor.
   CXXInheritedCtorInitExprArgs = Args;
@@ -2271,7 +2283,7 @@ CodeGenFunction::EmitSynthesizedCXXCopyCtorCall(const CXXConstructorDecl *D,
   CallArgList Args;
 
   // Push the this ptr.
-  Args.add(RValue::get(This.getPointer()), D->getThisType(getContext()));
+  Args.add(RValue::get(This.getPointer()), D->getThisType());
 
   // Push the src ptr.
   QualType QT = *(FPT->param_type_begin());
@@ -2808,7 +2820,7 @@ void CodeGenFunction::EmitForwardingCallToLambda(
   // variadic arguments.
 
   // Now emit our call.
-  auto callee = CGCallee::forDirect(calleePtr, callOperator);
+  auto callee = CGCallee::forDirect(calleePtr, GlobalDecl(callOperator));
   RValue RV = EmitCall(calleeFnInfo, callee, returnSlot, callArgs);
 
   // If necessary, copy the returned value into the slot.

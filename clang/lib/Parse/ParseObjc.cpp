@@ -1,9 +1,8 @@
 //===--- ParseObjC.cpp - Objective C Parsing ------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -263,7 +262,7 @@ Decl *Parser::ParseObjCAtInterfaceDeclaration(SourceLocation AtLoc,
       categoryId = Tok.getIdentifierInfo();
       categoryLoc = ConsumeToken();
     }
-    else if (!getLangOpts().ObjC2) {
+    else if (!getLangOpts().ObjC) {
       Diag(Tok, diag::err_expected)
           << tok::identifier; // missing category name.
       return nullptr;
@@ -705,7 +704,7 @@ void Parser::ParseObjCInterfaceDeclList(tok::ObjCKeywordKind contextKey,
       break;
 
     case tok::objc_property:
-      if (!getLangOpts().ObjC2)
+      if (!getLangOpts().ObjC)
         Diag(AtLoc, diag::err_objc_properties_require_objc2);
 
       ObjCDeclSpec OCDS;
@@ -1103,7 +1102,7 @@ bool Parser::isTokIdentifier_in() const {
   // FIXME: May have to do additional look-ahead to only allow for
   // valid tokens following an 'in'; such as an identifier, unary operators,
   // '[' etc.
-  return (getLangOpts().ObjC2 && Tok.is(tok::identifier) &&
+  return (getLangOpts().ObjC && Tok.is(tok::identifier) &&
           Tok.getIdentifierInfo() == ObjCTypeQuals[objc_in]);
 }
 
@@ -1337,7 +1336,7 @@ Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
 
   // If attributes exist before the method, parse them.
   ParsedAttributes methodAttrs(AttrFactory);
-  if (getLangOpts().ObjC2)
+  if (getLangOpts().ObjC)
     MaybeParseGNUAttributes(methodAttrs);
   MaybeParseCXX11Attributes(methodAttrs);
 
@@ -1364,7 +1363,7 @@ Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
   SmallVector<DeclaratorChunk::ParamInfo, 8> CParamInfo;
   if (Tok.isNot(tok::colon)) {
     // If attributes exist after the method, parse them.
-    if (getLangOpts().ObjC2)
+    if (getLangOpts().ObjC)
       MaybeParseGNUAttributes(methodAttrs);
     MaybeParseCXX11Attributes(methodAttrs);
 
@@ -1400,7 +1399,7 @@ Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
 
     // If attributes exist before the argument name, parse them.
     // Regardless, collect all the attributes we've parsed so far.
-    if (getLangOpts().ObjC2)
+    if (getLangOpts().ObjC)
       MaybeParseGNUAttributes(paramAttrs);
     MaybeParseCXX11Attributes(paramAttrs);
     ArgInfo.ArgAttrs = paramAttrs;
@@ -1484,7 +1483,7 @@ Decl *Parser::ParseObjCMethodDecl(SourceLocation mLoc,
 
   // FIXME: Add support for optional parameter list...
   // If attributes exist after the method, parse them.
-  if (getLangOpts().ObjC2)
+  if (getLangOpts().ObjC)
     MaybeParseGNUAttributes(methodAttrs);
   MaybeParseCXX11Attributes(methodAttrs);
 
@@ -1550,7 +1549,7 @@ ParseObjCProtocolReferences(SmallVectorImpl<Decl *> &Protocols,
 
 TypeResult Parser::parseObjCProtocolQualifierType(SourceLocation &rAngleLoc) {
   assert(Tok.is(tok::less) && "Protocol qualifiers start with '<'");
-  assert(getLangOpts().ObjC1 && "Protocol qualifiers only exist in Objective-C");
+  assert(getLangOpts().ObjC && "Protocol qualifiers only exist in Objective-C");
 
   SourceLocation lAngleLoc;
   SmallVector<Decl *, 8> protocols;
@@ -2741,7 +2740,7 @@ StmtResult Parser::ParseObjCAtStatement(SourceLocation AtLoc) {
 
   // Otherwise, eat the semicolon.
   ExpectAndConsumeSemi(diag::err_expected_semi_after_expr);
-  return Actions.ActOnExprStmt(Res);
+  return Actions.ActOnExprStmt(Res, isExprValueDiscarded());
 }
 
 ExprResult Parser::ParseObjCAtExpression(SourceLocation AtLoc) {
@@ -2945,14 +2944,14 @@ bool Parser::ParseObjCXXMessageReceiver(bool &IsExpr, void *&TypeOrExpr) {
 /// This routine will only return true for a subset of valid message-send
 /// expressions.
 bool Parser::isSimpleObjCMessageExpression() {
-  assert(Tok.is(tok::l_square) && getLangOpts().ObjC1 &&
+  assert(Tok.is(tok::l_square) && getLangOpts().ObjC &&
          "Incorrect start for isSimpleObjCMessageExpression");
   return GetLookAheadToken(1).is(tok::identifier) &&
          GetLookAheadToken(2).is(tok::identifier);
 }
 
 bool Parser::isStartOfObjCClassMessageMissingOpenBracket() {
-  if (!getLangOpts().ObjC1 || !NextToken().is(tok::identifier) ||
+  if (!getLangOpts().ObjC || !NextToken().is(tok::identifier) ||
       InMessageExpression)
     return false;
 

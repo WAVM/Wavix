@@ -1,9 +1,8 @@
 //===--- TokenAnnotator.cpp - Format C++ code -----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -366,7 +365,8 @@ private:
       // specifier parameter, although this is technically valid:
       // [[foo(:)]]
       if (AttrTok->is(tok::colon) ||
-          AttrTok->startsSequence(tok::identifier, tok::identifier))
+          AttrTok->startsSequence(tok::identifier, tok::identifier) || 
+          AttrTok->startsSequence(tok::r_paren, tok::identifier))
         return false;
       if (AttrTok->is(tok::ellipsis))
         return true;
@@ -398,9 +398,11 @@ private:
     bool IsCpp11AttributeSpecifier = isCpp11AttributeSpecifier(*Left) ||
                                      Contexts.back().InCpp11AttributeSpecifier;
 
+    bool InsideInlineASM = Line.startsWith(tok::kw_asm);
     bool StartsObjCMethodExpr =
-        !CppArrayTemplates && Style.isCpp() && !IsCpp11AttributeSpecifier &&
-        Contexts.back().CanBeExpression && Left->isNot(TT_LambdaLSquare) &&
+        !InsideInlineASM && !CppArrayTemplates && Style.isCpp() &&
+        !IsCpp11AttributeSpecifier && Contexts.back().CanBeExpression &&
+        Left->isNot(TT_LambdaLSquare) &&
         !CurrentToken->isOneOf(tok::l_brace, tok::r_square) &&
         (!Parent ||
          Parent->isOneOf(tok::colon, tok::l_square, tok::l_paren,
@@ -492,9 +494,14 @@ private:
       if (CurrentToken->is(tok::r_square)) {
         if (IsCpp11AttributeSpecifier)
           CurrentToken->Type = TT_AttributeSquare;
-        else if (CurrentToken->Next && CurrentToken->Next->is(tok::l_paren) &&
+        else if (((CurrentToken->Next &&
+                   CurrentToken->Next->is(tok::l_paren)) ||
+                  (CurrentToken->Previous &&
+                   CurrentToken->Previous->Previous == Left)) &&
                  Left->is(TT_ObjCMethodExpr)) {
-          // An ObjC method call is rarely followed by an open parenthesis.
+          // An ObjC method call is rarely followed by an open parenthesis. It
+          // also can't be composed of just one token, unless it's a macro that
+          // will be expanded to more tokens.
           // FIXME: Do we incorrectly label ":" with this?
           StartsObjCMethodExpr = false;
           Left->Type = TT_Unknown;
@@ -1120,6 +1127,7 @@ private:
            (Tok.Next->Next->TokenText == "module" ||
             Tok.Next->Next->TokenText == "provide" ||
             Tok.Next->Next->TokenText == "require" ||
+            Tok.Next->Next->TokenText == "requireType" ||
             Tok.Next->Next->TokenText == "forwardDeclare") &&
            Tok.Next->Next->Next && Tok.Next->Next->Next->is(tok::l_paren);
   }
@@ -2874,6 +2882,7 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
   } else if (Style.Language == FormatStyle::LK_Cpp ||
              Style.Language == FormatStyle::LK_ObjC ||
              Style.Language == FormatStyle::LK_Proto ||
+             Style.Language == FormatStyle::LK_TableGen ||
              Style.Language == FormatStyle::LK_TextProto) {
     if (Left.isStringLiteral() && Right.isStringLiteral())
       return true;
@@ -3049,6 +3058,30 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
       return true;
   }
 
+  // Deal with lambda arguments in C++ - we want consistent line breaks whether
+  // they happen to be at arg0, arg1 or argN. The selection is a bit nuanced
+  // as aggressive line breaks are placed when the lambda is not the last arg.
+  if ((Style.Language == FormatStyle::LK_Cpp ||
+       Style.Language == FormatStyle::LK_ObjC) &&
+      Left.is(tok::l_paren) && Left.BlockParameterCount > 0 &&
+      !Right.isOneOf(tok::l_paren, TT_LambdaLSquare)) {
+    // Multiple lambdas in the same function call force line breaks.
+    if (Left.BlockParameterCount > 1)
+      return true;
+
+    // A lambda followed by another arg forces a line break.
+    if (!Left.Role)
+      return false;
+    auto Comma = Left.Role->lastComma();
+    if (!Comma)
+      return false;
+    auto Next = Comma->getNextNonComment();
+    if (!Next)
+      return false;
+    if (!Next->isOneOf(TT_LambdaLSquare, tok::l_brace, tok::caret))
+      return true;
+  }
+
   return false;
 }
 
@@ -3086,8 +3119,21 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
     // Don't wrap between ":" and "!" of a strict prop init ("field!: type;").
     if (Left.is(tok::exclaim) && Right.is(tok::colon))
       return false;
-    if (Right.is(Keywords.kw_is))
-      return false;
+    // Look for is type annotations like:
+    // function f(): a is B { ... }
+    // Do not break before is in these cases.
+    if (Right.is(Keywords.kw_is)) {
+      const FormatToken* Next = Right.getNextNonComment();
+      // If `is` is followed by a colon, it's likely that it's a dict key, so
+      // ignore it for this check.
+      // For example this is common in Polymer:
+      // Polymer({
+      //   is: 'name',
+      //   ...
+      // });
+      if (!Next || !Next->is(tok::colon))
+        return false;
+    }
     if (Left.is(Keywords.kw_in))
       return Style.BreakBeforeBinaryOperators == FormatStyle::BOS_None;
     if (Right.is(Keywords.kw_in))

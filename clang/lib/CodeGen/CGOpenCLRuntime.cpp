@@ -1,9 +1,8 @@
 //===----- CGOpenCLRuntime.cpp - Interface to OpenCL Runtimes -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -62,6 +61,11 @@ llvm::Type *CGOpenCLRuntime::convertOpenCLSpecificType(const Type *T) {
   case BuiltinType::OCLReserveID:
     return llvm::PointerType::get(
         llvm::StructType::create(Ctx, "opencl.reserve_id_t"), AddrSpc);
+#define EXT_OPAQUE_TYPE(ExtType, Id, Ext) \
+  case BuiltinType::Id: \
+    return llvm::PointerType::get( \
+        llvm::StructType::create(Ctx, "opencl." #ExtType), AddrSpc);
+#include "clang/Basic/OpenCLExtensionTypes.def"
   }
 }
 

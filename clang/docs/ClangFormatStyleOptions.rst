@@ -108,7 +108,7 @@ Configuring Style in Code
 
 When using ``clang::format::reformat(...)`` functions, the format is specified
 by supplying the `clang::format::FormatStyle
-<http://clang.llvm.org/doxygen/structclang_1_1format_1_1FormatStyle.html>`_
+<https://clang.llvm.org/doxygen/structclang_1_1format_1_1FormatStyle.html>`_
 structure.
 
 
@@ -131,19 +131,19 @@ the configuration (without a prefix: ``Auto``).
 
   * ``LLVM``
     A style complying with the `LLVM coding standards
-    <http://llvm.org/docs/CodingStandards.html>`_
+    <https://llvm.org/docs/CodingStandards.html>`_
   * ``Google``
     A style complying with `Google's C++ style guide
     <http://google-styleguide.googlecode.com/svn/trunk/cppguide.xml>`_
   * ``Chromium``
     A style complying with `Chromium's style guide
-    <http://www.chromium.org/developers/coding-style>`_
+    <https://www.chromium.org/developers/coding-style>`_
   * ``Mozilla``
     A style complying with `Mozilla's style guide
     <https://developer.mozilla.org/en-US/docs/Developer_Guide/Coding_Style>`_
   * ``WebKit``
     A style complying with `WebKit's style guide
-    <http://www.webkit.org/coding/coding-style.html>`_
+    <https://www.webkit.org/coding/coding-style.html>`_
 
 .. START_FORMAT_STYLE_OPTIONS
 
@@ -908,20 +908,17 @@ the configuration (without a prefix: ``Auto``).
 
       try {
         foo();
-      } catch () {
+      }
+      catch () {
       }
       void foo() { bar(); }
-      class foo
-      {
+      class foo {
       };
       if (foo()) {
-      } else {
       }
-      enum X : int
-      {
-        A,
-        B
-      };
+      else {
+      }
+      enum X : int { A, B };
 
   * ``BS_Allman`` (in configuration: ``Allman``)
     Always break before braces.
@@ -1281,7 +1278,7 @@ the configuration (without a prefix: ``Auto``).
   used for ordering ``#includes``.
 
   `POSIX extended
-  <http://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap09.html>`_
+  <https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap09.html>`_
   regular expressions are supported.
 
   These regular expressions are matched against the filename of an include
@@ -1293,7 +1290,7 @@ the configuration (without a prefix: ``Auto``).
   If none of the regular expressions match, INT_MAX is assigned as
   category. The main header for a source file automatically gets category 0.
   so that it is generally kept at the beginning of the ``#includes``
-  (http://llvm.org/docs/CodingStandards.html#include-style). However, you
+  (https://llvm.org/docs/CodingStandards.html#include-style). However, you
   can also assign negative priorities if you have certain headers that
   always need to be first.
 
@@ -1401,7 +1398,7 @@ the configuration (without a prefix: ``Auto``).
 **JavaImportGroups** (``std::vector<std::string>``)
   A vector of prefixes ordered by the desired groups for Java imports.
 
-  Each group is seperated by a newline. Static imports will also follow the
+  Each group is separated by a newline. Static imports will also follow the
   same grouping convention above all non-static imports. One group's prefix
   can be a subset of another - the longest prefix is always matched. Within
   a group, the imports are ordered lexicographically.

@@ -1,9 +1,8 @@
 //===------- SemaTemplateInstantiate.cpp - C++ Template Instantiation ------===/
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //===----------------------------------------------------------------------===/
 //
 //  This file implements C++ template instantiation.
@@ -675,7 +674,7 @@ Optional<TemplateDeductionInfo *> Sema::isSFINAEContext() const {
       // context, depending on what else is on the stack.
       if (isa<TypeAliasTemplateDecl>(Active->Entity))
         break;
-      // Fall through.
+      LLVM_FALLTHROUGH;
     case CodeSynthesisContext::DefaultFunctionArgumentInstantiation:
     case CodeSynthesisContext::ExceptionSpecInstantiation:
       // This is a template instantiation, so there is no SFINAE.
@@ -907,7 +906,7 @@ namespace {
     QualType TransformFunctionProtoType(TypeLocBuilder &TLB,
                                         FunctionProtoTypeLoc TL,
                                         CXXRecordDecl *ThisContext,
-                                        unsigned ThisTypeQuals,
+                                        Qualifiers ThisTypeQuals,
                                         Fn TransformExceptionSpec);
 
     ParmVarDecl *TransformFunctionTypeParam(ParmVarDecl *OldParm,
@@ -1167,7 +1166,7 @@ TemplateInstantiator::TransformPredefinedExpr(PredefinedExpr *E) {
   if (!E->isTypeDependent())
     return E;
 
-  return getSema().BuildPredefinedExpr(E->getLocation(), E->getIdentType());
+  return getSema().BuildPredefinedExpr(E->getLocation(), E->getIdentKind());
 }
 
 ExprResult
@@ -1427,7 +1426,7 @@ template<typename Fn>
 QualType TemplateInstantiator::TransformFunctionProtoType(TypeLocBuilder &TLB,
                                  FunctionProtoTypeLoc TL,
                                  CXXRecordDecl *ThisContext,
-                                 unsigned ThisTypeQuals,
+                                 Qualifiers ThisTypeQuals,
                                  Fn TransformExceptionSpec) {
   // We need a local instantiation scope for this function prototype.
   LocalInstantiationScope Scope(SemaRef, /*CombineWithOuterScope=*/true);
@@ -1666,7 +1665,7 @@ TypeSourceInfo *Sema::SubstFunctionDeclType(TypeSourceInfo *T,
                                 SourceLocation Loc,
                                 DeclarationName Entity,
                                 CXXRecordDecl *ThisContext,
-                                unsigned ThisTypeQuals) {
+                                Qualifiers ThisTypeQuals) {
   assert(!CodeSynthesisContexts.empty() &&
          "Cannot perform an instantiation without some context on the "
          "instantiation stack");
@@ -2148,7 +2147,7 @@ Sema::InstantiateClass(SourceLocation PointOfInstantiation,
     NamedDecl *ND = dyn_cast<NamedDecl>(I->NewDecl);
     CXXRecordDecl *ThisContext =
         dyn_cast_or_null<CXXRecordDecl>(ND->getDeclContext());
-    CXXThisScopeRAII ThisScope(*this, ThisContext, /*TypeQuals*/0,
+    CXXThisScopeRAII ThisScope(*this, ThisContext, Qualifiers(),
                                ND && ND->isCXXInstanceMember());
 
     Attr *NewAttr =
@@ -2343,7 +2342,7 @@ bool Sema::InstantiateInClassInitializer(
 
   // Instantiate the initializer.
   ActOnStartCXXInClassMemberInitializer();
-  CXXThisScopeRAII ThisScope(*this, Instantiation->getParent(), /*TypeQuals=*/0);
+  CXXThisScopeRAII ThisScope(*this, Instantiation->getParent(), Qualifiers());
 
   ExprResult NewInit = SubstInitializer(OldInit, TemplateArgs,
                                         /*CXXDirectInit=*/false);

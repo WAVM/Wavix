@@ -31,22 +31,37 @@
 // CHECK-COVERAGE-WIN64: "--dependent-lib={{[^"]*}}ubsan_standalone-x86_64.lib"
 
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=integer %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-INTEGER -implicit-check-not="-fsanitize-address-use-after-scope"
-// CHECK-INTEGER: "-fsanitize={{((signed-integer-overflow|unsigned-integer-overflow|integer-divide-by-zero|shift-base|shift-exponent|implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){7}"}}
+// CHECK-INTEGER: "-fsanitize={{((signed-integer-overflow|unsigned-integer-overflow|integer-divide-by-zero|shift-base|shift-exponent|implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){8}"}}
 
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-conversion %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-conversion,CHECK-implicit-conversion-RECOVER
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-conversion -fsanitize-recover=implicit-conversion %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-conversion,CHECK-implicit-conversion-RECOVER
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-conversion -fno-sanitize-recover=implicit-conversion %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-conversion,CHECK-implicit-conversion-NORECOVER
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-conversion -fsanitize-trap=implicit-conversion %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-conversion,CHECK-implicit-conversion-TRAP
-// CHECK-implicit-conversion: "-fsanitize={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}}
-// CHECK-implicit-conversion-RECOVER: "-fsanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}}
-// CHECK-implicit-conversion-RECOVER-NOT: "-fno-sanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}}
-// CHECK-implicit-conversion-RECOVER-NOT: "-fsanitize-trap={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}}
-// CHECK-implicit-conversion-NORECOVER-NOT: "-fno-sanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}} // ???
-// CHECK-implicit-conversion-NORECOVER-NOT: "-fsanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}}
-// CHECK-implicit-conversion-NORECOVER-NOT: "-fsanitize-trap={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}}
-// CHECK-implicit-conversion-TRAP: "-fsanitize-trap={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}}
-// CHECK-implicit-conversion-TRAP-NOT: "-fsanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}}
-// CHECK-implicit-conversion-TRAP-NOT: "-fno-sanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation),?){2}"}}
+// CHECK-implicit-conversion: "-fsanitize={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}}
+// CHECK-implicit-conversion-RECOVER: "-fsanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}}
+// CHECK-implicit-conversion-RECOVER-NOT: "-fno-sanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}}
+// CHECK-implicit-conversion-RECOVER-NOT: "-fsanitize-trap={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}}
+// CHECK-implicit-conversion-NORECOVER-NOT: "-fno-sanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}} // ???
+// CHECK-implicit-conversion-NORECOVER-NOT: "-fsanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}}
+// CHECK-implicit-conversion-NORECOVER-NOT: "-fsanitize-trap={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}}
+// CHECK-implicit-conversion-TRAP: "-fsanitize-trap={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}}
+// CHECK-implicit-conversion-TRAP-NOT: "-fsanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}}
+// CHECK-implicit-conversion-TRAP-NOT: "-fno-sanitize-recover={{((implicit-unsigned-integer-truncation|implicit-signed-integer-truncation|implicit-integer-sign-change),?){3}"}}
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-integer-arithmetic-value-change %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-integer-arithmetic-value-change,CHECK-implicit-integer-arithmetic-value-change-RECOVER
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-integer-arithmetic-value-change -fsanitize-recover=implicit-integer-arithmetic-value-change %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-integer-arithmetic-value-change,CHECK-implicit-integer-arithmetic-value-change-RECOVER
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-integer-arithmetic-value-change -fno-sanitize-recover=implicit-integer-arithmetic-value-change %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-integer-arithmetic-value-change,CHECK-implicit-integer-arithmetic-value-change-NORECOVER
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-integer-arithmetic-value-change -fsanitize-trap=implicit-integer-arithmetic-value-change %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-integer-arithmetic-value-change,CHECK-implicit-integer-arithmetic-value-change-TRAP
+// CHECK-implicit-integer-arithmetic-value-change: "-fsanitize={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}}
+// CHECK-implicit-integer-arithmetic-value-change-RECOVER: "-fsanitize-recover={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}}
+// CHECK-implicit-integer-arithmetic-value-change-RECOVER-NOT: "-fno-sanitize-recover={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}}
+// CHECK-implicit-integer-arithmetic-value-change-RECOVER-NOT: "-fsanitize-trap={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}}
+// CHECK-implicit-integer-arithmetic-value-change-NORECOVER-NOT: "-fno-sanitize-recover={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}} // ???
+// CHECK-implicit-integer-arithmetic-value-change-NORECOVER-NOT: "-fsanitize-recover={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}}
+// CHECK-implicit-integer-arithmetic-value-change-NORECOVER-NOT: "-fsanitize-trap={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}}
+// CHECK-implicit-integer-arithmetic-value-change-TRAP: "-fsanitize-trap={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}}
+// CHECK-implicit-integer-arithmetic-value-change-TRAP-NOT: "-fsanitize-recover={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}}
+// CHECK-implicit-integer-arithmetic-value-change-TRAP-NOT: "-fno-sanitize-recover={{((implicit-signed-integer-truncation|implicit-integer-sign-change),?){2}"}}
 
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-integer-truncation %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-integer-truncation,CHECK-implicit-integer-truncation-RECOVER
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=implicit-integer-truncation -fsanitize-recover=implicit-integer-truncation %s -### 2>&1 | FileCheck %s --check-prefixes=CHECK-implicit-integer-truncation,CHECK-implicit-integer-truncation-RECOVER
@@ -208,12 +223,48 @@
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=address %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-WITHOUT-USE-AFTER-SCOPE
 // CHECK-ASAN-WITHOUT-USE-AFTER-SCOPE: -cc1{{.*}}address-use-after-scope
 
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fsanitize-address-poison-custom-array-cookie %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE
+// RUN: %clang_cl --target=x86_64-windows -fsanitize=address -fsanitize-address-poison-custom-array-cookie -### -- %s 2>&1 | FileCheck %s --check-prefix=CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE
+// CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE: -cc1{{.*}}-fsanitize-address-poison-custom-array-cookie
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fno-sanitize-address-poison-custom-array-cookie %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE-OFF
+// RUN: %clang_cl --target=x86_64-windows -fsanitize=address -fno-sanitize-address-poison-custom-array-cookie -### -- %s 2>&1 | FileCheck %s --check-prefix=CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE-OFF
+// CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE-OFF-NOT: -cc1{{.*}}address-poison-custom-array-cookie
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fno-sanitize-address-poison-custom-array-cookie -fsanitize-address-poison-custom-array-cookie %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE-BOTH
+// RUN: %clang_cl --target=x86_64-windows -fsanitize=address -fno-sanitize-address-poison-custom-array-cookie -fsanitize-address-poison-custom-array-cookie -### -- %s 2>&1 | FileCheck %s --check-prefix=CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE-BOTH
+// CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE-BOTH: -cc1{{.*}}-fsanitize-address-poison-custom-array-cookie
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fsanitize-address-poison-custom-array-cookie -fno-sanitize-address-poison-custom-array-cookie %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE-BOTH-OFF
+// CHECK-POISON-CUSTOM-ARRAY-NEW-COOKIE-BOTH-OFF-NOT: -cc1{{.*}}address-poison-custom-array-cookie
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-WITHOUT-POISON-CUSTOM-ARRAY-NEW-COOKIE
+// CHECK-ASAN-WITHOUT-POISON-CUSTOM-ARRAY-NEW-COOKIE-NOT: -cc1{{.*}}address-poison-custom-array-cookie
+
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fsanitize-address-globals-dead-stripping %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-GLOBALS
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=address %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-NO-ASAN-GLOBALS
 // RUN: %clang_cl --target=x86_64-windows-msvc -fsanitize=address -fsanitize-address-globals-dead-stripping -### -- %s 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-GLOBALS
 // RUN: %clang_cl --target=x86_64-windows-msvc -fsanitize=address -### -- %s 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-GLOBALS
 // CHECK-ASAN-GLOBALS: -cc1{{.*}}-fsanitize-address-globals-dead-stripping
 // CHECK-NO-ASAN-GLOBALS-NOT: -cc1{{.*}}-fsanitize-address-globals-dead-stripping
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fsanitize-address-use-odr-indicator %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-ODR-INDICATOR
+// RUN: %clang_cl --target=x86_64-windows -fsanitize=address -fsanitize-address-use-odr-indicator -### -- %s 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-ODR-INDICATOR
+// CHECK-ASAN-ODR-INDICATOR: -cc1{{.*}}-fsanitize-address-use-odr-indicator
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fno-sanitize-address-use-odr-indicator %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-ODR-INDICATOR-OFF
+// RUN: %clang_cl --target=x86_64-windows -fsanitize=address -fno-sanitize-address-use-odr-indicator -### -- %s 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-ODR-INDICATOR-OFF
+// CHECK-ASAN-ODR-INDICATOR-OFF-NOT: -cc1{{.*}}address-generate-odr-globals
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fno-sanitize-address-use-odr-indicator -fsanitize-address-use-odr-indicator %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-ODR-INDICATOR-BOTH
+// RUN: %clang_cl --target=x86_64-windows -fsanitize=address -fno-sanitize-address-use-odr-indicator -fsanitize-address-use-odr-indicator -### -- %s 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-ODR-INDICATOR-BOTH
+// CHECK-ASAN-ODR-INDICATOR-BOTH: -cc1{{.*}}-fsanitize-address-use-odr-indicator
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fsanitize-address-use-odr-indicator -fno-sanitize-address-use-odr-indicator %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-ODR-INDICATOR-BOTH-OFF
+// CHECK-ASAN-ODR-INDICATOR-BOTH-OFF-NOT: -cc1{{.*}}address-generate-odr-globals
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=address %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-WITHOUT-ODR-INDICATOR
+// CHECK-ASAN-WITHOUT-ODR-INDICATOR-NOT: -cc1{{.*}}address-generate-odr-globals
 
 // RUN: %clang -target x86_64-linux-gnu -fsanitize-memory-track-origins -pie %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ONLY-TRACK-ORIGINS
 // CHECK-ONLY-TRACK-ORIGINS: warning: argument unused during compilation: '-fsanitize-memory-track-origins'
@@ -658,28 +709,67 @@
 // RUN: %clang -target x86_64-unknown-cloudabi -fsanitize=safe-stack %s -### 2>&1 | FileCheck %s -check-prefix=SAFESTACK-CLOUDABI
 // SAFESTACK-CLOUDABI: "-fsanitize=safe-stack"
 
+
+
+// * NetBSD; please keep ordered as in Sanitizers.def *
+
 // RUN: %clang -target i386--netbsd -fsanitize=address %s -### 2>&1 | FileCheck %s -check-prefix=ADDRESS-NETBSD
 // RUN: %clang -target x86_64--netbsd -fsanitize=address %s -### 2>&1 | FileCheck %s -check-prefix=ADDRESS-NETBSD
 // ADDRESS-NETBSD: "-fsanitize=address"
 
-// RUN: %clang -target i386--netbsd -fsanitize=vptr %s -### 2>&1 | FileCheck %s -check-prefix=VPTR-NETBSD
-// RUN: %clang -target x86_64--netbsd -fsanitize=vptr %s -### 2>&1 | FileCheck %s -check-prefix=VPTR-NETBSD
-// VPTR-NETBSD: "-fsanitize=vptr"
+// RUN: %clang -target x86_64--netbsd -fsanitize=kernel-address %s -### 2>&1 | FileCheck %s -check-prefix=KERNEL-ADDRESS-NETBSD
+// KERNEL-ADDRESS-NETBSD: "-fsanitize=kernel-address"
 
-// RUN: %clang -target i386--netbsd -fsanitize=safe-stack %s -### 2>&1 | FileCheck %s -check-prefix=SAFESTACK-NETBSD
-// RUN: %clang -target x86_64--netbsd -fsanitize=safe-stack %s -### 2>&1 | FileCheck %s -check-prefix=SAFESTACK-NETBSD
-// SAFESTACK-NETBSD: "-fsanitize=safe-stack"
+// RUN: %clang -target x86_64--netbsd -fsanitize=hwaddress %s -### 2>&1 | FileCheck %s -check-prefix=HWADDRESS-NETBSD
+// HWADDRESS-NETBSD: "-fsanitize=hwaddress"
 
-// RUN: %clang -target i386--netbsd -fsanitize=function %s -### 2>&1 | FileCheck %s -check-prefix=FUNCTION-NETBSD
-// RUN: %clang -target x86_64--netbsd -fsanitize=function %s -### 2>&1 | FileCheck %s -check-prefix=FUNCTION-NETBSD
-// FUNCTION-NETBSD: "-fsanitize=function"
+// RUN: %clang -target x86_64--netbsd -fsanitize=kernel-hwaddress %s -### 2>&1 | FileCheck %s -check-prefix=KERNEL-HWADDRESS-NETBSD
+// KERNEL-HWADDRESS-NETBSD: "-fsanitize=kernel-hwaddress"
+
+// RUN: %clang -target x86_64--netbsd -fsanitize=memory %s -### 2>&1 | FileCheck %s -check-prefix=MEMORY-NETBSD
+// MEMORY-NETBSD: "-fsanitize=memory"
+
+// RUN: %clang -target x86_64--netbsd -fsanitize=kernel-memory %s -### 2>&1 | FileCheck %s -check-prefix=KERNEL-MEMORY-NETBSD
+// KERNEL-MEMORY-NETBSD: "-fsanitize=kernel-memory"
+
+// RUN: %clang -target x86_64--netbsd -fsanitize=thread %s -### 2>&1 | FileCheck %s -check-prefix=THREAD-NETBSD
+// THREAD-NETBSD: "-fsanitize=thread"
 
 // RUN: %clang -target i386--netbsd -fsanitize=leak %s -### 2>&1 | FileCheck %s -check-prefix=LEAK-NETBSD
 // RUN: %clang -target x86_64--netbsd -fsanitize=leak %s -### 2>&1 | FileCheck %s -check-prefix=LEAK-NETBSD
 // LEAK-NETBSD: "-fsanitize=leak"
 
-// RUN: %clang -target x86_64--netbsd -fsanitize=thread %s -### 2>&1 | FileCheck %s -check-prefix=THREAD-NETBSD
-// THREAD-NETBSD: "-fsanitize=thread"
+// RUN: %clang -target i386--netbsd -fsanitize=function %s -### 2>&1 | FileCheck %s -check-prefix=FUNCTION-NETBSD
+// RUN: %clang -target x86_64--netbsd -fsanitize=function %s -### 2>&1 | FileCheck %s -check-prefix=FUNCTION-NETBSD
+// FUNCTION-NETBSD: "-fsanitize=function"
+
+// RUN: %clang -target i386--netbsd -fsanitize=vptr %s -### 2>&1 | FileCheck %s -check-prefix=VPTR-NETBSD
+// RUN: %clang -target x86_64--netbsd -fsanitize=vptr %s -### 2>&1 | FileCheck %s -check-prefix=VPTR-NETBSD
+// VPTR-NETBSD: "-fsanitize=vptr"
+
+// RUN: %clang -target x86_64--netbsd -fsanitize=dataflow %s -### 2>&1 | FileCheck %s -check-prefix=DATAFLOW-NETBSD
+// DATAFLOW-NETBSD: "-fsanitize=dataflow"
+
+// RUN: %clang -target i386--netbsd -fsanitize=cfi %s -### 2>&1 | FileCheck %s -check-prefix=CFI-NETBSD
+// RUN: %clang -target x86_64--netbsd -fsanitize=cfi %s -### 2>&1 | FileCheck %s -check-prefix=CFI-NETBSD
+// CFI-NETBSD: "-fsanitize=cfi-derived-cast,cfi-icall,cfi-mfcall,cfi-unrelated-cast,cfi-nvcall,cfi-vcall"
+
+// RUN: %clang -target i386--netbsd -fsanitize=safe-stack %s -### 2>&1 | FileCheck %s -check-prefix=SAFESTACK-NETBSD
+// RUN: %clang -target x86_64--netbsd -fsanitize=safe-stack %s -### 2>&1 | FileCheck %s -check-prefix=SAFESTACK-NETBSD
+// SAFESTACK-NETBSD: "-fsanitize=safe-stack"
+
+// RUN: %clang -target x86_64--netbsd -fsanitize=shadow-call-stack %s -### 2>&1 | FileCheck %s -check-prefix=SHADOW-CALL-STACK-NETBSD
+// SHADOW-CALL-STACK-NETBSD: "-fsanitize=shadow-call-stack"
+
+// RUN: %clang -target i386--netbsd -fsanitize=undefined %s -### 2>&1 | FileCheck %s -check-prefix=UNDEFINED-NETBSD
+// RUN: %clang -target x86_64--netbsd -fsanitize=undefined %s -### 2>&1 | FileCheck %s -check-prefix=UNDEFINED-NETBSD
+// UNDEFINED-NETBSD: "-fsanitize={{.*}}
+
+// RUN: %clang -target i386--netbsd -fsanitize=scudo %s -### 2>&1 | FileCheck %s -check-prefix=SCUDO-NETBSD
+// RUN: %clang -target x86_64--netbsd -fsanitize=scudo %s -### 2>&1 | FileCheck %s -check-prefix=SCUDO-NETBSD
+// SCUDO-NETBSD: "-fsanitize=scudo"
+
+
 
 // RUN: %clang -target x86_64-scei-ps4 -fsanitize=function -fsanitize=undefined %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-FSAN-UBSAN-PS4
 // CHECK-FSAN-UBSAN-PS4: unsupported option '-fsanitize=function' for target 'x86_64-scei-ps4'
@@ -702,6 +792,10 @@
 // CHECK-ASAN-PS4: --dependent-lib=libSceDbgAddressSanitizer_stub_weak.a
 // CHECK-ASAN-PS4-NOT: {{(\.(o|bc)"? |-l).*-lSceDbgAddressSanitizer_stub_weak}}
 // CHECK-ASAN-PS4: -lSceDbgAddressSanitizer_stub_weak
+// RUN: %clang -target x86_64-scei-ps4 -fsanitize=address -nostdlib %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-NOLIB-PS4
+// RUN: %clang -target x86_64-scei-ps4 -fsanitize=address -nodefaultlibs %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-NOLIB-PS4
+// RUN: %clang -target x86_64-scei-ps4 -fsanitize=address -nodefaultlibs -nostdlib  %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-NOLIB-PS4
+// CHECK-ASAN-NOLIB-PS4-NOT: SceDbgAddressSanitizer_stub_weak
 
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=address -fsanitize-minimal-runtime %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-MINIMAL
 // CHECK-ASAN-MINIMAL: error: invalid argument '-fsanitize-minimal-runtime' not allowed with '-fsanitize=address'
@@ -733,6 +827,10 @@
 // CHECK-CFI-NOICALL-MINIMAL: "-fsanitize=cfi-derived-cast,cfi-mfcall,cfi-unrelated-cast,cfi-nvcall,cfi-vcall"
 // CHECK-CFI-NOICALL-MINIMAL: "-fsanitize-trap=cfi-derived-cast,cfi-mfcall,cfi-unrelated-cast,cfi-nvcall,cfi-vcall"
 // CHECK-CFI-NOICALL-MINIMAL: "-fsanitize-minimal-runtime"
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=shadow-call-stack -fsanitize-minimal-runtime %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-SCS-MINIMAL
+// CHECK-SCS-MINIMAL: "-fsanitize=shadow-call-stack"
+// CHECK-SCS-MINIMAL: "-fsanitize-minimal-runtime"
 
 // RUN: %clang -target aarch64-linux-gnu -fsanitize=scudo %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-SCUDO
 // RUN: %clang -target arm-linux-androideabi -fsanitize=scudo %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-SCUDO
@@ -778,3 +876,11 @@
 //
 // RUN: %clang -target x86_64-linux-gnu -fsanitize=scudo,kernel-memory  %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-SCUDO-KMSAN
 // CHECK-SCUDO-KMSAN: error: invalid argument '-fsanitize=kernel-memory' not allowed with '-fsanitize=scudo'
+
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=hwaddress %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-HWASAN-INTERCEPTOR-ABI
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=hwaddress -fsanitize-hwaddress-abi=interceptor %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-HWASAN-INTERCEPTOR-ABI
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=hwaddress -fsanitize-hwaddress-abi=platform %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-HWASAN-PLATFORM-ABI
+// RUN: %clang -target x86_64-linux-gnu -fsanitize=hwaddress -fsanitize-hwaddress-abi=foo %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-HWASAN-FOO-ABI
+// CHECK-HWASAN-INTERCEPTOR-ABI: "-default-function-attr" "hwasan-abi=interceptor"
+// CHECK-HWASAN-PLATFORM-ABI: "-default-function-attr" "hwasan-abi=platform"
+// CHECK-HWASAN-FOO-ABI: error: invalid value 'foo' in '-fsanitize-hwaddress-abi=foo'

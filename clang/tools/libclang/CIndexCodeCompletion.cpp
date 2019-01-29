@@ -1,9 +1,8 @@
 //===- CIndexCodeCompletion.cpp - Code Completion API hooks ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,7 +25,6 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Frontend/ASTUnit.h"
 #include "clang/Frontend/CompilerInstance.h"
-#include "clang/Frontend/FrontendDiagnostic.h"
 #include "clang/Sema/CodeCompleteConsumer.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/SmallString.h"
@@ -487,7 +485,8 @@ static unsigned long long getContextsForContextKind(
       contexts = CXCompletionContext_Namespace;
       break;
     }
-    case CodeCompletionContext::CCC_PotentiallyQualifiedName: {
+    case CodeCompletionContext::CCC_SymbolOrNewName:
+    case CodeCompletionContext::CCC_Symbol: {
       contexts = CXCompletionContext_NestedNameSpecifier;
       break;
     }
@@ -539,7 +538,7 @@ static unsigned long long getContextsForContextKind(
     case CodeCompletionContext::CCC_Other:
     case CodeCompletionContext::CCC_ObjCInterface:
     case CodeCompletionContext::CCC_ObjCImplementation:
-    case CodeCompletionContext::CCC_Name:
+    case CodeCompletionContext::CCC_NewName:
     case CodeCompletionContext::CCC_MacroName:
     case CodeCompletionContext::CCC_PreprocessorExpression:
     case CodeCompletionContext::CCC_PreprocessorDirective:

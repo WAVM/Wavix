@@ -1,9 +1,8 @@
 //=== WebAssembly.h - Declare WebAssembly target feature support *- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -28,7 +27,8 @@ class LLVM_LIBRARY_VISIBILITY WebAssemblyTargetInfo : public TargetInfo {
   enum SIMDEnum {
     NoSIMD,
     SIMD128,
-  } SIMDLevel;
+    UnimplementedSIMD128,
+  } SIMDLevel = NoSIMD;
 
   bool HasAtomics;
   bool HasNontrappingFPToInt;
@@ -61,6 +61,8 @@ protected:
                         MacroBuilder &Builder) const override;
 
 private:
+  static void setSIMDLevel(llvm::StringMap<bool> &Features, SIMDEnum Level);
+
   bool
   initFeatureMap(llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags,
                  StringRef CPU,

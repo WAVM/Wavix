@@ -1,9 +1,8 @@
 //== SMTSolver.h ------------------------------------------------*- C++ -*--==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -284,6 +283,9 @@ public:
 
   /// Reset the solver and remove all constraints.
   virtual void reset() = 0;
+
+  /// Checks if the solver supports floating-points.
+  virtual bool isFPSupported() = 0;
 
   virtual void print(raw_ostream &OS) const = 0;
 };

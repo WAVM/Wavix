@@ -1,9 +1,8 @@
 //===--- SemaCUDA.cpp - Semantic Analysis for CUDA constructs -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -48,7 +47,7 @@ ExprResult Sema::ActOnCUDAExecConfigExpr(Scope *S, SourceLocation LLLLoc,
   QualType ConfigQTy = ConfigDecl->getType();
 
   DeclRefExpr *ConfigDR = new (Context)
-      DeclRefExpr(ConfigDecl, false, ConfigQTy, VK_LValue, LLLLoc);
+      DeclRefExpr(Context, ConfigDecl, false, ConfigQTy, VK_LValue, LLLLoc);
   MarkFunctionReferenced(LLLLoc, ConfigDecl);
 
   return ActOnCallExpr(S, ConfigDR, LLLLoc, ExecConfig, GGGLoc, nullptr,

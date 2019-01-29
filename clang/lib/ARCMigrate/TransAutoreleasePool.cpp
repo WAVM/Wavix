@@ -1,9 +1,8 @@
 //===--- TransAutoreleasePool.cpp - Transformations to ARC mode -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -403,8 +402,8 @@ private:
     return cast<Expr>(getEssential((Stmt*)E));
   }
   static Stmt *getEssential(Stmt *S) {
-    if (ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(S))
-      S = EWC->getSubExpr();
+    if (FullExpr *FE = dyn_cast<FullExpr>(S))
+      S = FE->getSubExpr();
     if (Expr *E = dyn_cast<Expr>(S))
       S = E->IgnoreParenCasts();
     return S;

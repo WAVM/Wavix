@@ -1,9 +1,8 @@
 //===--- ModuleDependencyCollector.cpp - Collect module dependencies ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -155,10 +154,6 @@ void ModuleDependencyCollector::writeFileMap() {
   // Default to use relative overlay directories in the VFS yaml file. This
   // allows crash reproducer scripts to work across machines.
   VFSWriter.setOverlayDir(VFSDir);
-
-  // Do not ignore non existent contents otherwise we might skip something
-  // that should have been collected here.
-  VFSWriter.setIgnoreNonExistentContents(false);
 
   // Explicitly set case sensitivity for the YAML writer. For that, find out
   // the sensitivity at the path where the headers all collected to.

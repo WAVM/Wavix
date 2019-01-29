@@ -1,9 +1,8 @@
 //===--- TargetOptions.h ----------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -15,10 +14,11 @@
 #ifndef LLVM_CLANG_BASIC_TARGETOPTIONS_H
 #define LLVM_CLANG_BASIC_TARGETOPTIONS_H
 
+#include "clang/Basic/OpenCLOptions.h"
+#include "llvm/Support/VersionTuple.h"
+#include "llvm/Target/TargetOptions.h"
 #include <string>
 #include <vector>
-#include "clang/Basic/OpenCLOptions.h"
-#include "llvm/Target/TargetOptions.h"
 
 namespace clang {
 
@@ -73,6 +73,9 @@ public:
   // "default" for the case when the user has not explicitly specified a
   // code model.
   std::string CodeModel;
+
+  /// The version of the SDK which was used during the compilation.
+  llvm::VersionTuple SDKVersion;
 };
 
 }  // end namespace clang

@@ -1,9 +1,8 @@
 //===--- AArch64.cpp - Implement AArch64 target feature support -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -37,11 +36,11 @@ const Builtin::Info AArch64TargetInfo::BuiltinInfo[] = {
 AArch64TargetInfo::AArch64TargetInfo(const llvm::Triple &Triple,
                                      const TargetOptions &Opts)
     : TargetInfo(Triple), ABI("aapcs") {
-  if (getTriple().getOS() == llvm::Triple::OpenBSD) {
+  if (getTriple().isOSOpenBSD()) {
     Int64Type = SignedLongLong;
     IntMaxType = SignedLongLong;
   } else {
-    if (!getTriple().isOSDarwin() && getTriple().getOS() != llvm::Triple::NetBSD)
+    if (!getTriple().isOSDarwin() && !getTriple().isOSNetBSD())
       WCharType = UnsignedInt;
 
     Int64Type = SignedLong;
@@ -50,6 +49,7 @@ AArch64TargetInfo::AArch64TargetInfo(const llvm::Triple &Triple,
 
   // All AArch64 implementations support ARMv8 FP, which makes half a legal type.
   HasLegalHalfType = true;
+  HasFloat16 = true;
 
   LongWidth = LongAlign = PointerWidth = PointerAlign = 64;
   MaxVectorAlign = 128;
@@ -194,6 +194,9 @@ void AArch64TargetInfo::getTargetDefines(const LangOptions &Opts,
   if (HasDotProd)
     Builder.defineMacro("__ARM_FEATURE_DOTPROD", "1");
 
+  if ((FPU & NeonMode) && HasFP16FML)
+    Builder.defineMacro("__ARM_FEATURE_FP16FML", "1");
+
   switch (ArchKind) {
   default:
     break;
@@ -231,6 +234,7 @@ bool AArch64TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
   Unaligned = 1;
   HasFullFP16 = 0;
   HasDotProd = 0;
+  HasFP16FML = 0;
   ArchKind = llvm::AArch64::ArchKind::ARMV8A;
 
   for (const auto &Feature : Features) {
@@ -252,6 +256,8 @@ bool AArch64TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasFullFP16 = 1;
     if (Feature == "+dotprod")
       HasDotProd = 1;
+    if (Feature == "+fp16fml")
+      HasFP16FML = 1;
   }
 
   setDataLayout();
@@ -267,6 +273,7 @@ AArch64TargetInfo::checkCallingConvention(CallingConv CC) const {
   case CC_PreserveMost:
   case CC_PreserveAll:
   case CC_OpenCLKernel:
+  case CC_AArch64VectorCall:
   case CC_Win64:
     return CCCR_OK;
   default:
@@ -507,6 +514,7 @@ WindowsARM64TargetInfo::checkCallingConvention(CallingConv CC) const {
   case CC_OpenCLKernel:
   case CC_PreserveMost:
   case CC_PreserveAll:
+  case CC_Swift:
   case CC_Win64:
     return CCCR_OK;
   default:

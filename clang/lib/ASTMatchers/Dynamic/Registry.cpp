@@ -1,9 +1,8 @@
 //===- Registry.cpp - Matcher registry ------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -106,6 +105,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_OVERLOADED_2(callee);
   REGISTER_OVERLOADED_2(hasPrefix);
   REGISTER_OVERLOADED_2(hasType);
+  REGISTER_OVERLOADED_2(ignoringParens);
   REGISTER_OVERLOADED_2(isDerivedFrom);
   REGISTER_OVERLOADED_2(isSameOrDerivedFrom);
   REGISTER_OVERLOADED_2(loc);
@@ -138,6 +138,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(binaryConditionalOperator);
   REGISTER_MATCHER(binaryOperator);
   REGISTER_MATCHER(blockDecl);
+  REGISTER_MATCHER(blockExpr);
   REGISTER_MATCHER(blockPointerType);
   REGISTER_MATCHER(booleanType);
   REGISTER_MATCHER(breakStmt);
@@ -153,6 +154,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(compoundStmt);
   REGISTER_MATCHER(conditionalOperator);
   REGISTER_MATCHER(constantArrayType);
+  REGISTER_MATCHER(constantExpr);
   REGISTER_MATCHER(containsDeclaration);
   REGISTER_MATCHER(continueStmt);
   REGISTER_MATCHER(cStyleCastExpr);
@@ -209,6 +211,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(expr);
   REGISTER_MATCHER(exprWithCleanups);
   REGISTER_MATCHER(fieldDecl);
+  REGISTER_MATCHER(indirectFieldDecl);
   REGISTER_MATCHER(floatLiteral);
   REGISTER_MATCHER(forEach);
   REGISTER_MATCHER(forEachArgumentWithParam);
@@ -269,6 +272,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasInClassInitializer);
   REGISTER_MATCHER(hasIncrement);
   REGISTER_MATCHER(hasIndex);
+  REGISTER_MATCHER(hasInit);
   REGISTER_MATCHER(hasInitializer);
   REGISTER_MATCHER(hasKeywordSelector);
   REGISTER_MATCHER(hasLHS);
@@ -317,7 +321,6 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(ignoringImplicit);
   REGISTER_MATCHER(ignoringParenCasts);
   REGISTER_MATCHER(ignoringParenImpCasts);
-  REGISTER_MATCHER(ignoringParens);
   REGISTER_MATCHER(imaginaryLiteral);
   REGISTER_MATCHER(implicitCastExpr);
   REGISTER_MATCHER(implicitValueInitExpr);
@@ -378,6 +381,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isPure);
   REGISTER_MATCHER(isScoped);
   REGISTER_MATCHER(isSignedInteger);
+  REGISTER_MATCHER(isStaticLocal);
   REGISTER_MATCHER(isStaticStorageClass);
   REGISTER_MATCHER(isStruct);
   REGISTER_MATCHER(isTemplateInstantiation);
@@ -491,6 +495,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(unresolvedUsingTypenameDecl);
   REGISTER_MATCHER(unresolvedUsingValueDecl);
   REGISTER_MATCHER(userDefinedLiteral);
+  REGISTER_MATCHER(usesADL);
   REGISTER_MATCHER(usingDecl);
   REGISTER_MATCHER(usingDirectiveDecl);
   REGISTER_MATCHER(valueDecl);

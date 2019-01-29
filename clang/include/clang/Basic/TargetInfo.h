@@ -1,9 +1,8 @@
 //===--- TargetInfo.h - Expose information about the target -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -64,6 +63,7 @@ protected:
   bool HasLegalHalfType; // True if the backend supports operations on the half
                          // LLVM IR type.
   bool HasFloat128;
+  bool HasFloat16;
   unsigned char PointerWidth, PointerAlign;
   unsigned char BoolWidth, BoolAlign;
   unsigned char IntWidth, IntAlign;
@@ -516,6 +516,9 @@ public:
 
   /// Determine whether the __float128 type is supported on this target.
   virtual bool hasFloat128Type() const { return HasFloat128; }
+
+  /// Determine whether the _Float16 type is supported on this target.
+  virtual bool hasFloat16Type() const { return HasFloat16; }
 
   /// Return the alignment that is suitable for storing any
   /// object with a fundamental alignment requirement.
@@ -1082,9 +1085,15 @@ public:
     return false;
   }
 
-  /// Identify whether this taret supports multiversioning of functions,
+  /// Identify whether this target supports multiversioning of functions,
   /// which requires support for cpu_supports and cpu_is functionality.
-  virtual bool supportsMultiVersioning() const { return false; }
+  bool supportsMultiVersioning() const {
+    return getTriple().getArch() == llvm::Triple::x86 ||
+           getTriple().getArch() == llvm::Triple::x86_64;
+  }
+
+  /// Identify whether this target supports IFuncs.
+  bool supportsIFunc() const { return getTriple().isOSBinFormatELF(); }
 
   // Validate the contents of the __builtin_cpu_supports(const char*)
   // argument.
@@ -1313,6 +1322,12 @@ public:
   /// DWARF.
   virtual Optional<unsigned> getDWARFAddressSpace(unsigned AddressSpace) const {
     return None;
+  }
+
+  /// \returns The version of the SDK which was used during the compilation if
+  /// one was specified, or an empty version otherwise.
+  const llvm::VersionTuple &getSDKVersion() const {
+    return getTargetOpts().SDKVersion;
   }
 
   /// Check the target is valid after it is fully initialized.
