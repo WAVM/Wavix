@@ -1,9 +1,8 @@
 //===-- buffer_queue_test.cc ----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -11,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 #include "xray_buffer_queue.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 #include <atomic>
@@ -19,8 +19,11 @@
 #include <unistd.h>
 
 namespace __xray {
+namespace {
 
 static constexpr size_t kSize = 4096;
+
+using ::testing::Eq;
 
 TEST(BufferQueueTest, API) {
   bool Success = false;
@@ -58,8 +61,12 @@ TEST(BufferQueueTest, ReleaseUnknown) {
   Buf.Data = reinterpret_cast<void *>(0xdeadbeef);
   Buf.Size = kSize;
   Buf.Generation = Buffers.generation();
-  EXPECT_EQ(BufferQueue::ErrorCode::UnrecognizedBuffer,
-            Buffers.releaseBuffer(Buf));
+
+  BufferQueue::Buffer Known;
+  EXPECT_THAT(Buffers.getBuffer(Known), Eq(BufferQueue::ErrorCode::Ok));
+  EXPECT_THAT(Buffers.releaseBuffer(Buf),
+              Eq(BufferQueue::ErrorCode::UnrecognizedBuffer));
+  EXPECT_THAT(Buffers.releaseBuffer(Known), Eq(BufferQueue::ErrorCode::Ok));
 }
 
 TEST(BufferQueueTest, ErrorsWhenFinalising) {
@@ -223,4 +230,5 @@ TEST(BufferQueueTest, GenerationalSupportAcrossThreads) {
   ASSERT_EQ(Counter.load(std::memory_order_acquire), 0);
 }
 
+} // namespace
 } // namespace __xray

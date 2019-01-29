@@ -1,9 +1,8 @@
 //=-- lsan_common_mac.cc --------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "sanitizer_common/sanitizer_platform.h"
+#include "sanitizer_common/sanitizer_libc.h"
 #include "lsan_common.h"
 
 #if CAN_SANITIZE_LEAKS && SANITIZER_MAC
@@ -116,7 +116,8 @@ static const char *kSkippedSecNames[] = {
 
 // Scans global variables for heap pointers.
 void ProcessGlobalRegions(Frontier *frontier) {
-  for (auto name : kSkippedSecNames) CHECK(ARRAY_SIZE(name) < kMaxSegName);
+  for (auto name : kSkippedSecNames)
+    CHECK(internal_strnlen(name, kMaxSegName + 1) <= kMaxSegName);
 
   MemoryMappingLayout memory_mapping(false);
   InternalMmapVector<LoadedModule> modules;

@@ -1,9 +1,8 @@
 //===-- xray_utils.h --------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,29 +19,40 @@
 #include <sys/types.h>
 #include <utility>
 
+#include "sanitizer_common/sanitizer_common.h"
+#if SANITIZER_FUCHSIA
+#include <zircon/types.h>
+#endif
+
 namespace __xray {
 
 class LogWriter {
 public:
+#if SANITIZER_FUCHSIA
+ LogWriter(zx_handle_t Vmo) : Vmo(Vmo) {}
+#else
   explicit LogWriter(int Fd) : Fd(Fd) {}
-  ~LogWriter();
+#endif
+ ~LogWriter();
 
-  // Write a character range into a log.
-  void WriteAll(const char *Begin, const char *End);
+ // Write a character range into a log.
+ void WriteAll(const char *Begin, const char *End);
 
-  void Flush();
+ void Flush();
 
-  // Returns a new log instance initialized using the flag-provided values.
-  static LogWriter *Open();
-  // Closes and deallocates the log instance.
-  static void Close(LogWriter *LogWriter);
+ // Returns a new log instance initialized using the flag-provided values.
+ static LogWriter *Open();
+ // Closes and deallocates the log instance.
+ static void Close(LogWriter *LogWriter);
 
 private:
-  int Fd = -1;
+#if SANITIZER_FUCHSIA
+ zx_handle_t Vmo = ZX_HANDLE_INVALID;
+ uint64_t Offset = 0;
+#else
+ int Fd = -1;
+#endif
 };
-
-// Default implementation of the reporting interface for sanitizer errors.
-void printToStdErr(const char *Buffer);
 
 constexpr size_t gcd(size_t a, size_t b) {
   return (b == 0) ? a : gcd(b, a % b);

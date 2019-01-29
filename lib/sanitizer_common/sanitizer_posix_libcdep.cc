@@ -1,9 +1,8 @@
 //===-- sanitizer_posix_libcdep.cc ----------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -94,10 +93,12 @@ static rlim_t getlim(int res) {
 }
 
 static void setlim(int res, rlim_t lim) {
-  // The following magic is to prevent clang from replacing it with memset.
-  volatile struct rlimit rlim;
+  struct rlimit rlim;
+  if (getrlimit(res, const_cast<struct rlimit *>(&rlim))) {
+    Report("ERROR: %s getrlimit() failed %d\n", SanitizerToolName, errno);
+    Die();
+  }
   rlim.rlim_cur = lim;
-  rlim.rlim_max = lim;
   if (setrlimit(res, const_cast<struct rlimit *>(&rlim))) {
     Report("ERROR: %s setrlimit() failed %d\n", SanitizerToolName, errno);
     Die();

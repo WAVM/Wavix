@@ -1,9 +1,8 @@
 //===-- tsan_rtl_thread.cc ------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -310,6 +309,12 @@ void ThreadDetach(ThreadState *thr, uptr pc, int tid) {
   CHECK_GT(tid, 0);
   CHECK_LT(tid, kMaxTid);
   ctx->thread_registry->DetachThread(tid, thr);
+}
+
+void ThreadNotJoined(ThreadState *thr, uptr pc, int tid, uptr uid) {
+  CHECK_GT(tid, 0);
+  CHECK_LT(tid, kMaxTid);
+  ctx->thread_registry->SetThreadUserId(tid, uid);
 }
 
 void ThreadSetName(ThreadState *thr, const char *name) {

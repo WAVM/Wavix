@@ -1,9 +1,8 @@
 //===- FuzzerLoop.cpp - Fuzzer's main loop --------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // Fuzzer's main loop.
@@ -275,7 +274,8 @@ NO_SANITIZE_MEMORY
 void Fuzzer::AlarmCallback() {
   assert(Options.UnitTimeoutSec > 0);
   // In Windows Alarm callback is executed by a different thread.
-#if !LIBFUZZER_WINDOWS
+  // NetBSD's current behavior needs this change too.
+#if !LIBFUZZER_WINDOWS && !LIBFUZZER_NETBSD
   if (!InFuzzingThread())
     return;
 #endif
@@ -354,8 +354,6 @@ void Fuzzer::PrintStats(const char *Where, const char *End, size_t Units) {
 void Fuzzer::PrintFinalStats() {
   if (Options.PrintCoverage)
     TPC.PrintCoverage();
-  if (Options.PrintUnstableStats)
-    TPC.PrintUnstableStats();
   if (Options.DumpCoverage)
     TPC.DumpCoverage();
   if (Options.PrintCorpusStats)
@@ -448,29 +446,6 @@ void Fuzzer::PrintPulseAndReportSlowInput(const uint8_t *Data, size_t Size) {
   }
 }
 
-void Fuzzer::CheckForUnstableCounters(const uint8_t *Data, size_t Size) {
-  auto CBSetupAndRun = [&]() {
-    ScopedEnableMsanInterceptorChecks S;
-    UnitStartTime = system_clock::now();
-    TPC.ResetMaps();
-    RunningUserCallback = true;
-    CB(Data, Size);
-    RunningUserCallback = false;
-    UnitStopTime = system_clock::now();
-  };
-
-  // Copy original run counters into our unstable counters
-  TPC.InitializeUnstableCounters();
-
-  // First Rerun
-  CBSetupAndRun();
-  if (TPC.UpdateUnstableCounters(Options.HandleUnstable)) {
-    // Second Rerun
-    CBSetupAndRun();
-    TPC.UpdateAndApplyUnstableCounters(Options.HandleUnstable);
-  }
-}
-
 bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
                     InputInfo *II, bool *FoundUniqFeatures) {
   if (!Size)
@@ -481,17 +456,6 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
   UniqFeatureSetTmp.clear();
   size_t FoundUniqFeaturesOfII = 0;
   size_t NumUpdatesBefore = Corpus.NumFeatureUpdates();
-  bool NewFeaturesUnstable = false;
-
-  if (Options.HandleUnstable || Options.PrintUnstableStats) {
-    TPC.CollectFeatures([&](size_t Feature) {
-      if (Corpus.IsFeatureNew(Feature, Size, Options.Shrink))
-        NewFeaturesUnstable = true;
-    });
-    if (NewFeaturesUnstable)
-      CheckForUnstableCounters(Data, Size);
-  }
-
   TPC.CollectFeatures([&](size_t Feature) {
     if (Corpus.AddFeature(Feature, Size, Options.Shrink))
       UniqFeatureSetTmp.push_back(Feature);
@@ -500,12 +464,10 @@ bool Fuzzer::RunOne(const uint8_t *Data, size_t Size, bool MayDeleteFile,
                              II->UniqFeatureSet.end(), Feature))
         FoundUniqFeaturesOfII++;
   });
-
   if (FoundUniqFeatures)
     *FoundUniqFeatures = FoundUniqFeaturesOfII;
   PrintPulseAndReportSlowInput(Data, Size);
   size_t NumNewFeatures = Corpus.NumFeatureUpdates() - NumUpdatesBefore;
-
   if (NumNewFeatures) {
     TPC.UpdateObservedPCs();
     Corpus.AddToCorpus({Data, Data + Size}, NumNewFeatures, MayDeleteFile,
@@ -889,14 +851,14 @@ void Fuzzer::AnnounceOutput(const uint8_t *Data, size_t Size) {
 
 extern "C" {
 
-__attribute__((visibility("default"))) size_t
+ATTRIBUTE_INTERFACE size_t
 LLVMFuzzerMutate(uint8_t *Data, size_t Size, size_t MaxSize) {
   assert(fuzzer::F);
   return fuzzer::F->GetMD().DefaultMutate(Data, Size, MaxSize);
 }
 
 // Experimental
-__attribute__((visibility("default"))) void
+ATTRIBUTE_INTERFACE void
 LLVMFuzzerAnnounceOutput(const uint8_t *Data, size_t Size) {
   assert(fuzzer::F);
   fuzzer::F->AnnounceOutput(Data, Size);

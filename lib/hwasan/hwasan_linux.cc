@@ -1,9 +1,8 @@
 //===-- hwasan_linux.cc -----------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -24,6 +23,7 @@
 #include "hwasan_thread.h"
 #include "hwasan_thread_list.h"
 
+#include <dlfcn.h>
 #include <elf.h>
 #include <link.h>
 #include <pthread.h>
@@ -39,6 +39,7 @@
 #include "sanitizer_common/sanitizer_procmaps.h"
 
 #if HWASAN_WITH_INTERCEPTORS && !SANITIZER_ANDROID
+SANITIZER_INTERFACE_ATTRIBUTE
 THREADLOCAL uptr __hwasan_tls;
 #endif
 
@@ -217,6 +218,8 @@ bool MemIsApp(uptr p) {
 }
 
 static void HwasanAtExit(void) {
+  if (common_flags()->print_module_map)
+    DumpProcessMap();
   if (flags()->print_stats && (flags()->atexit || hwasan_report_count > 0))
     ReportStats();
   if (hwasan_report_count > 0) {
@@ -283,8 +286,29 @@ uptr *GetCurrentThreadLongPtr() {
 }
 #endif
 
+#if SANITIZER_ANDROID
+void AndroidTestTlsSlot() {
+  uptr kMagicValue = 0x010203040A0B0C0D;
+  *(uptr *)get_android_tls_ptr() = kMagicValue;
+  dlerror();
+  if (*(uptr *)get_android_tls_ptr() != kMagicValue) {
+    Printf(
+        "ERROR: Incompatible version of Android: TLS_SLOT_SANITIZER(6) is used "
+        "for dlerror().\n");
+    Die();
+  }
+}
+#else
+void AndroidTestTlsSlot() {}
+#endif
+
 Thread *GetCurrentThread() {
-  auto *R = (StackAllocationsRingBuffer*)GetCurrentThreadLongPtr();
+  uptr *ThreadLong = GetCurrentThreadLongPtr();
+#if HWASAN_WITH_INTERCEPTORS
+  if (!*ThreadLong)
+    __hwasan_thread_enter();
+#endif
+  auto *R = (StackAllocationsRingBuffer *)ThreadLong;
   return hwasanThreadList().GetThreadByBufferAddress((uptr)(R->Next()));
 }
 
@@ -346,23 +370,25 @@ static AccessInfo GetAccessInfo(siginfo_t *info, ucontext_t *uc) {
   return AccessInfo{addr, size, is_store, !is_store, recover};
 }
 
+static void HandleTagMismatch(AccessInfo ai, uptr pc, uptr frame,
+                              ucontext_t *uc) {
+  InternalMmapVector<BufferedStackTrace> stack_buffer(1);
+  BufferedStackTrace *stack = stack_buffer.data();
+  stack->Reset();
+  GetStackTrace(stack, kStackTraceMax, pc, frame, uc,
+                common_flags()->fast_unwind_on_fatal);
+
+  bool fatal = flags()->halt_on_error || !ai.recover;
+  ReportTagMismatch(stack, ai.addr, ai.size, ai.is_store, fatal);
+}
+
 static bool HwasanOnSIGTRAP(int signo, siginfo_t *info, ucontext_t *uc) {
   AccessInfo ai = GetAccessInfo(info, uc);
   if (!ai.is_store && !ai.is_load)
     return false;
 
-  InternalMmapVector<BufferedStackTrace> stack_buffer(1);
-  BufferedStackTrace *stack = stack_buffer.data();
-  stack->Reset();
   SignalContext sig{info, uc};
-  GetStackTrace(stack, kStackTraceMax, StackTrace::GetNextInstructionPc(sig.pc),
-                sig.bp, uc, common_flags()->fast_unwind_on_fatal);
-
-  ReportTagMismatch(stack, ai.addr, ai.size, ai.is_store);
-
-  ++hwasan_report_count;
-  if (flags()->halt_on_error || !ai.recover)
-    Die();
+  HandleTagMismatch(ai, StackTrace::GetNextInstructionPc(sig.pc), sig.bp, uc);
 
 #if defined(__aarch64__)
   uc->uc_mcontext.pc += 4;
@@ -371,6 +397,19 @@ static bool HwasanOnSIGTRAP(int signo, siginfo_t *info, ucontext_t *uc) {
 # error Unsupported architecture
 #endif
   return true;
+}
+
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE void __hwasan_tag_mismatch(
+    uptr addr, uptr access_info) {
+  AccessInfo ai;
+  ai.is_store = access_info & 0x10;
+  ai.recover = false;
+  ai.addr = addr;
+  ai.size = 1 << (access_info & 0xf);
+
+  HandleTagMismatch(ai, (uptr)__builtin_return_address(0),
+                    (uptr)__builtin_frame_address(0), nullptr);
+  __builtin_unreachable();
 }
 
 static void OnStackUnwind(const SignalContext &sig, const void *,

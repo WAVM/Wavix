@@ -1,9 +1,8 @@
 //===-- sanitizer_linux_libcdep.cc ----------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,6 +22,7 @@
 #include "sanitizer_file.h"
 #include "sanitizer_flags.h"
 #include "sanitizer_freebsd.h"
+#include "sanitizer_getauxval.h"
 #include "sanitizer_linux.h"
 #include "sanitizer_placement_new.h"
 #include "sanitizer_procmaps.h"
@@ -99,6 +99,10 @@ void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
 
     // Find the mapping that contains a stack variable.
     MemoryMappingLayout proc_maps(/*cache_enabled*/true);
+    if (proc_maps.Error()) {
+      *stack_top = *stack_bottom = 0;
+      return;
+    }
     MemoryMappedSegment segment;
     uptr prev_end = 0;
     while (proc_maps.Next(&segment)) {
@@ -805,6 +809,40 @@ u64 MonotonicNanoTime() {
   return (u64)ts.tv_sec * (1000ULL * 1000 * 1000) + ts.tv_nsec;
 }
 #endif  // SANITIZER_LINUX && !SANITIZER_GO
+
+#if !SANITIZER_OPENBSD
+void ReExec() {
+  const char *pathname = "/proc/self/exe";
+
+#if SANITIZER_NETBSD
+  static const int name[] = {
+      CTL_KERN,
+      KERN_PROC_ARGS,
+      -1,
+      KERN_PROC_PATHNAME,
+  };
+  char path[400];
+  uptr len;
+
+  len = sizeof(path);
+  if (internal_sysctl(name, ARRAY_SIZE(name), path, &len, NULL, 0) != -1)
+    pathname = path;
+#elif SANITIZER_SOLARIS
+  pathname = getexecname();
+  CHECK_NE(pathname, NULL);
+#elif SANITIZER_USE_GETAUXVAL
+  // Calling execve with /proc/self/exe sets that as $EXEC_ORIGIN. Binaries that
+  // rely on that will fail to load shared libraries. Query AT_EXECFN instead.
+  pathname = reinterpret_cast<const char *>(getauxval(AT_EXECFN));
+#endif
+
+  uptr rv = internal_execve(pathname, GetArgv(), GetEnviron());
+  int rverrno;
+  CHECK_EQ(internal_iserror(rv, &rverrno), true);
+  Printf("execve failed, errno %d\n", rverrno);
+  Die();
+}
+#endif  // !SANITIZER_OPENBSD
 
 } // namespace __sanitizer
 

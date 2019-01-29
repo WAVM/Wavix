@@ -1,9 +1,8 @@
 //===-- sanitizer_thread_registry.h -----------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -122,6 +121,7 @@ class ThreadRegistry {
   void JoinThread(u32 tid, void *arg);
   void FinishThread(u32 tid);
   void StartThread(u32 tid, tid_t os_id, bool workerthread, void *arg);
+  void SetThreadUserId(u32 tid, uptr user_id);
 
  private:
   const ThreadContextFactory context_factory_;

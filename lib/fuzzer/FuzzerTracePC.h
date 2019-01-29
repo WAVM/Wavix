@@ -1,9 +1,8 @@
 //===- FuzzerTracePC.h - Internal header for the Fuzzer ---------*- C++ -* ===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // fuzzer::TracePC
@@ -74,11 +73,6 @@ class TracePC {
   // How many bits of PC are used from __sanitizer_cov_trace_pc.
   static const size_t kTracePcBits = 18;
 
-  enum HandleUnstableOptions {
-    MinUnstable = 1,
-    ZeroUnstable = 2,
-  };
-
   void HandleInit(uint32_t *Start, uint32_t *Stop);
   void HandleInline8bitCountersInit(uint8_t *Start, uint8_t *Stop);
   void HandlePCsInit(const uintptr_t *Start, const uintptr_t *Stop);
@@ -109,7 +103,6 @@ class TracePC {
 
   void PrintCoverage();
   void DumpCoverage();
-  void PrintUnstableStats();
 
   template<class CallBack>
   void IterateCoveredFunctions(CallBack CB);
@@ -142,18 +135,7 @@ class TracePC {
   void SetFocusFunction(const std::string &FuncName);
   bool ObservedFocusFunction();
 
-  void InitializeUnstableCounters();
-  bool UpdateUnstableCounters(int UnstableMode);
-  void UpdateAndApplyUnstableCounters(int UnstableMode);
-
 private:
-  struct UnstableEdge {
-    uint8_t Counter;
-    bool IsUnstable;
-  };
-
-  UnstableEdge UnstableCounters[kNumPCs];
-
   bool UseCounters = false;
   uint32_t UseValueProfileMask = false;
   bool DoPrintNewPCs = false;
@@ -184,9 +166,6 @@ private:
 
   Set<uintptr_t> ObservedPCs;
   std::unordered_map<uintptr_t, uintptr_t> ObservedFuncs;  // PC => Counter.
-
-  template <class Callback>
-  void IterateInline8bitCounters(Callback CB) const;
 
   std::pair<size_t, size_t> FocusFunction = {-1, -1};  // Module and PC IDs.
 
@@ -249,7 +228,7 @@ unsigned CounterToFeature(T Counter) {
 
 template <class Callback>  // void Callback(size_t Feature)
 ATTRIBUTE_NO_SANITIZE_ADDRESS
-__attribute__((noinline))
+ATTRIBUTE_NOINLINE
 void TracePC::CollectFeatures(Callback HandleFeature) const {
   uint8_t *Counters = this->Counters();
   size_t N = GetNumPCs();

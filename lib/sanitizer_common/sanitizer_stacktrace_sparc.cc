@@ -1,9 +1,8 @@
 //===-- sanitizer_stacktrace_sparc.cc -------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,7 +14,7 @@
 
 // This file is ported to Sparc v8, but it should be easy to port to
 // Sparc v9.
-#if defined(__sparcv8__)
+#if defined(__sparcv8__) || defined(__sparcv8) || defined(__sparc_v8__)
 
 #include "sanitizer_common.h"
 #include "sanitizer_stacktrace.h"
@@ -55,4 +54,5 @@ void BufferedStackTrace::FastUnwindStack(uptr pc, uptr bp, uptr stack_top,
 
 }  // namespace __sanitizer
 
-#endif  // !defined(__sparcv8__)
+#endif  // !defined(__sparcv8__) && !defined(__sparcv8) &&
+        // !defined(__sparc_v8__)

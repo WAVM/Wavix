@@ -3,8 +3,8 @@ set(LIBFUZZER_SOURCES
   FuzzerDataFlowTrace.cpp
   FuzzerDriver.cpp
   FuzzerExtFunctionsDlsym.cpp
-  FuzzerExtFunctionsWeakAlias.cpp
   FuzzerExtFunctionsWeak.cpp
+  FuzzerExtFunctionsWindows.cpp
   FuzzerExtraCounters.cpp
   FuzzerIO.cpp
   FuzzerIOPosix.cpp
@@ -25,6 +25,8 @@ set(LIBFUZZER_SOURCES
   FuzzerUtilWindows.cpp)
 
 set(LIBFUZZER_HEADERS
+  FuzzerBuiltins.h
+  FuzzerBuiltinsMsvc.h
   FuzzerCommand.h
   FuzzerCorpus.h
   FuzzerDataFlowTrace.h
@@ -69,8 +71,15 @@ if (CMAKE_CXX_FLAGS MATCHES "fsanitize-coverage")
   list(APPEND LIBFUZZER_CFLAGS -fno-sanitize-coverage=trace-pc-guard,edge,trace-cmp,indirect-calls,8bit-counters)
 endif()
 
-if(NOT HAS_THREAD_LOCAL)
-  list(APPEND LIBFUZZER_CFLAGS -Dthread_local=__thread)
+if(MSVC)
+  # Silence warnings by turning off exceptions in MSVC headers and avoid an
+  # error by unecessarily defining thread_local when it isn't even used on
+  # Windows.
+  list(APPEND LIBFUZZER_CFLAGS -D_HAS_EXCEPTIONS=0)
+else()
+  if(NOT HAS_THREAD_LOCAL)
+    list(APPEND LIBFUZZER_CFLAGS -Dthread_local=__thread)
+  endif()
 endif()
 
 set(FUZZER_SUPPORTED_OS ${SANITIZER_COMMON_SUPPORTED_OS})
@@ -124,12 +133,12 @@ if(OS_NAME MATCHES "Linux|Fuchsia" AND COMPILER_RT_LIBCXX_PATH)
     set(LIBCXX_${arch}_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/libcxx_fuzzer_${arch})
     add_custom_libcxx(libcxx_fuzzer_${arch} ${LIBCXX_${arch}_PREFIX}
       CFLAGS ${TARGET_CFLAGS}
-             -D_LIBCPP_ABI_VERSION=Fuzzer
              -D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS=1
              -fvisibility=hidden
       CMAKE_ARGS -DCMAKE_CXX_COMPILER_WORKS=ON
                  -DLIBCXX_ENABLE_EXCEPTIONS=OFF
                  -DLIBCXX_ENABLE_SHARED=OFF
+                 -DLIBCXX_ABI_NAMESPACE=Fuzzer
                  -DLIBCXX_CXX_ABI=none)
     target_compile_options(RTfuzzer.${arch} PRIVATE -isystem ${LIBCXX_${arch}_PREFIX}/include/c++/v1)
     add_dependencies(RTfuzzer.${arch} libcxx_fuzzer_${arch}-build)
