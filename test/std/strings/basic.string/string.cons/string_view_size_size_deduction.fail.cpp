@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,7 +24,7 @@
 //                const Allocator& = Allocator())
 //   -> basic_string<charT, traits, Allocator>;
 //
-//  A size_type parameter type in a basic_string deduction guide refers to the size_type 
+//  A size_type parameter type in a basic_string deduction guide refers to the size_type
 //  member type of the type deduced by the deduction guide.
 //
 //  The deduction guide shall not participate in overload resolution if Allocator

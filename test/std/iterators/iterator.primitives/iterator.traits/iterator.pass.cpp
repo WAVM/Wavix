@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -39,5 +38,6 @@ int main()
     static_assert((std::is_same<It::difference_type, int>::value), "");
     static_assert((std::is_same<It::value_type, A>::value), "");
     static_assert((std::is_same<It::pointer, A*>::value), "");
+    static_assert((std::is_same<It::reference, A&>::value), "");
     static_assert((std::is_same<It::iterator_category, std::forward_iterator_tag>::value), "");
 }

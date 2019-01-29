@@ -1,19 +1,18 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class month_day;
 
 // constexpr bool ok() const noexcept;
 //  Returns: true if m_.ok() is true, 1d <= d_, and d_ is less than or equal to the
-//    number of days in month m_; otherwise returns false. 
+//    number of days in month m_; otherwise returns false.
 //  When m_ == February, the number of days is considered to be 29.
 
 #include <chrono>

@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -50,6 +49,17 @@ int main()
         assert(!is.fail());
         assert(std::string(s) == "abcdefghijk");
     }
+#if TEST_STD_VER > 17
+    {
+        testbuf<char> sb("   abcdefghijk    ");
+        std::istream is(&sb);
+        char s[4];
+        is >> s;
+        assert(!is.eof());
+        assert(!is.fail());
+        assert(std::string(s) == "abc");
+    }
+#endif
     {
         testbuf<wchar_t> sb(L"   abcdefghijk    ");
         std::wistream is(&sb);
@@ -71,6 +81,17 @@ int main()
         assert(std::wstring(s) == L"abcdefghijk");
         assert(is.width() == 0);
     }
+#if TEST_STD_VER > 17
+    {
+        testbuf<wchar_t> sb(L"   abcdefghijk");
+        std::wistream is(&sb);
+        wchar_t s[4];
+        is >> s;
+        assert(!is.eof());
+        assert(!is.fail());
+        assert(std::wstring(s) == L"abc");
+    }
+#endif
     {
         testbuf<char> sb("   abcdefghijk");
         std::istream is(&sb);
@@ -82,4 +103,15 @@ int main()
         assert(std::string(s) == "");
         assert(is.width() == 0);
     }
+#if TEST_STD_VER > 17
+    {
+        testbuf<char> sb("   abcdefghijk");
+        std::istream is(&sb);
+        char s[1];
+        is >> s;
+        assert(!is.eof());
+        assert( is.fail());
+        assert(std::string(s) == "");
+    }
+#endif
 }

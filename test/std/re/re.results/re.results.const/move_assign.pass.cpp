@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // UNSUPPORTED: c++03
@@ -26,7 +25,7 @@ test(const Allocator& a)
     typedef std::match_results<const CharT*, Allocator> SM;
     SM m0(a);
     SM m1;
-    
+
     m1 = std::move(m0);
     assert(m1.size()          == 0);
     assert(m1.str()           == std::basic_string<CharT>());

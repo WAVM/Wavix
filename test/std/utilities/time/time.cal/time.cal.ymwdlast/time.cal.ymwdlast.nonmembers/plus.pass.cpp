@@ -1,25 +1,24 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class year_month_weekday_last;
 
 // constexpr year_month_weekday_last operator+(const year_month_weekday_last& ymwdl, const months& dm) noexcept;
 //   Returns: (ymwdl.year() / ymwdl.month() + dm) / ymwdl.weekday_last().
-// 
+//
 // constexpr year_month_weekday_last operator+(const months& dm, const year_month_weekday_last& ymwdl) noexcept;
 //   Returns: ymwdl + dm.
-// 
+//
 // constexpr year_month_weekday_last operator+(const year_month_weekday_last& ymwdl, const years& dy) noexcept;
 //   Returns: {ymwdl.year()+dy, ymwdl.month(), ymwdl.weekday_last()}.
-// 
+//
 // constexpr year_month_weekday_last operator+(const years& dy, const year_month_weekday_last& ymwdl) noexcept;
 //   Returns: ymwdl + dy.
 
@@ -93,7 +92,7 @@ int main()
 
     ASSERT_SAME_TYPE(year_month_weekday_last, decltype(std::declval<year_month_weekday_last>() + std::declval<years>()));
     ASSERT_SAME_TYPE(year_month_weekday_last, decltype(std::declval<years>() + std::declval<year_month_weekday_last>()));
-    
+
     static_assert(testConstexprYears (year_month_weekday_last{year{1}, January, weekday_last{Tuesday}}), "");
 
     year_month_weekday_last ym{year{1234}, std::chrono::January, weekday_last{Tuesday}};

@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class month_weekday_last;
@@ -20,8 +19,8 @@
 //     constexpr chrono::month        month() const noexcept;
 //     constexpr chrono::weekday_last weekday_last()  const noexcept;
 //     constexpr bool                 ok()    const noexcept;
-    
-             
+
+
 #include <chrono>
 #include <type_traits>
 #include <cassert>
@@ -39,7 +38,7 @@ int main()
     constexpr weekday Tuesday = std::chrono::Tuesday;
 
     ASSERT_NOEXCEPT(month_weekday_last{January, weekday_last{Tuesday}});
-    
+
 //  bad month
     constexpr month_weekday_last mwdl1{month{}, weekday_last{Tuesday}};
     static_assert( mwdl1.month() == month{},                      "");

@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -12,6 +11,8 @@
 // traps
 
 #include <limits>
+
+#include "test_macros.h"
 
 #if defined(__i386__) || defined(__x86_64__) || defined(__pnacl__) || \
     defined(__wasm__)
@@ -37,6 +38,9 @@ int main()
     test<signed char, integral_types_trap>();
     test<unsigned char, integral_types_trap>();
     test<wchar_t, integral_types_trap>();
+#if TEST_STD_VER > 17 && defined(__cpp_char8_t)
+    test<char8_t, integral_types_trap>();
+#endif
 #ifndef _LIBCPP_HAS_NO_UNICODE_CHARS
     test<char16_t, integral_types_trap>();
     test<char32_t, integral_types_trap>();

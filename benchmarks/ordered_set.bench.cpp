@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -83,12 +82,12 @@ struct Create : Base {
   using Base::Base;
 
   void run(benchmark::State& State) const {
-    std::vector<size_t> Keys(TableSize);
-    std::iota(Keys.begin(), Keys.end(), size_t{0});
+    std::vector<uint64_t> Keys(TableSize);
+    std::iota(Keys.begin(), Keys.end(), uint64_t{0});
     sortKeysBy(Keys, Access());
 
     while (State.KeepRunningBatch(TableSize * NumTables)) {
-      std::vector<std::set<size_t>> Sets(NumTables);
+      std::vector<std::set<uint64_t>> Sets(NumTables);
       for (auto K : Keys) {
         for (auto& Set : Sets) {
           benchmark::DoNotOptimize(Set.insert(K));

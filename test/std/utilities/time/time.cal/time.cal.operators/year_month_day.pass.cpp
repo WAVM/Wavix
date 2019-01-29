@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class year_month_day;
@@ -14,23 +13,23 @@
 // constexpr year_month_day
 //   operator/(const year_month& ym, const day& d) noexcept;
 // Returns: {ym.year(), ym.month(), d}.
-// 
+//
 // constexpr year_month_day
 //   operator/(const year_month& ym, int d) noexcept;
 // Returns: ym / day(d).
-// 
+//
 // constexpr year_month_day
 //   operator/(const year& y, const month_day& md) noexcept;
 // Returns: y / md.month() / md.day().
-// 
+//
 // constexpr year_month_day
 //   operator/(int y, const month_day& md) noexcept;
 // Returns: year(y) / md.
-// 
+//
 // constexpr year_month_day
 //   operator/(const month_day& md, const year& y) noexcept;
 // Returns: y / md.
-// 
+//
 // constexpr year_month_day
 //   operator/(const month_day& md, int y) noexcept;
 // Returns: year(y) / md.
@@ -51,7 +50,6 @@ int main()
     using year_month     = std::chrono::year_month;
     using month_day      = std::chrono::month_day;
     using year_month_day = std::chrono::year_month_day;
-    using weekday        = std::chrono::weekday;
 
     constexpr month February = std::chrono::February;
     constexpr year_month Feb2018{year{2018}, February};
@@ -62,7 +60,7 @@ int main()
 
         static_assert((Feb2018/day{2}).month() == February, "");
         static_assert((Feb2018/day{2}).day()   == day{2},   "");
-        
+
         for (int i = 1000; i < 1010; ++i)
             for (int j = 1; j <= 12; ++j)
                 for (unsigned k = 0; k <= 28; ++k)
@@ -85,7 +83,7 @@ int main()
 
         static_assert((Feb2018/2).month() == February, "");
         static_assert((Feb2018/2).day()   == day{2},   "");
-        
+
         for (int i = 1000; i < 1010; ++i)
             for (int j = 1; j <= 12; ++j)
                 for (unsigned k = 0; k <= 28; ++k)
@@ -108,7 +106,7 @@ int main()
 
         static_assert((Feb2018/2).month() == February, "");
         static_assert((Feb2018/2).day()   == day{2},   "");
-        
+
         for (int i = 1000; i < 1010; ++i)
             for (int j = 1; j <= 12; ++j)
                 for (unsigned k = 0; k <= 28; ++k)
@@ -137,7 +135,7 @@ int main()
         static_assert((year{2018}/month_day{February, day{2}}).day()   == day{2},   "" );
         static_assert((month_day{February, day{2}}/year{2018}).month() == February, "" );
         static_assert((month_day{February, day{2}}/year{2018}).day()   == day{2},   "" );
-        
+
         for (int i = 1000; i < 1010; ++i)
             for (int j = 1; j <= 12; ++j)
                 for (unsigned k = 0; k <= 28; ++k)
@@ -168,7 +166,7 @@ int main()
         static_assert((2018/month_day{February, day{2}}).day()   == day{2},   "" );
         static_assert((month_day{February, day{2}}/2018).month() == February, "" );
         static_assert((month_day{February, day{2}}/2018).day()   == day{2},   "" );
-        
+
         for (int i = 1000; i < 1010; ++i)
             for (int j = 1; j <= 12; ++j)
                 for (unsigned k = 0; k <= 28; ++k)

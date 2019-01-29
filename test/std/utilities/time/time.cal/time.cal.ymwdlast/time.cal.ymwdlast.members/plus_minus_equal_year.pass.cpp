@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class year_month_weekday_last;
@@ -47,7 +46,7 @@ int main()
 
     ASSERT_SAME_TYPE(year_month_weekday_last&, decltype(std::declval<year_month_weekday_last&>() += std::declval<years>()));
     ASSERT_SAME_TYPE(year_month_weekday_last&, decltype(std::declval<year_month_weekday_last&>() -= std::declval<years>()));
-    
+
     constexpr weekday Tuesday = std::chrono::Tuesday;
     constexpr month January = std::chrono::January;
 

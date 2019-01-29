@@ -1,18 +1,17 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class year_month_day;
 
 // constexpr year_month_day operator-(const year_month_day& ymd, const years& dy) noexcept;
-//    Returns: ymd + (-dy)          
+//    Returns: ymd + (-dy)
 
 
 #include <chrono>
@@ -48,7 +47,7 @@ int main()
     constexpr month January = std::chrono::January;
 
     static_assert(test_constexpr(), "");
-    
+
     year_month_day ym{year{1234}, January, day{10}};
     for (int i = 0; i <= 10; ++i)
     {

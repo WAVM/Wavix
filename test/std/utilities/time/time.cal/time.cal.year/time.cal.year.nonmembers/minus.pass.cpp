@@ -1,12 +1,11 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 
 // <chrono>
 // class year;
@@ -15,9 +14,9 @@
 //   Returns: x + -y.
 //
 // constexpr years operator-(const year& x, const year& y) noexcept;
-//   Returns: If x.ok() == true and y.ok() == true, returns a value m in the range 
-//   [years{0}, years{11}] satisfying y + m == x. 
-//   Otherwise the value returned is unspecified. 
+//   Returns: If x.ok() == true and y.ok() == true, returns a value m in the range
+//   [years{0}, years{11}] satisfying y + m == x.
+//   Otherwise the value returned is unspecified.
 //   [Example: January - February == years{11}. —end example]
 
 extern "C" int printf(const char *, ...);
@@ -48,7 +47,7 @@ int main()
 
     ASSERT_NOEXCEPT(                 std::declval<year>() - std::declval<year>());
     ASSERT_SAME_TYPE(years, decltype(std::declval<year>() - std::declval<year>()));
-    
+
     static_assert(testConstexpr<year, years>(), "");
 
     year y{1223};

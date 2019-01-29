@@ -1,13 +1,14 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include <limits>
+
+#include "test_macros.h"
 
 /*
 <limits>:
@@ -98,6 +99,14 @@ int main()
     TEST_NUMERIC_LIMITS(const wchar_t)
     TEST_NUMERIC_LIMITS(volatile wchar_t)
     TEST_NUMERIC_LIMITS(const volatile wchar_t)
+
+#if TEST_STD_VER > 17 && defined(__cpp_char8_t)
+    // char8_t
+    TEST_NUMERIC_LIMITS(char8_t)
+    TEST_NUMERIC_LIMITS(const char8_t)
+    TEST_NUMERIC_LIMITS(volatile char8_t)
+    TEST_NUMERIC_LIMITS(const volatile char8_t)
+#endif
 
     // char16_t
     TEST_NUMERIC_LIMITS(char16_t)
