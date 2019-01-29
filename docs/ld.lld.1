@@ -1,5 +1,6 @@
-.\" This file is distributed under the University of Illinois Open Source
-.\" License. See LICENSE.TXT for details.
+.\" Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+.\" See https://llvm.org/LICENSE.txt for license information.
+.\" SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 .\"
 .\" This man page documents only lld's ELF linking support, obtained originally
 .\" from FreeBSD.
@@ -311,6 +312,8 @@ Write optimization remarks in YAML format to
 .Ar file .
 .It Fl -opt-remarks-with-hotness
 Include hotness information in the optimization remarks file.
+.It Fl -pic-veneer
+Always generate position independent thunks.
 .It Fl -pie
 Create a position independent executable.
 .It Fl -print-gc-sections
@@ -496,6 +499,10 @@ This is a synonym for
 Disable combining and sorting multiple relocation sections.
 .It Cm nocopyreloc
 Disable the creation of copy relocations.
+.It Cm nodefaultlib
+Set the
+.Dv DF_1_NODEFLIB
+flag to indicate that default library search paths should be ignored.
 .It Cm nodelete
 Set the
 .Dv DF_1_NODELETE
@@ -503,7 +510,7 @@ flag to indicate that the object cannot be unloaded from a process.
 .It Cm nodlopen
 Set the
 .Dv DF_1_NOOPEN
-flag to indcate that the object may not be opened by
+flag to indicate that the object may not be opened by
 .Xr dlopen 3 .
 .It Cm norelro
 Do not indicate that portions of the object shold be mapped read-only

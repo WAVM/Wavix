@@ -1,9 +1,8 @@
 //===- ARM.cpp ------------------------------------------------------------===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -61,9 +60,7 @@ ARM::ARM() {
   GotPltEntrySize = 4;
   PltEntrySize = 16;
   PltHeaderSize = 32;
-  TrapInstr = 0xd4d4d4d4;
-  // ARM uses Variant 1 TLS
-  TcbSize = 8;
+  TrapInstr = {0xd4, 0xd4, 0xd4, 0xd4};
   NeedsThunks = true;
 }
 
@@ -136,6 +133,12 @@ RelExpr ARM::getRelExpr(RelType Type, const Symbol &S,
     return R_NONE;
   case R_ARM_TLS_LE32:
     return R_TLS;
+  case R_ARM_V4BX:
+    // V4BX is just a marker to indicate there's a "bx rN" instruction at the
+    // given address. It can be used to implement a special linker mode which
+    // rewrites ARMv4T inputs to ARMv4. Since we support only ARMv4 input and
+    // not ARMv4 output, we can just ignore it.
+    return R_HINT;
   default:
     return R_ABS;
   }
@@ -198,10 +201,10 @@ void ARM::writePltHeader(uint8_t *Buf) const {
   write32le(Buf + 4, PltData[1] | ((Offset >> 20) & 0xff));
   write32le(Buf + 8, PltData[2] | ((Offset >> 12) & 0xff));
   write32le(Buf + 12, PltData[3] | (Offset & 0xfff));
-  write32le(Buf + 16, TrapInstr); // Pad to 32-byte boundary
-  write32le(Buf + 20, TrapInstr);
-  write32le(Buf + 24, TrapInstr);
-  write32le(Buf + 28, TrapInstr);
+  memcpy(Buf + 16, TrapInstr.data(), 4); // Pad to 32-byte boundary
+  memcpy(Buf + 20, TrapInstr.data(), 4);
+  memcpy(Buf + 24, TrapInstr.data(), 4);
+  memcpy(Buf + 28, TrapInstr.data(), 4);
 }
 
 void ARM::addPltHeaderSymbols(InputSection &IS) const {
@@ -250,7 +253,7 @@ void ARM::writePlt(uint8_t *Buf, uint64_t GotPltEntryAddr,
   write32le(Buf + 0, PltData[0] | ((Offset >> 20) & 0xff));
   write32le(Buf + 4, PltData[1] | ((Offset >> 12) & 0xff));
   write32le(Buf + 8, PltData[2] | (Offset & 0xfff));
-  write32le(Buf + 12, TrapInstr); // Pad to 16-byte boundary
+  memcpy(Buf + 12, TrapInstr.data(), 4); // Pad to 16-byte boundary
 }
 
 void ARM::addPltSymbols(InputSection &IS, uint64_t Off) const {
@@ -487,14 +490,12 @@ void ARM::relocateOne(uint8_t *Loc, RelType Type, uint64_t Val) const {
     break;
   case R_ARM_MOVT_ABS:
   case R_ARM_MOVT_PREL:
-    checkInt(Loc, Val, 32, Type);
     write32le(Loc, (read32le(Loc) & ~0x000f0fff) |
                        (((Val >> 16) & 0xf000) << 4) | ((Val >> 16) & 0xfff));
     break;
   case R_ARM_THM_MOVT_ABS:
   case R_ARM_THM_MOVT_PREL:
     // Encoding T1: A = imm4:i:imm3:imm8
-    checkInt(Loc, Val, 32, Type);
     write16le(Loc,
               0xf2c0 |                     // opcode
                   ((Val >> 17) & 0x0400) | // i

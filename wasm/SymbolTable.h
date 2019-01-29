@@ -1,9 +1,8 @@
 //===- SymbolTable.h --------------------------------------------*- C++ -*-===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,12 +12,9 @@
 #include "InputFiles.h"
 #include "LTO.h"
 #include "Symbols.h"
+#include "lld/Common/LLVM.h"
 #include "llvm/ADT/CachedHashString.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/Support/raw_ostream.h"
-
-using llvm::wasm::WasmGlobalType;
-using llvm::wasm::WasmSignature;
 
 namespace lld {
 namespace wasm {
@@ -59,6 +55,8 @@ public:
                          uint32_t Size);
   Symbol *addDefinedGlobal(StringRef Name, uint32_t Flags, InputFile *File,
                            InputGlobal *G);
+  Symbol *addDefinedEvent(StringRef Name, uint32_t Flags, InputFile *File,
+                          InputEvent *E);
 
   Symbol *addUndefinedFunction(StringRef Name, uint32_t Flags, InputFile *File,
                                const WasmSignature *Signature);
@@ -66,7 +64,7 @@ public:
   Symbol *addUndefinedGlobal(StringRef Name, uint32_t Flags, InputFile *File,
                              const WasmGlobalType *Type);
 
-  void addLazy(ArchiveFile *F, const Archive::Symbol *Sym);
+  void addLazy(ArchiveFile *F, const llvm::object::Archive::Symbol *Sym);
 
   bool addComdat(StringRef Name);
 

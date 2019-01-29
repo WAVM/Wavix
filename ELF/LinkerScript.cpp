@@ -1,9 +1,8 @@
 //===- LinkerScript.cpp ---------------------------------------------------===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -415,9 +414,7 @@ LinkerScript::computeInputSections(const InputSectionDescription *Cmd) {
 
 void LinkerScript::discard(ArrayRef<InputSection *> V) {
   for (InputSection *S : V) {
-    if (S == In.ShStrTab || S == In.Dynamic || S == In.DynSymTab ||
-        S == In.DynStrTab || S == In.RelaPlt || S == In.RelaDyn ||
-        S == In.RelrDyn)
+    if (S == In.ShStrTab || S == In.RelaDyn || S == In.RelrDyn)
       error("discarding " + S->Name + " section is not allowed");
 
     // You can discard .hash and .gnu.hash sections by linker scripts. Since

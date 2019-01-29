@@ -1,9 +1,8 @@
 //===- MapFile.cpp --------------------------------------------------------===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -163,17 +162,18 @@ void elf::writeMapFile() {
   OS << right_justify("VMA", W) << ' ' << right_justify("LMA", W)
      << "     Size Align Out     In      Symbol\n";
 
+  OutputSection* OSec = nullptr;
   for (BaseCommand *Base : Script->SectionCommands) {
     if (auto *Cmd = dyn_cast<SymbolAssignment>(Base)) {
       if (Cmd->Provide && !Cmd->Sym)
         continue;
-      //FIXME: calculate and print LMA.
-      writeHeader(OS, Cmd->Addr, 0, Cmd->Size, 1);
+      uint64_t LMA = OSec ? OSec->getLMA() + Cmd->Addr - OSec->getVA(0) : 0;
+      writeHeader(OS, Cmd->Addr, LMA, Cmd->Size, 1);
       OS << Cmd->CommandString << '\n';
       continue;
     }
 
-    auto *OSec = cast<OutputSection>(Base);
+    OSec = cast<OutputSection>(Base);
     writeHeader(OS, OSec->Addr, OSec->getLMA(), OSec->Size, OSec->Alignment);
     OS << OSec->Name << '\n';
 

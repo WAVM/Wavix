@@ -1,9 +1,8 @@
 //===- Symbols.cpp --------------------------------------------------------===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -38,8 +37,8 @@ Defined *ElfSym::GlobalOffsetTable;
 Defined *ElfSym::MipsGp;
 Defined *ElfSym::MipsGpDisp;
 Defined *ElfSym::MipsLocalGp;
+Defined *ElfSym::RelaIpltStart;
 Defined *ElfSym::RelaIpltEnd;
-Defined *ElfSym::RISCVGlobalPointer;
 
 static uint64_t getSymVA(const Symbol &Sym, int64_t &Addend) {
   switch (Sym.kind()) {
@@ -139,15 +138,20 @@ uint64_t Symbol::getGotPltOffset() const {
   return (PltIndex + Target->GotPltHeaderEntriesNum) * Target->GotPltEntrySize;
 }
 
-uint64_t Symbol::getPltVA() const {
-  if (this->IsInIplt)
-    return In.Iplt->getVA() + PltIndex * Target->PltEntrySize;
-  return In.Plt->getVA() + Target->getPltEntryOffset(PltIndex);
+uint64_t Symbol::getPPC64LongBranchOffset() const {
+  assert(PPC64BranchltIndex != 0xffff);
+  return PPC64BranchltIndex * Target->GotPltEntrySize;
 }
 
-uint64_t Symbol::getPltOffset() const {
-  assert(!this->IsInIplt);
-  return Target->getPltEntryOffset(PltIndex);
+uint64_t Symbol::getPltVA() const {
+  PltSection *Plt = IsInIplt ? In.Iplt : In.Plt;
+  return Plt->getVA() + Plt->HeaderSize + PltIndex * Target->PltEntrySize;
+}
+
+uint64_t Symbol::getPPC64LongBranchTableVA() const {
+  assert(PPC64BranchltIndex != 0xffff);
+  return In.PPC64LongBranchTarget->getVA() +
+         PPC64BranchltIndex * Target->GotPltEntrySize;
 }
 
 uint64_t Symbol::getSize() const {
@@ -261,7 +265,7 @@ void elf::printTraceSymbol(Symbol *Sym) {
   message(toString(Sym->File) + S + Sym->getName());
 }
 
-void elf::warnUnorderableSymbol(const Symbol *Sym) {
+void elf::maybeWarnUnorderableSymbol(const Symbol *Sym) {
   if (!Config->WarnSymbolOrdering)
     return;
 

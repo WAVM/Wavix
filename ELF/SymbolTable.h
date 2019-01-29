@@ -1,9 +1,8 @@
 //===- SymbolTable.h --------------------------------------------*- C++ -*-===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -45,9 +44,9 @@ public:
   Symbol *addUndefined(StringRef Name, uint8_t Binding, uint8_t StOther,
                        uint8_t Type, bool CanOmitFromDynSym, InputFile *File);
 
-  Symbol *addDefined(StringRef Name, uint8_t StOther, uint8_t Type,
-                     uint64_t Value, uint64_t Size, uint8_t Binding,
-                     SectionBase *Section, InputFile *File);
+  Defined *addDefined(StringRef Name, uint8_t StOther, uint8_t Type,
+                      uint64_t Value, uint64_t Size, uint8_t Binding,
+                      SectionBase *Section, InputFile *File);
 
   template <class ELFT>
   void addShared(StringRef Name, SharedFile<ELFT> &F,
@@ -108,7 +107,7 @@ private:
   llvm::DenseSet<llvm::CachedHashStringRef> ComdatGroups;
 
   // Set of .so files to not link the same shared object file more than once.
-  llvm::DenseSet<StringRef> SoNames;
+  llvm::DenseMap<StringRef, InputFile *> SoNames;
 
   // A map from demangled symbol names to their symbol objects.
   // This mapping is 1:N because two symbols with different versions

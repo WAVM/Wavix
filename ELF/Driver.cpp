@@ -1,9 +1,8 @@
 //===- Driver.cpp ---------------------------------------------------------===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -224,7 +223,7 @@ void LinkerDriver::addFile(StringRef Path, bool WithLOption) {
     return;
   }
   case file_magic::elf_shared_object:
-    if (Config->Relocatable) {
+    if (Config->Static || Config->Relocatable) {
       error("attempted static link of dynamic object " + Path);
       return;
     }
@@ -275,17 +274,17 @@ static void initLLVM() {
 
 // Some command line options or some combinations of them are not allowed.
 // This function checks for such errors.
-static void checkOptions(opt::InputArgList &Args) {
+static void checkOptions() {
   // The MIPS ABI as of 2016 does not support the GNU-style symbol lookup
   // table which is a relatively new feature.
   if (Config->EMachine == EM_MIPS && Config->GnuHash)
-    error("the .gnu.hash section is not compatible with the MIPS target.");
+    error("the .gnu.hash section is not compatible with the MIPS target");
 
   if (Config->FixCortexA53Errata843419 && Config->EMachine != EM_AARCH64)
-    error("--fix-cortex-a53-843419 is only supported on AArch64 targets.");
+    error("--fix-cortex-a53-843419 is only supported on AArch64 targets");
 
   if (Config->TocOptimize && Config->EMachine != EM_PPC64)
-      error("--toc-optimize is only supported on the PowerPC64 target.");
+    error("--toc-optimize is only supported on the PowerPC64 target");
 
   if (Config->Pie && Config->Shared)
     error("-shared and -pie may not be used together");
@@ -350,8 +349,8 @@ static bool isKnownZFlag(StringRef S) {
          S == "execstack" || S == "global" || S == "hazardplt" ||
          S == "initfirst" || S == "interpose" ||
          S == "keep-text-section-prefix" || S == "lazy" || S == "muldefs" ||
-         S == "nocombreloc" || S == "nocopyreloc" || S == "nodelete" ||
-         S == "nodlopen" || S == "noexecstack" ||
+         S == "nocombreloc" || S == "nocopyreloc" || S == "nodefaultlib" ||
+         S == "nodelete" || S == "nodlopen" || S == "noexecstack" ||
          S == "nokeep-text-section-prefix" || S == "norelro" || S == "notext" ||
          S == "now" || S == "origin" || S == "relro" || S == "retpolineplt" ||
          S == "rodynamic" || S == "text" || S == "wxneeded" ||
@@ -402,13 +401,11 @@ void LinkerDriver::main(ArrayRef<const char *> ArgsArr) {
     Expected<std::unique_ptr<TarWriter>> ErrOrWriter =
         TarWriter::create(Path, path::stem(Path));
     if (ErrOrWriter) {
-      Tar = ErrOrWriter->get();
+      Tar = std::move(*ErrOrWriter);
       Tar->append("response.txt", createResponseFile(Args));
       Tar->append("version.txt", getLLDVersion() + "\n");
-      make<std::unique_ptr<TarWriter>>(std::move(*ErrOrWriter));
     } else {
-      error(Twine("--reproduce: failed to open ") + Path + ": " +
-            toString(ErrOrWriter.takeError()));
+      error("--reproduce: " + toString(ErrOrWriter.takeError()));
     }
   }
 
@@ -429,7 +426,7 @@ void LinkerDriver::main(ArrayRef<const char *> ArgsArr) {
 
   inferMachineType();
   setConfigs(Args);
-  checkOptions(Args);
+  checkOptions();
   if (errorCount())
     return;
 
@@ -650,64 +647,55 @@ static std::pair<bool, bool> getPackDynRelocs(opt::InputArgList &Args) {
 
 static void readCallGraph(MemoryBufferRef MB) {
   // Build a map from symbol name to section
-  DenseMap<StringRef, const Symbol *> SymbolNameToSymbol;
+  DenseMap<StringRef, Symbol *> Map;
   for (InputFile *File : ObjectFiles)
     for (Symbol *Sym : File->getSymbols())
-      SymbolNameToSymbol[Sym->getName()] = Sym;
+      Map[Sym->getName()] = Sym;
 
-  auto FindSection = [&](StringRef SymName) -> InputSectionBase * {
-    const Symbol *Sym = SymbolNameToSymbol.lookup(SymName);
-    if (Sym)
-      warnUnorderableSymbol(Sym);
-    else if (Config->WarnSymbolOrdering)
-      warn(MB.getBufferIdentifier() + ": no such symbol: " + SymName);
+  auto FindSection = [&](StringRef Name) -> InputSectionBase * {
+    Symbol *Sym = Map.lookup(Name);
+    if (!Sym) {
+      if (Config->WarnSymbolOrdering)
+        warn(MB.getBufferIdentifier() + ": no such symbol: " + Name);
+      return nullptr;
+    }
+    maybeWarnUnorderableSymbol(Sym);
 
-    if (const Defined *DR = dyn_cast_or_null<Defined>(Sym))
+    if (Defined *DR = dyn_cast_or_null<Defined>(Sym))
       return dyn_cast_or_null<InputSectionBase>(DR->Section);
     return nullptr;
   };
 
-  for (StringRef L : args::getLines(MB)) {
+  for (StringRef Line : args::getLines(MB)) {
     SmallVector<StringRef, 3> Fields;
-    L.split(Fields, ' ');
+    Line.split(Fields, ' ');
     uint64_t Count;
-    if (Fields.size() != 3 || !to_integer(Fields[2], Count))
-      fatal(MB.getBufferIdentifier() + ": parse error");
 
-    if (const InputSectionBase *FromSB = FindSection(Fields[0]))
-      if (const InputSectionBase *ToSB = FindSection(Fields[1]))
-        Config->CallGraphProfile[std::make_pair(FromSB, ToSB)] += Count;
+    if (Fields.size() != 3 || !to_integer(Fields[2], Count)) {
+      error(MB.getBufferIdentifier() + ": parse error");
+      return;
+    }
+
+    if (InputSectionBase *From = FindSection(Fields[0]))
+      if (InputSectionBase *To = FindSection(Fields[1]))
+        Config->CallGraphProfile[std::make_pair(From, To)] += Count;
   }
 }
 
 template <class ELFT> static void readCallGraphsFromObjectFiles() {
   for (auto File : ObjectFiles) {
     auto *Obj = cast<ObjFile<ELFT>>(File);
+
     for (const Elf_CGProfile_Impl<ELFT> &CGPE : Obj->CGProfile) {
       auto *FromSym = dyn_cast<Defined>(&Obj->getSymbol(CGPE.cgp_from));
       auto *ToSym = dyn_cast<Defined>(&Obj->getSymbol(CGPE.cgp_to));
       if (!FromSym || !ToSym)
         continue;
-      auto *FromSec = dyn_cast_or_null<InputSectionBase>(FromSym->Section);
-      auto *ToSec = dyn_cast_or_null<InputSectionBase>(ToSym->Section);
 
-      // The profile from .llvm.call-graph-profile is conceptually affiliated to
-      // FromSec. Don't warn unorderable symbol if FromSym is not absolute
-      // (FromSec isn't null) and the section is discarded
-      // (!FromSec->Repl->Live).
-      //
-      // We also don't want to warn when ToSym is undefined or is in a shared
-      // object (as symbols in shared objects are fixed and unorderable).
-      //
-      // The check used here is more relaxed (no warning if either FromSym or
-      // ToSym is not Defined) for simplicity and there is no compelling reason
-      // to warn on more cases.
-      if (!FromSec || FromSec->Repl->Live) {
-        warnUnorderableSymbol(FromSym);
-        warnUnorderableSymbol(ToSym);
-      }
-      if (FromSec && ToSec)
-        Config->CallGraphProfile[{FromSec, ToSec}] += CGPE.cgp_weight;
+      auto *From = dyn_cast_or_null<InputSectionBase>(FromSym->Section);
+      auto *To = dyn_cast_or_null<InputSectionBase>(ToSym->Section);
+      if (From && To)
+        Config->CallGraphProfile[{From, To}] += CGPE.cgp_weight;
     }
   }
 }
@@ -785,7 +773,10 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->DynamicLinker = getDynamicLinker(Args);
   Config->EhFrameHdr =
       Args.hasFlag(OPT_eh_frame_hdr, OPT_no_eh_frame_hdr, false);
+  Config->EmitLLVM = Args.hasArg(OPT_plugin_opt_emit_llvm, false);
   Config->EmitRelocs = Args.hasArg(OPT_emit_relocs);
+  Config->CallGraphProfileSort = Args.hasFlag(
+      OPT_call_graph_profile_sort, OPT_no_call_graph_profile_sort, true);
   Config->EnableNewDtags =
       Args.hasFlag(OPT_enable_new_dtags, OPT_disable_new_dtags, true);
   Config->Entry = Args.getLastArgValue(OPT_entry);
@@ -883,6 +874,7 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   Config->ZInterpose = hasZOption(Args, "interpose");
   Config->ZKeepTextSectionPrefix = getZFlag(
       Args, "keep-text-section-prefix", "nokeep-text-section-prefix", false);
+  Config->ZNodefaultlib = hasZOption(Args, "nodefaultlib");
   Config->ZNodelete = hasZOption(Args, "nodelete");
   Config->ZNodlopen = hasZOption(Args, "nodlopen");
   Config->ZNow = getZFlag(Args, "now", "lazy", false);
@@ -1013,6 +1005,7 @@ static void setConfigs(opt::InputArgList &Args) {
   Config->Endianness = Config->IsLE ? endianness::little : endianness::big;
   Config->IsMips64EL = (K == ELF64LEKind && M == EM_MIPS);
   Config->Pic = Config->Pie || Config->Shared;
+  Config->PicThunk = Args.hasArg(OPT_pic_veneer, Config->Pic);
   Config->Wordsize = Config->Is64 ? 8 : 4;
 
   // ELF defines two different ways to store relocation addends as shown below:
@@ -1557,6 +1550,9 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &Args) {
   Out::ElfHeader = make<OutputSection>("", 0, SHF_ALLOC);
   Out::ElfHeader->Size = sizeof(typename ELFT::Ehdr);
 
+  // Create wrapped symbols for -wrap option.
+  std::vector<WrappedSymbol> Wrapped = addWrappedSymbols<ELFT>(Args);
+
   // We need to create some reserved symbols such as _end. Create them.
   if (!Config->Relocatable)
     addReservedSymbols();
@@ -1568,9 +1564,6 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &Args) {
   // name "foo@ver1") rather do harm, so we don't call this if -r is given.
   if (!Config->Relocatable)
     Symtab->scanVersionScript();
-
-  // Create wrapped symbols for -wrap option.
-  std::vector<WrappedSymbol> Wrapped = addWrappedSymbols<ELFT>(Args);
 
   // Do link-time optimization if given files are LLVM bitcode files.
   // This compiles bitcode files into real object files.
@@ -1585,6 +1578,12 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &Args) {
   // files" and not object files. Index file creation is already done
   // in addCombinedLTOObject, so we are done if that's the case.
   if (Config->ThinLTOIndexOnly)
+    return;
+
+  // Likewise, --plugin-opt=emit-llvm is an option to make LTO create
+  // an output file in bitcode and exit, so that you can just get a
+  // combined bitcode file.
+  if (Config->EmitLLVM)
     return;
 
   // Apply symbol renames for -wrap.
@@ -1617,7 +1616,7 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &Args) {
     // supports them.
     if (Config->ARMHasBlx == false)
       warn("lld uses blx instruction, no object with architecture supporting "
-           "feature detected.");
+           "feature detected");
   }
 
   // This adds a .comment section containing a version string. We have to add it
@@ -1637,10 +1636,12 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &Args) {
   }
 
   // Read the callgraph now that we know what was gced or icfed
-  if (auto *Arg = Args.getLastArg(OPT_call_graph_ordering_file))
-    if (Optional<MemoryBufferRef> Buffer = readFile(Arg->getValue()))
-      readCallGraph(*Buffer);
-  readCallGraphsFromObjectFiles<ELFT>();
+  if (Config->CallGraphProfileSort) {
+    if (auto *Arg = Args.getLastArg(OPT_call_graph_ordering_file))
+      if (Optional<MemoryBufferRef> Buffer = readFile(Arg->getValue()))
+        readCallGraph(*Buffer);
+    readCallGraphsFromObjectFiles<ELFT>();
+  }
 
   // Write the result to the file.
   writeResult<ELFT>();

@@ -1,9 +1,8 @@
 //===- DWARF.cpp ----------------------------------------------------------===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -31,11 +30,16 @@ template <class ELFT> LLDDwarfObj<ELFT>::LLDDwarfObj(ObjFile<ELFT> *Obj) {
     if (!Sec)
       continue;
 
-    if (LLDDWARFSection *M = StringSwitch<LLDDWARFSection *>(Sec->Name)
-                                 .Case(".debug_info", &InfoSection)
-                                 .Case(".debug_ranges", &RangeSection)
-                                 .Case(".debug_line", &LineSection)
-                                 .Default(nullptr)) {
+    if (LLDDWARFSection *M =
+            StringSwitch<LLDDWARFSection *>(Sec->Name)
+                .Case(".debug_addr", &AddrSection)
+                .Case(".debug_gnu_pubnames", &GnuPubNamesSection)
+                .Case(".debug_gnu_pubtypes", &GnuPubTypesSection)
+                .Case(".debug_info", &InfoSection)
+                .Case(".debug_ranges", &RangeSection)
+                .Case(".debug_rnglists", &RngListsSection)
+                .Case(".debug_line", &LineSection)
+                .Default(nullptr)) {
       M->Data = toStringRef(Sec->data());
       M->Sec = Sec;
       continue;
@@ -43,10 +47,6 @@ template <class ELFT> LLDDwarfObj<ELFT>::LLDDwarfObj(ObjFile<ELFT> *Obj) {
 
     if (Sec->Name == ".debug_abbrev")
       AbbrevSection = toStringRef(Sec->data());
-    else if (Sec->Name == ".debug_gnu_pubnames")
-      GnuPubNamesSection = toStringRef(Sec->data());
-    else if (Sec->Name == ".debug_gnu_pubtypes")
-      GnuPubTypesSection = toStringRef(Sec->data());
     else if (Sec->Name == ".debug_str")
       StrSection = toStringRef(Sec->data());
     else if (Sec->Name == ".debug_line_str")
