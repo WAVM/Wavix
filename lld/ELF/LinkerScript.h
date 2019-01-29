@@ -1,9 +1,8 @@
 //===- LinkerScript.h -------------------------------------------*- C++ -*-===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -30,12 +29,13 @@ namespace lld {
 namespace elf {
 
 class Defined;
-class Symbol;
-class InputSectionBase;
 class InputSection;
-class OutputSection;
 class InputSectionBase;
+class InputSectionBase;
+class OutputSection;
 class SectionBase;
+class Symbol;
+class ThunkSection;
 
 // This represents an r-value in the linker script.
 struct ExprValue {
@@ -145,7 +145,9 @@ struct MemoryRegion {
 // Also it may be surrounded with SORT() command, so contains sorting rules.
 struct SectionPattern {
   SectionPattern(StringMatcher &&Pat1, StringMatcher &&Pat2)
-      : ExcludedFilePat(Pat1), SectionPat(Pat2) {}
+      : ExcludedFilePat(Pat1), SectionPat(Pat2),
+        SortOuter(SortSectionPolicy::Default),
+        SortInner(SortSectionPolicy::Default) {}
 
   StringMatcher ExcludedFilePat;
   StringMatcher SectionPat;
@@ -153,7 +155,6 @@ struct SectionPattern {
   SortSectionPolicy SortInner;
 };
 
-class ThunkSection;
 struct InputSectionDescription : BaseCommand {
   InputSectionDescription(StringRef FilePattern)
       : BaseCommand(InputSectionKind), FilePat(FilePattern) {}

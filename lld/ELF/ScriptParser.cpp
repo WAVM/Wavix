@@ -1,9 +1,8 @@
 //===- ScriptParser.cpp ---------------------------------------------------===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -78,8 +77,8 @@ private:
 
   SymbolAssignment *readSymbolAssignment(StringRef Name);
   ByteCommand *readByteCommand(StringRef Tok);
-  uint32_t readFill();
-  uint32_t parseFill(StringRef Tok);
+  std::array<uint8_t, 4> readFill();
+  std::array<uint8_t, 4> parseFill(StringRef Tok);
   bool readSectionDirective(OutputSection *Cmd, StringRef Tok1, StringRef Tok2);
   void readSectionAddressType(OutputSection *Cmd);
   OutputSection *readOverlaySectionDescription();
@@ -94,7 +93,6 @@ private:
   SortSectionPolicy readSortKind();
   SymbolAssignment *readProvideHidden(bool Provide, bool Hidden);
   SymbolAssignment *readAssignment(StringRef Tok);
-  std::pair<ELFKind, uint16_t> readBfdName();
   void readSort();
   Expr readAssert();
   Expr readConstant();
@@ -271,6 +269,8 @@ void ScriptParser::readLinkerScript() {
 }
 
 void ScriptParser::readDefsym(StringRef Name) {
+  if (errorCount())
+    return;
   Expr E = readExpr();
   if (!atEOF())
     setError("EOF expected, but got " + next());
@@ -383,23 +383,23 @@ void ScriptParser::readOutputArch() {
     skip();
 }
 
-std::pair<ELFKind, uint16_t> ScriptParser::readBfdName() {
-  StringRef S = next();
-  if (S == "elf32-i386")
-    return {ELF32LEKind, EM_386};
-  if (S == "elf32-iamcu")
-    return {ELF32LEKind, EM_IAMCU};
-  if (S == "elf32-littlearm")
-    return {ELF32LEKind, EM_ARM};
-  if (S == "elf32-x86-64")
-    return {ELF32LEKind, EM_X86_64};
-  if (S == "elf64-littleaarch64")
-    return {ELF64LEKind, EM_AARCH64};
-  if (S == "elf64-x86-64")
-    return {ELF64LEKind, EM_X86_64};
-
-  setError("unknown output format name: " + S);
-  return {ELFNoneKind, EM_NONE};
+static std::pair<ELFKind, uint16_t> parseBfdName(StringRef S) {
+  return StringSwitch<std::pair<ELFKind, uint16_t>>(S)
+      .Case("elf32-i386", {ELF32LEKind, EM_386})
+      .Case("elf32-iamcu", {ELF32LEKind, EM_IAMCU})
+      .Case("elf32-littlearm", {ELF32LEKind, EM_ARM})
+      .Case("elf32-x86-64", {ELF32LEKind, EM_X86_64})
+      .Case("elf64-littleaarch64", {ELF64LEKind, EM_AARCH64})
+      .Case("elf64-powerpc", {ELF64BEKind, EM_PPC64})
+      .Case("elf64-powerpcle", {ELF64LEKind, EM_PPC64})
+      .Case("elf64-x86-64", {ELF64LEKind, EM_X86_64})
+      .Case("elf32-tradbigmips", {ELF32BEKind, EM_MIPS})
+      .Case("elf32-ntradbigmips", {ELF32BEKind, EM_MIPS})
+      .Case("elf32-tradlittlemips", {ELF32LEKind, EM_MIPS})
+      .Case("elf32-ntradlittlemips", {ELF32LEKind, EM_MIPS})
+      .Case("elf64-tradbigmips", {ELF64BEKind, EM_MIPS})
+      .Case("elf64-tradlittlemips", {ELF64LEKind, EM_MIPS})
+      .Default({ELFNoneKind, EM_NONE});
 }
 
 // Parse OUTPUT_FORMAT(bfdname) or OUTPUT_FORMAT(bfdname, big, little).
@@ -407,11 +407,13 @@ std::pair<ELFKind, uint16_t> ScriptParser::readBfdName() {
 void ScriptParser::readOutputFormat() {
   expect("(");
 
-  std::pair<ELFKind, uint16_t> P = readBfdName();
-  if (Config->EKind == ELFNoneKind) {
-    Config->EKind = P.first;
-    Config->EMachine = P.second;
-  }
+  StringRef S = unquote(next());
+
+  std::tie(Config->EKind, Config->EMachine) = parseBfdName(S);
+  if (Config->EMachine == EM_NONE)
+    setError("unknown output format name: " + S);
+  if (S == "elf32-ntradlittlemips" || S == "elf32-ntradbigmips")
+    Config->MipsN32Abi = true;
 
   if (consume(")"))
     return;
@@ -723,9 +725,9 @@ Expr ScriptParser::readAssert() {
 // alias for =fillexp section attribute, which is different from
 // what GNU linkers do.
 // https://sourceware.org/binutils/docs/ld/Output-Section-Data.html
-uint32_t ScriptParser::readFill() {
+std::array<uint8_t, 4> ScriptParser::readFill() {
   expect("(");
-  uint32_t V = parseFill(next());
+  std::array<uint8_t, 4> V = parseFill(next());
   expect(")");
   return V;
 }
@@ -838,7 +840,12 @@ OutputSection *ScriptParser::readOutputSectionDescription(StringRef OutSec) {
     } else if (peek() == "(") {
       Cmd->SectionCommands.push_back(readInputSectionDescription(Tok));
     } else {
-      setError("unknown command " + Tok);
+      // We have a file name and no input sections description. It is not a
+      // commonly used syntax, but still acceptable. In that case, all sections
+      // from the file will be included.
+      auto *ISD = make<InputSectionDescription>(Tok);
+      ISD->SectionPatterns.push_back({{}, StringMatcher({"*"})});
+      Cmd->SectionCommands.push_back(ISD);
     }
   }
 
@@ -875,13 +882,13 @@ OutputSection *ScriptParser::readOutputSectionDescription(StringRef OutSec) {
 // When reading a hexstring, ld.bfd handles it as a blob of arbitrary
 // size, while ld.gold always handles it as a 32-bit big-endian number.
 // We are compatible with ld.gold because it's easier to implement.
-uint32_t ScriptParser::parseFill(StringRef Tok) {
+std::array<uint8_t, 4> ScriptParser::parseFill(StringRef Tok) {
   uint32_t V = 0;
   if (!to_integer(Tok, V))
     setError("invalid filler expression: " + Tok);
 
-  uint32_t Buf;
-  write32be(&Buf, V);
+  std::array<uint8_t, 4> Buf;
+  write32be(Buf.data(), V);
   return Buf;
 }
 

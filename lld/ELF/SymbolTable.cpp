@@ -1,9 +1,8 @@
 //===- SymbolTable.cpp ----------------------------------------------------===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -94,8 +93,20 @@ template <class ELFT> void SymbolTable::addFile(InputFile *File) {
   if (auto *F = dyn_cast<SharedFile<ELFT>>(File)) {
     // DSOs are uniquified not by filename but by soname.
     F->parseSoName();
-    if (errorCount() || !SoNames.insert(F->SoName).second)
+    if (errorCount())
       return;
+
+    // If a DSO appears more than once on the command line with and without
+    // --as-needed, --no-as-needed takes precedence over --as-needed because a
+    // user can add an extra DSO with --no-as-needed to force it to be added to
+    // the dependency list.
+    DenseMap<StringRef, InputFile *>::iterator It;
+    bool WasInserted;
+    std::tie(It, WasInserted) = SoNames.try_emplace(F->SoName, F);
+    cast<SharedFile<ELFT>>(It->second)->IsNeeded |= F->IsNeeded;
+    if (!WasInserted)
+      return;
+
     SharedFiles.push_back(F);
     F->parseRest();
     return;
@@ -251,10 +262,6 @@ Symbol *SymbolTable::addUndefined(StringRef Name, uint8_t Binding,
   if (S->isShared() || S->isLazy() || (S->isUndefined() && Binding != STB_WEAK))
     S->Binding = Binding;
 
-  if (!Config->GcSections && Binding != STB_WEAK)
-    if (auto *SS = dyn_cast<SharedSymbol>(S))
-      SS->getFile<ELFT>().IsNeeded = true;
-
   if (S->isLazy()) {
     // An undefined weak will not fetch archive members. See comment on Lazy in
     // Symbols.h for the details.
@@ -319,7 +326,7 @@ Symbol *SymbolTable::addUndefined(StringRef Name, uint8_t Binding,
 
     // We don't report backward references to weak symbols as they can be
     // overridden later.
-    if (Backref && S->Binding != STB_WEAK)
+    if (Backref && !S->isWeak())
       warn("backward reference detected: " + Name + " in " + toString(File) +
            " refers to " + toString(S->File));
   }
@@ -459,9 +466,9 @@ static void reportDuplicate(Symbol *Sym, InputFile *NewFile,
   error(Msg);
 }
 
-Symbol *SymbolTable::addDefined(StringRef Name, uint8_t StOther, uint8_t Type,
-                                uint64_t Value, uint64_t Size, uint8_t Binding,
-                                SectionBase *Section, InputFile *File) {
+Defined *SymbolTable::addDefined(StringRef Name, uint8_t StOther, uint8_t Type,
+                                 uint64_t Value, uint64_t Size, uint8_t Binding,
+                                 SectionBase *Section, InputFile *File) {
   Symbol *S;
   bool WasInserted;
   std::tie(S, WasInserted) = insert(Name, getVisibility(StOther),
@@ -474,7 +481,7 @@ Symbol *SymbolTable::addDefined(StringRef Name, uint8_t StOther, uint8_t Type,
   else if (Cmp == 0)
     reportDuplicate(S, File, dyn_cast_or_null<InputSectionBase>(Section),
                     Value);
-  return S;
+  return cast<Defined>(S);
 }
 
 template <typename ELFT>
@@ -494,19 +501,16 @@ void SymbolTable::addShared(StringRef Name, SharedFile<ELFT> &File,
 
   // An undefined symbol with non default visibility must be satisfied
   // in the same DSO.
-  if (WasInserted ||
-      ((S->isUndefined() || S->isLazy()) && S->Visibility == STV_DEFAULT)) {
-    uint8_t Binding = S->Binding;
-    bool WasUndefined = S->isUndefined();
-    replaceSymbol<SharedSymbol>(S, File, Name, Sym.getBinding(), Sym.st_other,
+  auto Replace = [&](uint8_t Binding) {
+    replaceSymbol<SharedSymbol>(S, File, Name, Binding, Sym.st_other,
                                 Sym.getType(), Sym.st_value, Sym.st_size,
                                 Alignment, VerdefIndex);
-    if (!WasInserted) {
-      S->Binding = Binding;
-      if (!S->isWeak() && !Config->GcSections && WasUndefined)
-        File.IsNeeded = true;
-    }
-  }
+  };
+
+  if (WasInserted)
+    Replace(Sym.getBinding());
+  else if (S->Visibility == STV_DEFAULT && (S->isUndefined() || S->isLazy()))
+    Replace(S->Binding);
 }
 
 Symbol *SymbolTable::addBitcode(StringRef Name, uint8_t Binding,

@@ -1,9 +1,8 @@
 //===- InputChunks.h --------------------------------------------*- C++ -*-===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,17 +23,8 @@
 #include "Config.h"
 #include "InputFiles.h"
 #include "lld/Common/ErrorHandler.h"
+#include "lld/Common/LLVM.h"
 #include "llvm/Object/Wasm.h"
-
-using llvm::object::WasmSection;
-using llvm::object::WasmSegment;
-using llvm::wasm::WasmFunction;
-using llvm::wasm::WasmRelocation;
-using llvm::wasm::WasmSignature;
-
-namespace llvm {
-class raw_ostream;
-}
 
 namespace lld {
 namespace wasm {

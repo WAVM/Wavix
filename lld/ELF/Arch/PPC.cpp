@@ -1,9 +1,8 @@
 //===- PPC.cpp ------------------------------------------------------------===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -37,6 +36,7 @@ PPC::PPC() {
 RelExpr PPC::getRelExpr(RelType Type, const Symbol &S,
                         const uint8_t *Loc) const {
   switch (Type) {
+  case R_PPC_REL14:
   case R_PPC_REL24:
   case R_PPC_REL32:
     return R_PC;
@@ -61,6 +61,9 @@ void PPC::relocateOne(uint8_t *Loc, RelType Type, uint64_t Val) const {
   case R_PPC_ADDR32:
   case R_PPC_REL32:
     write32be(Loc, Val);
+    break;
+  case R_PPC_REL14:
+    write32be(Loc, read32be(Loc) | (Val & 0xFFFC));
     break;
   case R_PPC_PLTREL24:
   case R_PPC_REL24:

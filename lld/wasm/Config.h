@@ -1,9 +1,8 @@
 //===- Config.h -------------------------------------------------*- C++ -*-===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -27,11 +26,15 @@ struct Configuration {
   bool ExportDynamic;
   bool GcSections;
   bool ImportMemory;
+  bool SharedMemory;
+  bool SharedTable;
   bool ImportTable;
   bool MergeDataSegments;
+  bool Pie;
   bool PrintGcSections;
   bool Relocatable;
   bool SaveTemps;
+  bool Shared;
   bool StripAll;
   bool StripDebug;
   bool StackFirst;
@@ -50,6 +53,9 @@ struct Configuration {
   llvm::StringSet<> AllowUndefinedSymbols;
   std::vector<llvm::StringRef> SearchPaths;
   llvm::CachePruningPolicy ThinLTOCachePolicy;
+
+  // True if we are creating position-independent code.
+  bool Pic;
 };
 
 // The only instance of Configuration struct.

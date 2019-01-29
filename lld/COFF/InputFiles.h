@@ -1,9 +1,8 @@
 //===- InputFiles.h ---------------------------------------------*- C++ -*-===//
 //
-//                             The LLVM Linker
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -15,6 +14,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/DebugInfo/CodeView/TypeRecord.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/COFF.h"
@@ -122,8 +122,11 @@ public:
     return Symbols[SymbolIndex];
   }
 
-  // Returns the underying COFF file.
+  // Returns the underlying COFF file.
   COFFObjectFile *getCOFFObj() { return COFFObj.get(); }
+
+  // Whether the object was already merged into the final PDB or not
+  bool wasProcessedForPDB() const { return !!ModuleDBI; }
 
   static std::vector<ObjFile *> Instances;
 
@@ -146,6 +149,11 @@ public:
   llvm::pdb::DbiModuleDescriptorBuilder *ModuleDBI = nullptr;
 
   const coff_section *AddrsigSec = nullptr;
+
+  // When using Microsoft precompiled headers, this is the PCH's key.
+  // The same key is used by both the precompiled object, and objects using the
+  // precompiled object. Any difference indicates out-of-date objects.
+  llvm::Optional<uint32_t> PCHSignature;
 
 private:
   void initializeChunks();

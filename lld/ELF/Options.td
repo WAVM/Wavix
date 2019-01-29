@@ -74,6 +74,10 @@ defm as_needed: B<"as-needed",
 defm call_graph_ordering_file:
   Eq<"call-graph-ordering-file", "Layout sections to optimize the given callgraph">;
 
+defm call_graph_profile_sort: B<"call-graph-profile-sort",
+    "Reorder sections with call graph profile (default)",
+    "Do not reorder sections with call graph profile">;
+
 // -chroot doesn't have a help text because it is an internal option.
 def chroot: Separate<["--", "-"], "chroot">;
 
@@ -250,6 +254,9 @@ defm pack_dyn_relocs:
 defm use_android_relr_tags: B<"use-android-relr-tags",
     "Use SHT_ANDROID_RELR / DT_ANDROID_RELR* tags instead of SHT_RELR / DT_RELR*",
     "Use SHT_RELR / DT_RELR* tags (default)">;
+
+def pic_veneer: F<"pic-veneer">,
+  HelpText<"Always generate position independent thunks (veneers)">;
 
 defm pie: B<"pie",
     "Create a position independent executable",
@@ -454,6 +461,7 @@ def: F<"plugin-opt=debug-pass-manager">,
 def: F<"plugin-opt=disable-verify">, Alias<disable_verify>, HelpText<"Alias for -disable-verify">;
 def plugin_opt_dwo_dir_eq: J<"plugin-opt=dwo_dir=">,
   HelpText<"Directory to store .dwo files when LTO and debug fission are used">;
+def plugin_opt_emit_llvm: F<"plugin-opt=emit-llvm">;
 def: J<"plugin-opt=jobs=">, Alias<thinlto_jobs>, HelpText<"Alias for -thinlto-jobs">;
 def: J<"plugin-opt=lto-partitions=">, Alias<lto_partitions>, HelpText<"Alias for -lto-partitions">;
 def plugin_opt_mcpu_eq: J<"plugin-opt=mcpu=">;
