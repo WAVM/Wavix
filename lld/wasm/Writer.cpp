@@ -167,8 +167,11 @@ void Writer::createImportSection() {
       Import.Memory.Flags |= WASM_LIMITS_FLAG_HAS_MAX;
       Import.Memory.Maximum = MaxMemoryPages;
     }
-    if (Config->SharedMemory)
+    if (Config->SharedMemory) {
       Import.Memory.Flags |= WASM_LIMITS_FLAG_IS_SHARED;
+      Import.Memory.Flags |= WASM_LIMITS_FLAG_HAS_MAX;
+      Import.Memory.Maximum = 65536;
+    }
     writeImport(OS, Import);
   }
 
@@ -233,16 +236,20 @@ void Writer::createMemorySection() {
   raw_ostream &OS = Section->getStream();
 
   bool HasMax = MaxMemoryPages != 0;
+  uint32_t SharedMaxMemoryPages = MaxMemoryPages;
   writeUleb128(OS, 1, "memory count");
   unsigned Flags = 0;
+  if (Config->SharedMemory) {
+    Flags |= WASM_LIMITS_FLAG_IS_SHARED;
+    HasMax = true;
+    SharedMaxMemoryPages = 65536;
+  }
   if (HasMax)
     Flags |= WASM_LIMITS_FLAG_HAS_MAX;
-  if (Config->SharedMemory)
-    Flags |= WASM_LIMITS_FLAG_IS_SHARED;
   writeUleb128(OS, Flags, "memory limits flags");
   writeUleb128(OS, NumMemoryPages, "initial pages");
   if (HasMax)
-    writeUleb128(OS, MaxMemoryPages, "max pages");
+    writeUleb128(OS, SharedMaxMemoryPages, "max pages");
 }
 
 void Writer::createGlobalSection() {

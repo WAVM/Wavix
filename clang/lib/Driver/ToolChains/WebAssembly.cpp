@@ -92,6 +92,9 @@ WebAssembly::WebAssembly(const Driver &D, const llvm::Triple &Triple,
     // /lib to the search path. Disable multiarch in this case, to discourage
     // paths containing "unknown" from acquiring meanings.
     getFilePaths().push_back(getDriver().SysRoot + "/lib");
+  } else if (getTriple().getOS() == llvm::Triple::Wavix) {
+    // Omit the triple from the Wavix library path to get things working again.
+    getFilePaths().push_back(getDriver().SysRoot + "/lib");
   } else {
     const std::string MultiarchTriple =
         getMultiarchTriple(getDriver(), Triple, getDriver().SysRoot);

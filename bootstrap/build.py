@@ -259,8 +259,8 @@ def CompilerRT():
              '-DCMAKE_TOOLCHAIN_FILE=' +
              WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
-             '-DCMAKE_C_COMPILER_WORKS=ON',
-             '-DCMAKE_CXX_COMPILER_WORKS=1',
+             '-DCMAKE_C_COMPILER_WORKS=YES',
+             '-DCMAKE_CXX_COMPILER_WORKS=YES',
              '-DCOMPILER_RT_BAREMETAL_BUILD=On',
              '-DCOMPILER_RT_BUILD_XRAY=OFF',
              '-DCOMPILER_RT_INCLUDE_TESTS=OFF',
@@ -270,7 +270,7 @@ def CompilerRT():
              WindowsFSEscape(os.path.join(HOST_DIR, 'bin', 'llvm-config')),
              '-DCOMPILER_RT_OS_DIR=wavix',
              '-DCMAKE_INSTALL_PREFIX=' +
-             WindowsFSEscape(os.path.join(HOST_DIR, 'lib', 'clang', '8.0.0'))]
+             WindowsFSEscape(os.path.join(HOST_DIR, 'lib', 'clang', '9.0.0'))]
 
   proc.check_call(command, cwd=COMPILER_RT_OUT_DIR)
   proc.check_call([NINJA_BIN, 'install'], cwd=COMPILER_RT_OUT_DIR)
@@ -312,7 +312,8 @@ def LibCXXABI():
              '-DCMAKE_TOOLCHAIN_FILE=' +
              WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DCMAKE_EXPORT_COMPILE_COMMANDS=YES',
-             '-DCMAKE_CXX_COMPILER_WORKS=1',
+             '-DCMAKE_C_COMPILER_WORKS=YES',
+             '-DCMAKE_CXX_COMPILER_WORKS=YES',
              '-DLIBCXXABI_LIBCXX_PATH=' + LIBCXX_SRC_DIR,
              '-DLIBCXXABI_LIBCXX_INCLUDES=' + os.path.join(LIBCXX_SRC_DIR, 'include'),
              '-DLIBCXXABI_ENABLE_STATIC=ON',
@@ -351,7 +352,8 @@ def LibCXX():
              # This checks for working <atomic> header, which in turn errors
              # out on systems with threads disabled
              '-DLLVM_COMPILER_CHECKED=ON',
-             '-DCMAKE_CXX_COMPILER_WORKS=1',
+             '-DCMAKE_C_COMPILER_WORKS=YES',
+             '-DCMAKE_CXX_COMPILER_WORKS=YES',
              '-DLIBCXX_CXX_ABI=libcxxabi',
              '-DLIBCXX_CXX_ABI_INCLUDE_PATHS=' + WindowsFSEscape(os.path.join(LIBCXXABI_SRC_DIR, 'include')),
              '-DLIBCXX_CXX_ABI_LIBRARY_PATH=' + WindowsFSEscape(os.path.join(SYSROOT_DIR, 'lib')),

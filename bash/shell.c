@@ -97,7 +97,7 @@ extern struct passwd *getpwuid ();
 extern int errno;
 #endif
 
-#if defined (NO_MAIN_ENV_ARG)
+#if defined (NO_MAIN_ENV_ARG) || defined (__WAVIX__)
 extern char **environ;	/* used if no third argument to main() */
 #endif
 
@@ -353,7 +353,7 @@ _cygwin32_check_tmp ()
 }
 #endif /* __CYGWIN__ */
 
-#if defined (NO_MAIN_ENV_ARG)
+#if defined (NO_MAIN_ENV_ARG) || defined (__WAVIX__)
 /* systems without third argument to main() */
 int
 main (argc, argv)
@@ -373,7 +373,7 @@ main (argc, argv, env)
 #endif
   volatile int locally_skip_execution;
   volatile int arg_index, top_level_arg_index;
-#ifdef __OPENNT
+#if defined(NO_MAIN_ENV_ARG) || defined (__WAVIX__)
   char **env;
 
   env = environ;
