@@ -47,6 +47,7 @@ pr43008.c.o.wasm
 
 # Indirect call type mismatch
 pr67037.c.o.wasm
+alias-4.c.o.wasm
 
 # relies on handling a SIGFPE signal
 20101011-1.c.o.wasm O0
