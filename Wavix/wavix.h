@@ -105,20 +105,14 @@ namespace Wavix {
 	inline U32 coerce32bitAddress(Uptr address)
 	{
 		if(address >= UINT32_MAX)
-		{
-			Runtime::throwException(
-				Runtime::ExceptionTypes::integerDivideByZeroOrOverflow);
-		}
+		{ Runtime::throwException(Runtime::ExceptionTypes::integerDivideByZeroOrOverflow); }
 		return (U32)address;
 	}
 
 	inline I32 coerce32bitAddressSigned(Uptr address)
 	{
 		if(address >= INT32_MAX)
-		{
-			Runtime::throwException(
-				Runtime::ExceptionTypes::integerDivideByZeroOrOverflow);
-		}
+		{ Runtime::throwException(Runtime::ExceptionTypes::integerDivideByZeroOrOverflow); }
 		return (I32)address;
 	}
 

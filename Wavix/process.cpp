@@ -536,8 +536,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	traceSyscallf("wait4", "(%i,0x%08x,%i,0x%08x)", pid, statusAddress, options, rusageAddress);
 
-	if(rusageAddress != 0)
-	{ throwException(ExceptionTypes::calledUnimplementedIntrinsic); }
+	if(rusageAddress != 0) { throwException(ExceptionTypes::calledUnimplementedIntrinsic); }
 
 	if(pid < -1)
 	{
