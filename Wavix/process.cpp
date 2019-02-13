@@ -63,12 +63,20 @@ struct RootResolver : Resolver
 	}
 };
 
-struct MainThreadArgs
+struct ExitThreadException
 {
-	Thread* thread;
-	GCPointer<Function> startFunction;
-	GCPointer<Function> mainFunction;
+	I64 code;
 };
+
+FORCENOINLINE static void setCurrentThreadAndProcess(Thread* newThread)
+{
+	currentThread = newThread;
+	currentProcess = newThread->process;
+}
+
+FORCENOINLINE static Thread* getCurrentThread() { return currentThread; }
+
+FORCENOINLINE static Process* getCurrentProcess() { return currentProcess; }
 
 FORCENOINLINE static void signalProcessWaiters(Process* process)
 {
@@ -76,27 +84,40 @@ FORCENOINLINE static void signalProcessWaiters(Process* process)
 	for(Thread* waitingThread : process->waiters) { waitingThread->wakeEvent.signal(); }
 }
 
-static I64 mainThreadEntry(void* argsVoid)
+static I64 mainThreadEntry(void* threadVoid)
 {
-	auto args = (const MainThreadArgs*)argsVoid;
-	currentThread = args->thread;
-	currentProcess = args->thread->process;
+	setCurrentThreadAndProcess((Thread*)threadVoid);
 
-	// Call the module start function, if it has one.
-	if(args->startFunction)
-	{
-		// Validation should reject the module if the start function isn't ()->()
-		wavmAssert(getFunctionType(args->startFunction) == FunctionType());
-		invokeFunctionUnchecked(args->thread->context, args->startFunction, nullptr);
-	}
+	catchRuntimeExceptionsOnRelocatableStack(
+		[]() {
+			I64 result;
+			try
+			{
+				wavmAssert(getFunctionType(getCurrentThread()->startFunction) == FunctionType());
+				invokeFunctionUnchecked(
+					getCurrentThread()->context, getCurrentThread()->startFunction, nullptr);
 
-	// Call the main function.
-	I64 result = invokeFunctionUnchecked(args->thread->context, args->mainFunction, nullptr)->i64;
+				result = invokeFunctionUnchecked(
+							 getCurrentThread()->context, getCurrentThread()->mainFunction, nullptr)
+							 ->i64;
+			}
+			catch(ExitThreadException exitThreadException)
+			{
+				result = exitThreadException.code;
+			}
+
+			Lock<Platform::Mutex> resultLock(getCurrentThread()->resultMutex);
+			getCurrentThread()->result = result;
+		},
+		[](Exception* exception) {
+			Lock<Platform::Mutex> resultLock(getCurrentThread()->resultMutex);
+			getCurrentThread()->result = -1;
+		});
 
 	// Wake any threads waiting for this process to exit.
 	signalProcessWaiters(currentProcess);
 
-	return result;
+	return 0;
 }
 
 inline bool loadBinaryModuleFromFile(const char* wasmFilename, IR::Module& outModule)
@@ -186,19 +207,17 @@ ModuleInstance* loadModule(Process* process, const char* hostFilename)
 Thread* executeModule(Process* process, ModuleInstance* moduleInstance)
 {
 	// Look up the module's start, and main functions.
-	MainThreadArgs* mainThreadArgs = new MainThreadArgs;
-	mainThreadArgs->startFunction = getStartFunction(moduleInstance);
-	mainThreadArgs->mainFunction = asFunctionNullable(getInstanceExport(moduleInstance, "_start"));
-	;
+	Function* startFunction = getStartFunction(moduleInstance);
+	Function* mainFunction = asFunctionNullable(getInstanceExport(moduleInstance, "_start"));
 
 	// Validate that the module exported a main function, and that it is the expected type.
-	if(!mainThreadArgs->mainFunction)
+	if(!mainFunction)
 	{
 		Log::printf(Log::debug, "Module does not export _start function");
 		return nullptr;
 	}
 
-	FunctionType mainFunctionType = getFunctionType(mainThreadArgs->mainFunction);
+	FunctionType mainFunctionType = getFunctionType(mainFunction);
 	if(mainFunctionType != FunctionType())
 	{
 		Log::printf(Log::debug,
@@ -209,15 +228,14 @@ Thread* executeModule(Process* process, ModuleInstance* moduleInstance)
 
 	// Create the context and Wavix Thread object for the main thread.
 	Context* mainContext = Runtime::createContext(process->compartment);
-	Thread* mainThread = new Thread(process, mainContext);
-	mainThreadArgs->thread = mainThread;
+	Thread* mainThread = new Thread(process, mainContext, startFunction, mainFunction);
 
 	// Start the process's main thread.
 	enum
 	{
 		mainThreadNumStackBytes = 1 * 1024 * 1024
 	};
-	Platform::createThread(mainThreadNumStackBytes, &mainThreadEntry, mainThreadArgs);
+	Platform::createThread(mainThreadNumStackBytes, &mainThreadEntry, mainThread);
 
 	return mainThread;
 }
@@ -265,7 +283,8 @@ Process* Wavix::spawnProcess(Process* parent,
 
 	// Get the module's memory and table.
 	process->memory = asMemoryNullable(getInstanceExport(moduleInstance, "__memory"));
-	process->table = asTableNullable(getInstanceExport(moduleInstance, "__indirect_function_table"));
+	process->table
+		= asTableNullable(getInstanceExport(moduleInstance, "__indirect_function_table"));
 
 	if(!process->memory || !process->table) { return nullptr; }
 
@@ -285,7 +304,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_exit", I32, __syscall_exit, I32 exit
 	// Wake any threads waiting for this process to exit.
 	signalProcessWaiters(currentProcess);
 
-	Platform::exitThread(exitCode);
+	throw ExitThreadException{exitCode};
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_exit_group", I32, __syscall_exit_group, I32 exitCode)
@@ -295,13 +314,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_exit_group", I32, __syscall_exit_gro
 	// Wake any threads waiting for this process to exit.
 	signalProcessWaiters(currentProcess);
 
-	Platform::exitThread(exitCode);
-}
-
-FORCENOINLINE static void setCurrentThreadAndProcess(Thread* newThread)
-{
-	currentThread = newThread;
-	currentProcess = newThread->process;
+	throw ExitThreadException{exitCode};
 }
 
 DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
@@ -362,7 +375,10 @@ DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 	// Create a new Wavix Thread with a clone of the original's runtime context.
 	auto newContext
 		= cloneContext(getContextFromRuntimeData(contextRuntimeData), newProcess->compartment);
-	Thread* newThread = new Thread(newProcess, newContext);
+	Thread* newThread = new Thread(newProcess,
+								   newContext,
+								   getCurrentThread()->startFunction,
+								   getCurrentThread()->mainFunction);
 	newProcess->threads.push_back(newThread);
 
 	// Fork the current platform thread.
@@ -460,7 +476,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	}
 
 	// Exit the calling thread.
-	Platform::exitThread(0);
+	throw ExitThreadException{0};
 
 	Errors::unreachable();
 }
@@ -468,7 +484,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_kill", I32, __syscall_kill, I32 a, I32 b)
 {
 	traceSyscallf("kill", "(%i,%i)", a, b);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_getpid", I32, __syscall_getpid, I32 dummy)
@@ -496,7 +512,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32 c)
 {
 	traceSyscallf("sched_getaffinity", "(%i,%i,%i)", a, b, c);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 #define WAVIX_WNOHANG 1
@@ -520,7 +536,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	traceSyscallf("wait4", "(%i,0x%08x,%i,0x%08x)", pid, statusAddress, options, rusageAddress);
 
-	if(rusageAddress != 0) { throwException(Exception::calledUnimplementedIntrinsicType); }
+	if(rusageAddress != 0)
+	{ createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic); }
 
 	if(pid < -1)
 	{
@@ -575,7 +592,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_gettid", I32, __syscall_gettid, I32)
 {
 	traceSyscallf("gettid", "()");
-	// throwException(Exception::calledUnimplementedIntrinsicType);
+	// createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 	return 1;
 }
 
@@ -591,7 +608,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	// Wake any threads waiting for this process to exit.
 	signalProcessWaiters(currentProcess);
 
-	Platform::exitThread(-1);
+	throw ExitThreadException{-1};
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,

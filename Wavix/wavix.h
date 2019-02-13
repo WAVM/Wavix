@@ -11,6 +11,7 @@
 #include "WAVM/Logging/Logging.h"
 #include "WAVM/Platform/Diagnostics.h"
 #include "WAVM/Platform/Event.h"
+#include "WAVM/Platform/Mutex.h"
 #include "WAVM/Runtime/Intrinsics.h"
 #include "WAVM/Runtime/Runtime.h"
 
@@ -32,11 +33,22 @@ namespace Wavix {
 	{
 		Process* process;
 		Runtime::GCPointer<Runtime::Context> context;
+		Runtime::GCPointer<Runtime::Function> startFunction;
+		Runtime::GCPointer<Runtime::Function> mainFunction;
+
+		Platform::Mutex resultMutex;
+		I64 result = 0;
 
 		Platform::Event wakeEvent;
 
-		Thread(Process* inProcess, Runtime::Context* inContext)
-		: process(inProcess), context(inContext)
+		Thread(Process* inProcess,
+			   Runtime::Context* inContext,
+			   Runtime::Function* inStartFunction,
+			   Runtime::Function* inMainFunction)
+		: process(inProcess)
+		, context(inContext)
+		, startFunction(inStartFunction)
+		, mainFunction(inMainFunction)
 		{
 		}
 	};
@@ -93,14 +105,20 @@ namespace Wavix {
 	inline U32 coerce32bitAddress(Uptr address)
 	{
 		if(address >= UINT32_MAX)
-		{ Runtime::throwException(Runtime::Exception::integerDivideByZeroOrOverflowType); }
+		{
+			Runtime::createAndThrowException(
+				Runtime::ExceptionTypes::integerDivideByZeroOrOverflow);
+		}
 		return (U32)address;
 	}
-	
+
 	inline I32 coerce32bitAddressSigned(Uptr address)
 	{
 		if(address >= INT32_MAX)
-		{ Runtime::throwException(Runtime::Exception::integerDivideByZeroOrOverflowType); }
+		{
+			Runtime::createAndThrowException(
+				Runtime::ExceptionTypes::integerDivideByZeroOrOverflow);
+		}
 		return (I32)address;
 	}
 

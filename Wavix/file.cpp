@@ -223,13 +223,13 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  U32 mode)
 {
 	traceSyscallf("openat", "");
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_creat", I32, __syscall_creat, U32 pathAddress, U32 mode)
 {
 	traceSyscallf("creat", "");
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_close", I32, __syscall_close, I32 fd)
@@ -362,7 +362,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	if(!validateFD(fd)) { return -1; }
 
 	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { throwException(Exception::calledUnimplementedIntrinsicType); }
+	if(!platformFile) { createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic); }
 
 	if(isTracingSyscalls) { Log::printf(Log::debug, "IOVs:\n"); }
 
@@ -412,7 +412,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	if(!validateFD(fd)) { return -1; }
 
 	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { throwException(Exception::calledUnimplementedIntrinsicType); }
+	if(!platformFile) { createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic); }
 
 	if(isTracingSyscalls) { Log::printf(Log::debug, "IOVs:\n"); }
 
@@ -448,7 +448,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_fsync", I32, __syscall_fsync, I32 fd
 	if(!validateFD(fd)) { return -1; }
 
 	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { throwException(Exception::calledUnimplementedIntrinsicType); }
+	if(!platformFile) { createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic); }
 
 	Platform::flushFileWrites(platformFile);
 
@@ -464,7 +464,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_fdatasync", I32, __syscall_fdatasync
 	if(!validateFD(fd)) { return -1; }
 
 	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { throwException(Exception::calledUnimplementedIntrinsicType); }
+	if(!platformFile) { createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic); }
 
 	Platform::flushFileWrites(platformFile);
 
@@ -516,7 +516,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	case WAVIX_F_GETFL: return 0;
 	case WAVIX_F_SETFL: return 0;
 	case WAVIX_F_SETFD: return 0;
-	default: throwException(Exception::calledUnimplementedIntrinsicType);
+	default: createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 	}
 }
 
@@ -638,7 +638,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_unlink", I32, __syscall_unlink, I32 a)
 {
 	traceSyscallf("unlink", "(%i)", a);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_chdir", I32, __syscall_chdir, U32 pathAddress)
@@ -661,19 +661,19 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_chdir", I32, __syscall_chdir, U32 pa
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_access", I32, __syscall_access, I32 a, I32 b)
 {
 	traceSyscallf("access", "(%i,%i)", a, b);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_dup", I32, __syscall_dup, I32 a)
 {
 	traceSyscallf("dup", "(%i)", a);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_dup2", I32, __syscall_dup2, I32 a, I32 b)
 {
 	traceSyscallf("dup2", "(%i,%i)", a, b);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
@@ -693,26 +693,26 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	Path path;
 	if(!parsePath(pathString, path)) { return -1; }
 
-	// throwException(Exception::calledUnimplementedIntrinsicType);
+	// createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 	return -1;
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_umask", I32, __syscall_umask, I32 a)
 {
 	traceSyscallf("umask", "(%i)", a);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_rename", I32, __syscall_rename, I32 a, I32 b)
 {
 	traceSyscallf("rename", "(%i,%i)", a, b);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_chown32", I32, __syscall_chown32, I32 a, I32 b, I32 c)
 {
 	traceSyscallf("chown32", "(%i,%i,%i)", a, b, c);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
@@ -724,19 +724,19 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32 c)
 {
 	traceSyscallf("getdents64", "(%i,%i,%i)", a, b, c);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_pipe", I32, __syscall_pipe, I32 a)
 {
 	traceSyscallf("pipe", "(%i)", a);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_poll", I32, __syscall_poll, I32 a, I32 b, I32 c)
 {
 	traceSyscallf("poll", "(%i,%i,%i)", a, b, c);
-	throwException(Exception::calledUnimplementedIntrinsicType);
+	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
@@ -751,7 +751,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32 f)
 {
 	traceSyscallf("pselect", "(%i,0x%08x,0x%08x,0x%08x,0x%08x,0x%08x)", a, b, c, d, e, f);
-	// throwException(Exception::calledUnimplementedIntrinsicType);
+	// createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 	return 0;
 }
 
@@ -766,7 +766,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32 e)
 {
 	traceSyscallf("_newselect", "(%i,0x%08x,0x%08x,0x%08x,0x%08x)", a, b, c, d, e);
-	// throwException(Exception::calledUnimplementedIntrinsicType);
+	// createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
 	return 0;
 }
 
