@@ -106,7 +106,7 @@ namespace Wavix {
 	{
 		if(address >= UINT32_MAX)
 		{
-			Runtime::createAndThrowException(
+			Runtime::throwException(
 				Runtime::ExceptionTypes::integerDivideByZeroOrOverflow);
 		}
 		return (U32)address;
@@ -116,7 +116,7 @@ namespace Wavix {
 	{
 		if(address >= INT32_MAX)
 		{
-			Runtime::createAndThrowException(
+			Runtime::throwException(
 				Runtime::ExceptionTypes::integerDivideByZeroOrOverflow);
 		}
 		return (I32)address;

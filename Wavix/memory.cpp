@@ -37,7 +37,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	const Uptr numPages = (Uptr(numBytes) + IR::numBytesPerPage - 1) / IR::numBytesPerPage;
 
-	if(address != 0 || fd != -1) { createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic); }
+	if(address != 0 || fd != -1) { throwException(ExceptionTypes::calledUnimplementedIntrinsic); }
 
 	Memory* memory = currentThread->process->memory;
 	Iptr basePageIndex = growMemory(memory, numPages);
@@ -148,7 +148,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	}
 	else
 	{
-		createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
+		throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 	}
 }
 
@@ -157,7 +157,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_brk", I32, __syscall_brk, U32 addres
 	Memory* memory = currentThread->process->memory;
 
 	traceSyscallf("brk", "(address=0x%08x)", address);
-	// createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
+	// throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 
 	return coerce32bitAddress(getMemoryNumPages(memory));
 }

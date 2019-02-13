@@ -484,7 +484,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_kill", I32, __syscall_kill, I32 a, I32 b)
 {
 	traceSyscallf("kill", "(%i,%i)", a, b);
-	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
+	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_getpid", I32, __syscall_getpid, I32 dummy)
@@ -512,7 +512,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32 c)
 {
 	traceSyscallf("sched_getaffinity", "(%i,%i,%i)", a, b, c);
-	createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
+	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 #define WAVIX_WNOHANG 1
@@ -537,7 +537,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	traceSyscallf("wait4", "(%i,0x%08x,%i,0x%08x)", pid, statusAddress, options, rusageAddress);
 
 	if(rusageAddress != 0)
-	{ createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic); }
+	{ throwException(ExceptionTypes::calledUnimplementedIntrinsic); }
 
 	if(pid < -1)
 	{
@@ -592,7 +592,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_gettid", I32, __syscall_gettid, I32)
 {
 	traceSyscallf("gettid", "()");
-	// createAndThrowException(ExceptionTypes::calledUnimplementedIntrinsic);
+	// throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 	return 1;
 }
 
