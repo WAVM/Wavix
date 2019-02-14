@@ -120,15 +120,17 @@ namespace Wavix {
 	{
 		// Validate the path name and make a local copy of it.
 		std::string pathString;
-		while(true)
-		{
-			const char c = Runtime::memoryRef<char>(memory, stringAddress + pathString.size());
-			if(c == 0) { break; }
-			else
+		Runtime::unwindSignalsAsExceptions([&] {
+			while(true)
 			{
-				pathString += c;
-			}
-		};
+				const char c = Runtime::memoryRef<char>(memory, stringAddress + pathString.size());
+				if(c == 0) { break; }
+				else
+				{
+					pathString += c;
+				}
+			};
+		});
 
 		return pathString;
 	}

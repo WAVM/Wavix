@@ -569,8 +569,10 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	Path path;
 	if(!parsePath(pathString, path)) { return -1; }
 
-	wavix_stat& result = memoryRef<wavix_stat>(memory, resultAddress);
-	memset(&result, 0, sizeof(wavix_stat));
+	unwindSignalsAsExceptions([=] {
+		wavix_stat& result = memoryRef<wavix_stat>(memory, resultAddress);
+		memset(&result, 0, sizeof(wavix_stat));
+	});
 
 	return 0;
 }
@@ -591,8 +593,10 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	if(!parsePath(pathString, path)) { return -1; }
 
-	wavix_stat& result = memoryRef<wavix_stat>(memory, resultAddress);
-	memset(&result, 0, sizeof(wavix_stat));
+	unwindSignalsAsExceptions([=] {
+		wavix_stat& result = memoryRef<wavix_stat>(memory, resultAddress);
+		memset(&result, 0, sizeof(wavix_stat));
+	});
 
 	return 0;
 }

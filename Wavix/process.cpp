@@ -415,20 +415,23 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	std::string pathString = readUserString(memory, pathAddress);
 	std::vector<std::string> args;
 	std::vector<std::string> envs;
-	while(true)
-	{
-		const U32 argStringAddress = memoryRef<U32>(memory, argsAddress);
-		if(!argStringAddress) { break; }
-		args.push_back(readUserString(memory, argStringAddress));
-		argsAddress += sizeof(U32);
-	};
-	while(true)
-	{
-		const U32 envStringAddress = memoryRef<U32>(memory, envsAddress);
-		if(!envStringAddress) { break; }
-		envs.push_back(readUserString(memory, envStringAddress));
-		envsAddress += sizeof(U32);
-	};
+
+	Runtime::unwindSignalsAsExceptions([&] {
+		while(true)
+		{
+			const U32 argStringAddress = memoryRef<U32>(memory, argsAddress);
+			if(!argStringAddress) { break; }
+			args.push_back(readUserString(memory, argStringAddress));
+			argsAddress += sizeof(U32);
+		};
+		while(true)
+		{
+			const U32 envStringAddress = memoryRef<U32>(memory, envsAddress);
+			if(!envStringAddress) { break; }
+			envs.push_back(readUserString(memory, envStringAddress));
+			envsAddress += sizeof(U32);
+		};
+	});
 
 	if(isTracingSyscalls)
 	{
@@ -583,7 +586,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 			if(waiterIt != child->waiters.end()) { child->waiters.erase(waiterIt); }
 		}
 
-		memoryRef<U32>(memory, statusAddress) = WAVIX_WEXITED;
+		unwindSignalsAsExceptions([=] { memoryRef<U32>(memory, statusAddress) = WAVIX_WEXITED; });
 		return pid == -1 ? 1 : pid;
 	}
 }
