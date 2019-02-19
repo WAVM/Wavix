@@ -16,4 +16,7 @@ if(MSVC)
 else()
 	# Disable zero-length printf format string warning.
 	target_compile_options(wavix PRIVATE "-Wno-format-zero-length")
+
+	# Don't eliminate frame pointers to allow fast call stack unwinding and sanitizer-safe thread forking.
+	target_compile_options(${TARGET_NAME} PRIVATE "-fno-omit-frame-pointer")
 endif()
