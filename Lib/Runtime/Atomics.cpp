@@ -94,24 +94,21 @@ template<typename Value> static void atomicStore(Value* valuePointer, Value newV
 }
 
 // Decodes a floating-point timeout value relative to startTime.
-static U64 getEndTimeFromTimeout(U64 startTime, F64 timeout)
+static U64 getEndTimeFromTimeout(U64 startTimeMicroseconds, I64 timeoutNanoseconds)
 {
-	const F64 timeoutMicroseconds = timeout * 1000.0;
-	U64 endTime = UINT64_MAX;
-	if(!std::isnan(timeoutMicroseconds) && std::isfinite(timeoutMicroseconds))
+	U64 endTimeMicroseconds = UINT64_MAX;
+	if(timeoutNanoseconds >= 0)
 	{
-		if(timeoutMicroseconds <= 0.0) { endTime = startTime; }
-		else if(timeoutMicroseconds <= F64(UINT64_MAX - 1))
-		{
-			endTime = startTime + U64(timeoutMicroseconds);
-			errorUnless(endTime >= startTime);
-		}
+		// Convert the timeout to microseconds, rounding up.
+		const U64 timeoutMicroseconds = (U64(timeoutNanoseconds) + 999) / 1000;
+
+		endTimeMicroseconds = startTimeMicroseconds + timeoutMicroseconds;
 	}
-	return endTime;
+	return endTimeMicroseconds;
 }
 
 template<typename Value>
-static U32 waitOnAddress(Value* valuePointer, Value expectedValue, F64 timeout)
+static U32 waitOnAddress(Value* valuePointer, Value expectedValue, I64 timeout)
 {
 	const U64 endTime = getEndTimeFromTimeout(Platform::getMonotonicClock(), timeout);
 
@@ -122,7 +119,14 @@ static U32 waitOnAddress(Value* valuePointer, Value expectedValue, F64 timeout)
 	// Lock the wait list, and check that *valuePointer is still what the caller expected it to be.
 	{
 		Lock<Platform::Mutex> waitListLock(waitList->mutex);
-		if(atomicLoad(valuePointer) != expectedValue)
+
+		// Use unwindSignalsAsExceptions to ensure that an access violation signal produced by the
+		// load will be thrown as a Runtime::Exception and unwind the stack (e.g. the locks).
+		Value value;
+		Runtime::unwindSignalsAsExceptions(
+			[valuePointer, &value] { value = atomicLoad(valuePointer); });
+
+		if(value != expectedValue)
 		{
 			// If *valuePointer wasn't the expected value, unlock the wait list and return.
 			waitListLock.unlock();
@@ -197,7 +201,7 @@ static U32 wakeAddress(void* pointer, U32 numToWake)
 	closeWaitList(address, waitList);
 
 	if(actualNumToWake > UINT32_MAX)
-	{ Runtime::throwException(Runtime::Exception::integerDivideByZeroOrOverflowType); }
+	{ throwException(ExceptionTypes::integerDivideByZeroOrOverflow); }
 	return U32(actualNumToWake);
 }
 
@@ -207,13 +211,13 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 						  misalignedAtomicTrap,
 						  U64 address)
 {
-	throwException(Exception::misalignedAtomicMemoryAccessType, {address});
+	throwException(ExceptionTypes::misalignedAtomicMemoryAccess, {address});
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
-						  "atomic_wake",
+						  "atomic_notify",
 						  I32,
-						  atomic_wake,
+						  atomic_notify,
 						  U32 address,
 						  I32 numToWake,
 						  Uptr memoryId)
@@ -223,7 +227,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 	// Validate that the address is within the memory's bounds.
 	const U64 memoryNumBytes = U64(memory->numPages) * IR::numBytesPerPage;
 	if(U64(address) + 4 > memoryNumBytes)
-	{ throwException(Exception::outOfBoundsMemoryAccessType, {memory, memoryNumBytes}); }
+	{ throwException(ExceptionTypes::outOfBoundsMemoryAccess, {memory, memoryNumBytes}); }
 
 	// The alignment check is done by the caller.
 	wavmAssert(!(address & 3));
@@ -237,7 +241,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 						  atomic_wait_I32,
 						  U32 address,
 						  I32 expectedValue,
-						  F64 timeout,
+						  I64 timeout,
 						  Uptr memoryId)
 {
 	Memory* memory = getMemoryFromRuntimeData(contextRuntimeData, memoryId);
@@ -256,7 +260,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 						  atomic_wait_i64,
 						  I32 address,
 						  I64 expectedValue,
-						  F64 timeout,
+						  I64 timeout,
 						  Uptr memoryId)
 {
 	Memory* memory = getMemoryFromRuntimeData(contextRuntimeData, memoryId);

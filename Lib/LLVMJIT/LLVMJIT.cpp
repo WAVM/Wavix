@@ -30,7 +30,7 @@ static HashMap<std::string, const char*> runtimeSymbolMap = {
 #ifdef _WIN32
 	// the LLVM X86 code generator calls __chkstk when allocating more than 4KB of stack space
 	{"__chkstk", "__chkstk"},
-	{"__C_specific_handler", "__C_specific_handler"},
+	{"__CxxFrameHandler3", "__CxxFrameHandler3"},
 #ifndef _WIN64
 	{"__aullrem", "_aullrem"},
 	{"__allrem", "_allrem"},
@@ -38,8 +38,8 @@ static HashMap<std::string, const char*> runtimeSymbolMap = {
 	{"__alldiv", "_alldiv"},
 #endif
 #else
-	{"__CxxFrameHandler3", "__CxxFrameHandler3"},
 	{"__cxa_begin_catch", "__cxa_begin_catch"},
+	{"__cxa_end_catch", "__cxa_end_catch"},
 	{"__gxx_personality_v0", "__gxx_personality_v0"},
 #endif
 #ifdef __arm__
@@ -97,18 +97,6 @@ LLVMContext::LLVMContext()
 	default: Errors::unreachable();
 	}
 
-	auto llvmExceptionRecordStructType = llvm::StructType::create({
-		i32Type,   // DWORD ExceptionCode
-		i32Type,   // DWORD ExceptionFlags
-		i8PtrType, // _EXCEPTION_RECORD* ExceptionRecord
-		i8PtrType, // PVOID ExceptionAddress
-		i32Type,   // DWORD NumParameters
-		llvm::ArrayType::get(i64Type,
-							 15) // ULONG_PTR ExceptionInformation[EXCEPTION_MAXIMUM_PARAMETERS]
-	});
-	exceptionPointersStructType
-		= llvm::StructType::create({llvmExceptionRecordStructType->getPointerTo(), i8PtrType});
-
 	anyrefType = llvm::StructType::create("Object", i8Type)->getPointerTo();
 
 	i8x16Type = llvm::VectorType::get(i8Type, 16);
@@ -126,7 +114,7 @@ LLVMContext::LLVMContext()
 	valueTypes[(Uptr)ValueType::f64] = f64Type;
 	valueTypes[(Uptr)ValueType::v128] = i64x2Type;
 	valueTypes[(Uptr)ValueType::anyref] = anyrefType;
-	valueTypes[(Uptr)ValueType::anyfunc] = anyrefType;
+	valueTypes[(Uptr)ValueType::funcref] = anyrefType;
 
 	// Create zero constants of each type.
 	typedZeroConstants[(Uptr)ValueType::none] = nullptr;
@@ -136,6 +124,6 @@ LLVMContext::LLVMContext()
 	typedZeroConstants[(Uptr)ValueType::f32] = emitLiteral(*this, (F32)0.0f);
 	typedZeroConstants[(Uptr)ValueType::f64] = emitLiteral(*this, (F64)0.0);
 	typedZeroConstants[(Uptr)ValueType::v128] = emitLiteral(*this, V128());
-	typedZeroConstants[(Uptr)ValueType::anyref] = typedZeroConstants[(Uptr)ValueType::anyfunc]
+	typedZeroConstants[(Uptr)ValueType::anyref] = typedZeroConstants[(Uptr)ValueType::funcref]
 		= typedZeroConstants[(Uptr)ValueType::nullref] = llvm::Constant::getNullValue(anyrefType);
 }

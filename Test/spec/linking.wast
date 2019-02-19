@@ -38,12 +38,12 @@
 
 (module $Mg
   (global $glob (export "glob") i32 (i32.const 42))
-  (func (export "get") (result i32) (get_global $glob))
+  (func (export "get") (result i32) (global.get $glob))
 
   ;; export mutable globals
   (global $mut_glob (export "mut_glob") (mut i32) (i32.const 142))
-  (func (export "get_mut") (result i32) (get_global $mut_glob))
-  (func (export "set_mut") (param i32) (set_global $mut_glob (get_local 0)))
+  (func (export "get_mut") (result i32) (global.get $mut_glob))
+  (func (export "set_mut") (param i32) (global.set $mut_glob (local.get 0)))
 )
 (register "Mg" $Mg)
 
@@ -57,7 +57,7 @@
   (export "Mg.glob" (global $x))
   (export "Mg.get" (func $f))
   (global $glob (export "glob") i32 (i32.const 43))
-  (func (export "get") (result i32) (get_global $glob))
+  (func (export "get") (result i32) (global.get $glob))
 
   (export "Mg.mut_glob" (global $mut_glob))
   (export "Mg.get_mut" (func $get_mut))
@@ -92,10 +92,10 @@
   "incompatible import type"
 )
 
+
 (module $Mref-ex
-  (global (export "g-const") anyfunc (ref.null))
-  ;; Mutable globals cannot be exported yet
-  ;; (global (export "g-var") (mut anyfunc) (ref.null))
+  (global (export "g-const") funcref (ref.null))
+  (global (export "g-var") (mut funcref) (ref.null))
 )
 (register "Mref-ex" $Mref-ex)
 
@@ -105,8 +105,9 @@
 
 (assert_unlinkable
   (module (global (import "Mref-ex" "g-var") (mut anyref)))
-  "type mismatch"
+  "incompatible import type"
 )
+
 
 ;; Tables
 
@@ -114,13 +115,13 @@
   (type (func (result i32)))
   (type (func))
 
-  (table (export "tab") 10 anyfunc)
+  (table (export "tab") 10 funcref)
   (elem (i32.const 2) $g $g $g $g)
   (func $g (result i32) (i32.const 4))
   (func (export "h") (result i32) (i32.const -4))
 
   (func (export "call") (param i32) (result i32)
-    (call_indirect (type 0) (get_local 0))
+    (call_indirect (type 0) (local.get 0))
   )
 )
 (register "Mt" $Mt)
@@ -132,15 +133,15 @@
   (func $f (import "Mt" "call") (param i32) (result i32))
   (func $h (import "Mt" "h") (result i32))
 
-  (table anyfunc (elem $g $g $g $h $f))
+  (table funcref (elem $g $g $g $h $f))
   (func $g (result i32) (i32.const 5))
 
   (export "Mt.call" (func $f))
   (func (export "call Mt.call") (param i32) (result i32)
-    (call $f (get_local 0))
+    (call $f (local.get 0))
   )
   (func (export "call") (param i32) (result i32)
-    (call_indirect (type 1) (get_local 0))
+    (call_indirect (type 1) (local.get 0))
   )
 )
 
@@ -171,12 +172,12 @@
   (type (func (result i32)))
 
   (func $h (import "Mt" "h") (result i32))
-  (table (import "Mt" "tab") 5 anyfunc)
+  (table (import "Mt" "tab") 5 funcref)
   (elem (i32.const 1) $i $h)
   (func $i (result i32) (i32.const 6))
 
   (func (export "call") (param i32) (result i32)
-    (call_indirect (type 0) (get_local 0))
+    (call_indirect (type 0) (local.get 0))
   )
 )
 
@@ -206,7 +207,7 @@
 (assert_trap (invoke $Ot "call" (i32.const 20)) "undefined")
 
 (module
-  (table (import "Mt" "tab") 0 anyfunc)
+  (table (import "Mt" "tab") 0 funcref)
   (elem (i32.const 9) $f)
   (func $f)
 )
@@ -215,13 +216,13 @@
 (register "G1" $G1)
 (module $G2
   (global (import "G1" "g") i32)
-  (global (export "g") i32 (get_global 0))
+  (global (export "g") i32 (global.get 0))
 )
 (assert_return (get $G2 "g") (i32.const 5))
 
 (assert_unlinkable
   (module
-    (table (import "Mt" "tab") 0 anyfunc)
+    (table (import "Mt" "tab") 0 funcref)
     (elem (i32.const 10) $f)
     (func $f)
   )
@@ -230,7 +231,7 @@
 
 (assert_unlinkable
   (module
-    (table (import "Mt" "tab") 10 anyfunc)
+    (table (import "Mt" "tab") 10 funcref)
     (memory (import "Mt" "mem") 1)  ;; does not exist
     (func $f (result i32) (i32.const 0))
     (elem (i32.const 7) $f)
@@ -240,6 +241,28 @@
 )
 (assert_trap (invoke $Mt "call" (i32.const 7)) "uninitialized")
 
+(assert_unlinkable
+  (module
+    (table (import "Mt" "tab") 10 funcref)
+    (func $f (result i32) (i32.const 0))
+    (elem (i32.const 7) $f)
+    (elem (i32.const 12) $f)  ;; out of bounds
+  )
+  "elements segment does not fit"
+)
+
+(assert_unlinkable
+  (module
+    (table (import "Mt" "tab") 10 funcref)
+    (func $f (result i32) (i32.const 0))
+    (elem (i32.const 7) $f)
+    (memory 1)
+    (data (i32.const 0x10000) "d") ;; out of bounds
+  )
+  "data segment does not fit"
+)
+
+
 ;; Memories
 
 (module $Mm
@@ -247,7 +270,7 @@
   (data (i32.const 10) "\00\01\02\03\04\05\06\07\08\09")
 
   (func (export "load") (param $a i32) (result i32)
-    (i32.load8_u (get_local 0))
+    (i32.load8_u (local.get 0))
   )
 )
 (register "Mm" $Mm)
@@ -260,7 +283,7 @@
 
   (export "Mm.load" (func $loadM))
   (func (export "load") (param $a i32) (result i32)
-    (i32.load8_u (get_local 0))
+    (i32.load8_u (local.get 0))
   )
 )
 
@@ -273,7 +296,7 @@
   (data (i32.const 5) "\a0\a1\a2\a3\a4\a5\a6\a7")
 
   (func (export "load") (param $a i32) (result i32)
-    (i32.load8_u (get_local 0))
+    (i32.load8_u (local.get 0))
   )
 )
 
@@ -299,7 +322,7 @@
   (memory (import "Mm" "mem") 1 8)
 
   (func (export "grow") (param $a i32) (result i32)
-    (memory.grow (get_local 0))
+    (memory.grow (local.get 0))
   )
 )
 
@@ -316,9 +339,29 @@
   (module
     (func $host (import "spectest" "print"))
     (memory (import "Mm" "mem") 1)
-    (table (import "Mm" "tab") 0 anyfunc)  ;; does not exist
+    (table (import "Mm" "tab") 0 funcref)  ;; does not exist
     (data (i32.const 0) "abc")
   )
   "unknown import"
 )
 (assert_return (invoke $Mm "load" (i32.const 0)) (i32.const 0))
+
+(assert_unlinkable
+  (module
+    (memory (import "Mm" "mem") 1)
+    (data (i32.const 0) "abc")
+    (data (i32.const 0x50000) "d") ;; out of bounds
+  )
+  "data segment does not fit"
+)
+
+(assert_unlinkable
+  (module
+    (memory (import "Mm" "mem") 1)
+    (data (i32.const 0) "abc")
+    (table 0 funcref)
+    (func)
+    (elem (i32.const 0) 0) ;; out of bounds
+  )
+  "elements segment does not fit"
+)

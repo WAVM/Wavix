@@ -57,6 +57,11 @@ static std::string escapeString(const char* string, Uptr numChars)
 	return result;
 }
 
+static std::string escapeString(const std::string& string)
+{
+	return escapeString(string.c_str(), string.size());
+}
+
 static std::string escapeName(const std::string& name)
 {
 	std::string escapedName;
@@ -85,6 +90,15 @@ static std::string escapeName(const std::string& name)
 	}
 
 	return escapedName;
+}
+
+static bool hasNonNameChars(const std::string& name)
+{
+	for(char c : name)
+	{
+		if(!isNameChar(c)) { return true; }
+	}
+	return false;
 }
 
 static std::string expandIndentation(std::string&& inString, U8 spacesPerIndentLevel = 2)
@@ -184,7 +198,7 @@ static void print(std::string& string, ReferenceType type)
 {
 	switch(type)
 	{
-	case ReferenceType::anyfunc: string += "anyfunc"; break;
+	case ReferenceType::funcref: string += "funcref"; break;
 	case ReferenceType::anyref: string += "anyref"; break;
 	default: Errors::unreachable();
 	}
@@ -250,18 +264,9 @@ struct NameScope
 		}
 
 		if(!allowQuotedNames) { name = escapeName(name); }
-		else
+		else if(hasNonNameChars(name))
 		{
-			bool needsQuotes = false;
-			for(char c : name)
-			{
-				if(!isNameChar(c))
-				{
-					needsQuotes = true;
-					break;
-				}
-			}
-			if(needsQuotes) { name = '\"' + escapeString(name.data(), name.size()) + '\"'; }
+			name = '\"' + escapeString(name.data(), name.size()) + '\"';
 		}
 
 		name = sigil + name;
@@ -328,10 +333,13 @@ struct ModulePrintContext
 		case InitializerExpression::Type::v128_const:
 			string += "(v128.const " + asString(expression.v128) + ')';
 			break;
-		case InitializerExpression::Type::get_global:
-			string += "(get_global " + names.globals[expression.globalRef] + ')';
+		case InitializerExpression::Type::global_get:
+			string += "(global.get " + names.globals[expression.ref] + ')';
 			break;
 		case InitializerExpression::Type::ref_null: string += "(ref.null)"; break;
+		case InitializerExpression::Type::ref_func:
+			string += "(ref.func " + names.functions[expression.ref].name + ')';
+			break;
 		default: Errors::unreachable();
 		};
 	}
@@ -454,26 +462,26 @@ struct FunctionPrintContext
 
 	void select(NoImm) { string += "\nselect"; }
 
-	void get_local(GetOrSetVariableImm<false> imm)
+	void local_get(GetOrSetVariableImm<false> imm)
 	{
-		string += "\nget_local " + localNames[imm.variableIndex];
+		string += "\nlocal.get " + localNames[imm.variableIndex];
 	}
-	void set_local(GetOrSetVariableImm<false> imm)
+	void local_set(GetOrSetVariableImm<false> imm)
 	{
-		string += "\nset_local " + localNames[imm.variableIndex];
+		string += "\nlocal.set " + localNames[imm.variableIndex];
 	}
-	void tee_local(GetOrSetVariableImm<false> imm)
+	void local_tee(GetOrSetVariableImm<false> imm)
 	{
-		string += "\ntee_local " + localNames[imm.variableIndex];
+		string += "\nlocal.tee " + localNames[imm.variableIndex];
 	}
 
-	void get_global(GetOrSetVariableImm<true> imm)
+	void global_get(GetOrSetVariableImm<true> imm)
 	{
-		string += "\nget_global " + moduleContext.names.globals[imm.variableIndex];
+		string += "\nglobal.get " + moduleContext.names.globals[imm.variableIndex];
 	}
-	void set_global(GetOrSetVariableImm<true> imm)
+	void global_set(GetOrSetVariableImm<true> imm)
 	{
-		string += "\nset_global " + moduleContext.names.globals[imm.variableIndex];
+		string += "\nglobal.set " + moduleContext.names.globals[imm.variableIndex];
 	}
 
 	void table_get(TableImm imm)
@@ -492,23 +500,10 @@ struct FunctionPrintContext
 
 	void rethrow(RethrowImm imm)
 	{
-		string += "\nrethrow ";
+		wavmAssert(controlStack[controlStack.size() - 1 - imm.catchDepth].type
+				   == ControlContext::Type::catch_);
 
-		Uptr catchDepth = 0;
-		for(Uptr targetDepth = controlStack.size() - 1; targetDepth > 0; --targetDepth)
-		{
-			if(controlStack[targetDepth].type == ControlContext::Type::catch_)
-			{
-				if(catchDepth == imm.catchDepth)
-				{
-					string += getBranchTargetId(targetDepth);
-					return;
-				}
-				++catchDepth;
-			}
-		}
-
-		Errors::unreachable();
+		string += "\nrethrow " + getBranchTargetId(imm.catchDepth);
 	}
 
 	void call(FunctionImm imm)
@@ -1079,14 +1074,14 @@ void ModulePrintContext::printLinkingSection(const IR::UserSection& linkingSecti
 					std::string segmentName;
 					serialize(substream, segmentName);
 
-					Uptr alignment = 0;
+					Uptr alignmentLog2 = 0;
 					Uptr flags = 0;
-					serializeVarUInt32(substream, alignment);
+					serializeVarUInt32(substream, alignmentLog2);
 					serializeVarUInt32(substream, flags);
 
-					linkingSectionString += "\n;; ";
-					linkingSectionString += segmentName;
-					linkingSectionString += " alignment=" + std::to_string(1 << alignment);
+					linkingSectionString += "\n;; \"";
+					linkingSectionString += escapeString(segmentName);
+					linkingSectionString += "\" alignment=2^" + std::to_string(alignmentLog2);
 					linkingSectionString += " flags=" + std::to_string(flags);
 				}
 
@@ -1106,13 +1101,13 @@ void ModulePrintContext::printLinkingSection(const IR::UserSection& linkingSecti
 					Uptr functionIndex = 0;
 					serializeVarUInt32(substream, functionIndex);
 
-					linkingSectionString += ";; \n";
+					linkingSectionString += "\n;; ";
 					if(functionIndex < names.functions.size())
-					{ linkingSectionString += ' ' + names.functions[functionIndex].name; }
+					{ linkingSectionString += names.functions[functionIndex].name; }
 					else
 					{
 						linkingSectionString
-							+= " <invalid function index " + std::to_string(functionIndex) + ">";
+							+= "<invalid function index " + std::to_string(functionIndex) + ">";
 					}
 				}
 
@@ -1135,8 +1130,9 @@ void ModulePrintContext::printLinkingSection(const IR::UserSection& linkingSecti
 					U32 flags = 0;
 					serializeVarUInt32(substream, flags);
 
-					linkingSectionString += "\n;; ";
-					linkingSectionString += comdatName;
+					linkingSectionString += "\n;; \"";
+					linkingSectionString += escapeString(comdatName);
+					linkingSectionString += '\"';
 
 					if(flags) { linkingSectionString += " OtherFlags=" + std::to_string(flags); }
 
@@ -1272,13 +1268,15 @@ void ModulePrintContext::printLinkingSection(const IR::UserSection& linkingSecti
 						break;
 					}
 					default:
-						linkingSectionString += "\nUnknown symbol kind: " + std::to_string(kind);
+						linkingSectionString += "\n;; Unknown symbol kind: " + std::to_string(kind);
 						throw FatalSerializationException("Unknown symbol kind");
 					};
 
 					linkingSectionString += "\n;; ";
 					linkingSectionString += kindName;
-					linkingSectionString += symbolName;
+					linkingSectionString += '\"';
+					linkingSectionString += escapeString(symbolName);
+					linkingSectionString += '\"';
 
 					switch(SymbolKind(kind))
 					{
@@ -1328,8 +1326,8 @@ void ModulePrintContext::printLinkingSection(const IR::UserSection& linkingSecti
 				break;
 			}
 			default:
-				linkingSectionString
-					+= "\nUnknown WASM linking subsection type: " + std::to_string(subsectionType);
+				linkingSectionString += "\n;; Unknown WASM linking subsection type: "
+										+ std::to_string(subsectionType);
 				throw FatalSerializationException("Unknown linking subsection type");
 				break;
 			};

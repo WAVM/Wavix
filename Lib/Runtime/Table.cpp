@@ -265,7 +265,7 @@ static Object* setTableElementNonNull(Table* table, Uptr index, Object* object)
 
 	// Verify the index is within the table's bounds.
 	if(index >= table->numReservedElements)
-	{ throwException(Exception::outOfBoundsTableAccessType, {table, U64(index)}); }
+	{ throwException(ExceptionTypes::outOfBoundsTableAccess, {table, U64(index)}); }
 
 	// Use a saturated index to access the table data to ensure that it's harmless for the CPU to
 	// speculate past the above bounds check.
@@ -281,7 +281,7 @@ static Object* setTableElementNonNull(Table* table, Uptr index, Object* object)
 	while(true)
 	{
 		if(biasedTableElementValueToObject(oldBiasedValue) == getOutOfBoundsElement())
-		{ throwException(Exception::outOfBoundsTableAccessType, {table, U64(index)}); }
+		{ throwException(ExceptionTypes::outOfBoundsTableAccess, {table, U64(index)}); }
 		if(table->elements[saturatedIndex].biasedValue.compare_exchange_weak(
 			   oldBiasedValue, biasedValue, std::memory_order_acq_rel))
 		{ break; }
@@ -294,7 +294,7 @@ static Object* getTableElementNonNull(Table* table, Uptr index)
 {
 	// Verify the index is within the table's bounds.
 	if(index >= table->numReservedElements)
-	{ throwException(Exception::outOfBoundsTableAccessType, {table, U64(index)}); }
+	{ throwException(ExceptionTypes::outOfBoundsTableAccess, {table, U64(index)}); }
 
 	// Use a saturated index to access the table data to ensure that it's harmless for the CPU to
 	// speculate past the above bounds check.
@@ -308,7 +308,7 @@ static Object* getTableElementNonNull(Table* table, Uptr index)
 
 	// If the element was an out-of-bounds sentinel value, throw an out-of-bounds exception.
 	if(object == getOutOfBoundsElement())
-	{ throwException(Exception::outOfBoundsTableAccessType, {table, U64(index)}); }
+	{ throwException(ExceptionTypes::outOfBoundsTableAccess, {table, U64(index)}); }
 
 	wavmAssert(object);
 	return object;
@@ -322,7 +322,10 @@ Object* Runtime::setTableElement(Table* table, Uptr index, Object* newValue)
 	if(!newValue) { newValue = getUninitializedElement(); }
 
 	// Write the table element.
-	Object* oldObject = setTableElementNonNull(table, index, newValue);
+	Object* oldObject = nullptr;
+	Runtime::unwindSignalsAsExceptions([table, index, newValue, &oldObject] {
+		oldObject = setTableElementNonNull(table, index, newValue);
+	});
 
 	// If the old table element was the uninitialized sentinel value, return null.
 	return oldObject == getUninitializedElement() ? nullptr : oldObject;
@@ -330,7 +333,9 @@ Object* Runtime::setTableElement(Table* table, Uptr index, Object* newValue)
 
 Object* Runtime::getTableElement(Table* table, Uptr index)
 {
-	Object* object = getTableElementNonNull(table, index);
+	Object* object = nullptr;
+	Runtime::unwindSignalsAsExceptions(
+		[table, index, &object] { object = getTableElementNonNull(table, index); });
 
 	// If the old table element was the uninitialized sentinel value, return null.
 	return object == getUninitializedElement() ? nullptr : object;
@@ -425,18 +430,11 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 	Lock<Platform::Mutex> passiveElemSegmentsLock(moduleInstance->passiveElemSegmentsMutex);
 
 	if(!moduleInstance->passiveElemSegments.contains(elemSegmentIndex))
-	{
-		passiveElemSegmentsLock.unlock();
-		throwException(Exception::invalidArgumentType);
-	}
+	{ throwException(ExceptionTypes::invalidArgument); }
 	else
 	{
-		// Copy the passive elem segment shared_ptr, and unlock the mutex. It's important to
-		// explicitly unlock the mutex before calling setTableElement, as setTableElement trigger a
-		// signal that will unwind the stack without calling the Lock destructor.
-		std::shared_ptr<const std::vector<Object*>> passiveElemSegmentObjects
+		const std::shared_ptr<const std::vector<Object*>>& passiveElemSegmentObjects
 			= moduleInstance->passiveElemSegments[elemSegmentIndex];
-		passiveElemSegmentsLock.unlock();
 
 		Table* table = getTableFromRuntimeData(contextRuntimeData, tableId);
 
@@ -446,7 +444,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 			const U64 destIndex = U64(destOffset) + index;
 			if(sourceIndex >= passiveElemSegmentObjects->size())
 			{
-				throwException(Exception::outOfBoundsElemSegmentAccessType,
+				throwException(ExceptionTypes::outOfBoundsElemSegmentAccess,
 							   {asObject(moduleInstance), U64(elemSegmentIndex), sourceIndex});
 			}
 
@@ -457,9 +455,9 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
-						  "table.drop",
+						  "elem.drop",
 						  void,
-						  table_drop,
+						  elem_drop,
 						  Uptr moduleInstanceId,
 						  Uptr elemSegmentIndex)
 {
@@ -468,10 +466,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 	Lock<Platform::Mutex> passiveElemSegmentsLock(moduleInstance->passiveElemSegmentsMutex);
 
 	if(!moduleInstance->passiveElemSegments.contains(elemSegmentIndex))
-	{
-		passiveElemSegmentsLock.unlock();
-		throwException(Exception::invalidArgumentType);
-	}
+	{ throwException(ExceptionTypes::invalidArgument); }
 	else
 	{
 		moduleInstance->passiveElemSegments.removeOrFail(elemSegmentIndex);
@@ -487,31 +482,35 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 						  U32 numElements,
 						  Uptr tableId)
 {
-	Table* table = getTableFromRuntimeData(contextRuntimeData, tableId);
+	Runtime::unwindSignalsAsExceptions([=] {
+		Table* table = getTableFromRuntimeData(contextRuntimeData, tableId);
 
-	if(sourceOffset != destOffset)
-	{
-		const Uptr numNonOverlappingElements
-			= sourceOffset < destOffset && U64(sourceOffset) + U64(numElements) > destOffset
-				  ? destOffset - sourceOffset
-				  : numElements;
-
-		// If the end of the source overlaps the beginning of the destination, copy those elements
-		// before they are overwritten by the second part of the copy below.
-		for(Uptr index = numNonOverlappingElements; index < numElements; ++index)
+		if(sourceOffset != destOffset)
 		{
-			setTableElementNonNull(table,
-								   U64(destOffset) + U64(index),
-								   getTableElementNonNull(table, U64(sourceOffset) + U64(index)));
-		}
+			const Uptr numNonOverlappingElements
+				= sourceOffset < destOffset && U64(sourceOffset) + U64(numElements) > destOffset
+					  ? destOffset - sourceOffset
+					  : numElements;
 
-		for(Uptr index = 0; index < numNonOverlappingElements; ++index)
-		{
-			setTableElementNonNull(table,
-								   U64(destOffset) + U64(index),
-								   getTableElementNonNull(table, U64(sourceOffset) + U64(index)));
+			// If the end of the source overlaps the beginning of the destination, copy those
+			// elements before they are overwritten by the second part of the copy below.
+			for(Uptr index = numNonOverlappingElements; index < numElements; ++index)
+			{
+				setTableElementNonNull(
+					table,
+					U64(destOffset) + U64(index),
+					getTableElementNonNull(table, U64(sourceOffset) + U64(index)));
+			}
+
+			for(Uptr index = 0; index < numNonOverlappingElements; ++index)
+			{
+				setTableElementNonNull(
+					table,
+					U64(destOffset) + U64(index),
+					getTableElementNonNull(table, U64(sourceOffset) + U64(index)));
+			}
 		}
-	}
+	});
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
@@ -527,12 +526,12 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 	if(asObject(function) == getOutOfBoundsElement())
 	{
 		Log::printf(Log::debug, "call_indirect: index %u is out-of-bounds\n", index);
-		throwException(Exception::outOfBoundsTableAccessType, {table, U64(index)});
+		throwException(ExceptionTypes::outOfBoundsTableAccess, {table, U64(index)});
 	}
 	else if(asObject(function) == getUninitializedElement())
 	{
 		Log::printf(Log::debug, "call_indirect: index %u is uninitialized\n", index);
-		throwException(Exception::uninitializedTableElementType, {table, U64(index)});
+		throwException(ExceptionTypes::uninitializedTableElement, {table, U64(index)});
 	}
 	else
 	{
@@ -545,6 +544,6 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 					asString(IR::FunctionType{function->encodedType}).c_str(),
 					ipDescription.c_str(),
 					asString(expectedSignature).c_str());
-		throwException(Exception::indirectCallSignatureMismatchType);
+		throwException(ExceptionTypes::indirectCallSignatureMismatch);
 	}
 }

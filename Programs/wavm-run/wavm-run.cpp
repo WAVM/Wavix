@@ -92,8 +92,7 @@ struct RootResolver : Resolver
 			stubModuleNames.functions.push_back({"importStub: " + exportName, {}, {}});
 			IR::setDisassemblyNames(stubIRModule, stubModuleNames);
 			IR::validatePreCodeSections(stubIRModule);
-			DeferredCodeValidationState deferredCodeValidationState;
-			IR::validatePostCodeSections(stubIRModule, deferredCodeValidationState);
+			IR::validatePostCodeSections(stubIRModule);
 
 			// Instantiate the module and return the stub function instance.
 			auto stubModule = compileModule(stubIRModule);
@@ -112,10 +111,7 @@ struct RootResolver : Resolver
 		}
 		case IR::ExternKind::global:
 		{
-			return asObject(Runtime::createGlobal(
-				compartment,
-				asGlobalType(type),
-				IR::Value(asGlobalType(type).valueType, IR::UntaggedValue())));
+			return asObject(Runtime::createGlobal(compartment, asGlobalType(type)));
 		}
 		case IR::ExternKind::exceptionType:
 		{
@@ -192,7 +188,8 @@ static int run(const CommandLineOptions& options)
 
 		if(!precompiledObjectSection)
 		{
-			Log::printf(Log::error, "Input file did not contain 'wavm.precompiled_object' section");
+			Log::printf(Log::error,
+						"Input file did not contain 'wavm.precompiled_object' section.\n");
 			return EXIT_FAILURE;
 		}
 		else
@@ -323,7 +320,7 @@ static int run(const CommandLineOptions& options)
 			case ValueType::f64: value = atof(options.args[i]); break;
 			case ValueType::v128:
 			case ValueType::anyref:
-			case ValueType::anyfunc:
+			case ValueType::funcref:
 				Errors::fatalf("Cannot parse command-line argument for %s function parameter",
 							   asString(functionType.params()[i]));
 			default: Errors::unreachable();
@@ -367,6 +364,7 @@ static void showHelp()
 				"  --disable-emscripten  Disable Emscripten intrinsics\n"
 				"  --enable-thread-test  Enable ThreadTest intrinsics\n"
 				"  --precompiled         Use precompiled object code in programfile\n"
+				"  --metrics             Write benchmarking information to stdout\n"
 				"  --                    Stop parsing arguments\n");
 }
 
@@ -392,6 +390,10 @@ int main(int argc, char** argv)
 		else if(!strcmp(*options.args, "--debug") || !strcmp(*options.args, "-d"))
 		{
 			Log::setCategoryEnabled(Log::debug, true);
+		}
+		else if(!strcmp(*options.args, "--metrics"))
+		{
+			Log::setCategoryEnabled(Log::metrics, true);
 		}
 		else if(!strcmp(*options.args, "--disable-emscripten"))
 		{
@@ -431,10 +433,12 @@ int main(int argc, char** argv)
 		return EXIT_FAILURE;
 	}
 
-	// Treat any unhandled exception (e.g. in a thread) as a fatal error.
-	Runtime::setUnhandledExceptionHandler([](Runtime::Exception&& exception) {
-		Errors::fatalf("Runtime exception: %s", describeException(exception).c_str());
-	});
-
-	return run(options);
+	int result = EXIT_FAILURE;
+	Runtime::catchRuntimeExceptions([&result, options]() { result = run(options); },
+									[](Runtime::Exception* exception) {
+										// Treat any unhandled exception as a fatal error.
+										Errors::fatalf("Runtime exception: %s",
+													   describeException(exception).c_str());
+									});
+	return result;
 }

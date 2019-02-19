@@ -144,6 +144,12 @@ void EmitFunctionContext::end(NoImm)
 	wavmAssert(controlStack.size());
 	ControlContext& currentContext = controlStack.back();
 
+	if(currentContext.type == ControlContext::Type::try_) { endTryWithoutCatch(); }
+	else if(currentContext.type == ControlContext::Type::catch_)
+	{
+		endTryCatch();
+	}
+
 	branchToEndOfControlContext();
 
 	if(currentContext.elseBlock)
@@ -161,12 +167,6 @@ void EmitFunctionContext::end(NoImm)
 			currentContext.endPHIs[argIndex]->addIncoming(currentContext.elseArgs[argIndex],
 														  currentContext.elseBlock);
 		}
-	}
-
-	if(currentContext.type == ControlContext::Type::try_) { endTry(); }
-	else if(currentContext.type == ControlContext::Type::catch_)
-	{
-		endCatch();
 	}
 
 	// Switch the IR emitter to the end block.
@@ -376,7 +376,7 @@ void EmitFunctionContext::call_indirect(CallIndirectImm imm)
 		llvmContext.iptrType->getPointerTo(),
 		sizeof(Uptr));
 
-	// Load the anyfunc referenced by the table.
+	// Load the funcref referenced by the table.
 	auto elementPointer = irBuilder.CreateInBoundsGEP(tableBasePointer, {functionIndexZExt});
 	llvm::LoadInst* biasedValueLoad = irBuilder.CreateLoad(elementPointer);
 	biasedValueLoad->setAtomic(llvm::AtomicOrdering::Acquire);
@@ -399,7 +399,7 @@ void EmitFunctionContext::call_indirect(CallIndirectImm imm)
 		FunctionType(TypeTuple(),
 					 TypeTuple({ValueType::i32,
 								inferValueType<Uptr>(),
-								ValueType::anyfunc,
+								ValueType::funcref,
 								inferValueType<Uptr>()})),
 		{tableElementIndex,
 		 getTableIdFromOffset(llvmContext, moduleContext.tableOffsets[imm.tableIndex]),

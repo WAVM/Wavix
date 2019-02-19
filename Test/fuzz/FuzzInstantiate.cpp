@@ -59,7 +59,7 @@ struct StubResolver : Runtime::Resolver
 				case IR::ValueType::f64: encoder.f64_const({0.0}); break;
 				case IR::ValueType::v128: encoder.v128_const({V128{{0, 0}}}); break;
 				case IR::ValueType::anyref:
-				case IR::ValueType::anyfunc:
+				case IR::ValueType::funcref:
 				case IR::ValueType::nullref: encoder.ref_null(); break;
 				default: Errors::unreachable();
 				};
@@ -75,8 +75,7 @@ struct StubResolver : Runtime::Resolver
 			stubModuleNames.functions.push_back({"importStub: " + exportName, {}, {}});
 			IR::setDisassemblyNames(stubModule, stubModuleNames);
 			IR::validatePreCodeSections(stubModule);
-			DeferredCodeValidationState deferredCodeValidationState;
-			IR::validatePostCodeSections(stubModule, deferredCodeValidationState);
+			IR::validatePostCodeSections(stubModule);
 
 			// Instantiate the module and return the stub function instance.
 			auto stubModuleInstance = Runtime::instantiateModule(
@@ -95,10 +94,7 @@ struct StubResolver : Runtime::Resolver
 		}
 		case IR::ExternKind::global:
 		{
-			return asObject(Runtime::createGlobal(
-				compartment,
-				asGlobalType(type),
-				IR::Value(asGlobalType(type).valueType, IR::UntaggedValue())));
+			return asObject(Runtime::createGlobal(compartment, asGlobalType(type)));
 		}
 		case IR::ExternKind::exceptionType:
 		{
@@ -115,6 +111,7 @@ extern "C" I32 LLVMFuzzerTestOneInput(const U8* data, Uptr numBytes)
 	IR::Module module;
 	module.featureSpec.maxLabelsPerFunction = 65536;
 	module.featureSpec.maxLocals = 1024;
+	module.featureSpec.maxDataSegments = 65536;
 	if(!WASM::loadBinaryModule(data, numBytes, module, Log::debug)) { return 0; }
 
 	GCPointer<Compartment> compartment = createCompartment();
@@ -129,7 +126,7 @@ extern "C" I32 LLVMFuzzerTestOneInput(const U8* data, Uptr numBytes)
 								  std::move(linkResult.resolvedImports),
 								  "fuzz");
 			},
-			[&](Exception&& exception) {});
+			[&](Exception* exception) { destroyException(exception); });
 	}
 	errorUnless(tryCollectCompartment(std::move(compartment)));
 

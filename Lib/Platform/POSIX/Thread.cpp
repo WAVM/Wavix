@@ -21,10 +21,10 @@
 #include "WAVM/Inline/Config.h"
 #include "WAVM/Inline/Errors.h"
 #include "WAVM/Inline/Lock.h"
-#include "WAVM/Platform/Exception.h"
 #include "WAVM/Platform/Intrinsic.h"
 #include "WAVM/Platform/Memory.h"
 #include "WAVM/Platform/Mutex.h"
+#include "WAVM/Platform/Signal.h"
 #include "WAVM/Platform/Thread.h"
 
 #ifdef __APPLE__
@@ -62,6 +62,7 @@ struct ForkThreadArgs
 	ExecutionContext forkContext;
 	Platform::Mutex forkedStackMutex;
 	U8* threadEntryFramePointer;
+	SignalContext* innermostSignalContext;
 };
 
 enum
@@ -69,7 +70,7 @@ enum
 	sigAltStackNumBytes = 65536
 };
 
-#define ALLOCATE_SIGALTSTACK_ON_MAIN_STACK 0
+#define ALLOCATE_SIGALTSTACK_ON_MAIN_STACK 1
 
 static bool isAlignedLog2(void* pointer, Uptr alignmentLog2)
 {
@@ -194,31 +195,31 @@ static Uptr getNumStackBytesRLimit()
 
 static void getThreadStack(pthread_t thread, U8*& outMinGuardAddr, U8*& outMinAddr, U8*& outMaxAddr)
 {
-	Uptr numGuardBytes = 0;
 #ifdef __linux__
 	// Linux uses pthread_getattr_np/pthread_attr_getstack, and returns a pointer to the minimum
 	// address of the stack.
 	pthread_attr_t threadAttributes;
 	memset(&threadAttributes, 0, sizeof(threadAttributes));
 	errorUnless(!pthread_getattr_np(thread, &threadAttributes));
-	Uptr numStackBytes;
-	errorUnless(!pthread_attr_getstack(&threadAttributes, (void**)&outMinAddr, &numStackBytes));
+	Uptr numStackBytes = 0;
+	Uptr numGuardBytes = 0;
+	errorUnless(
+		!pthread_attr_getstack(&threadAttributes, (void**)&outMinGuardAddr, &numStackBytes));
 	errorUnless(!pthread_attr_getguardsize(&threadAttributes, &numGuardBytes));
 	errorUnless(!pthread_attr_destroy(&threadAttributes));
-	outMaxAddr = outMinAddr + numStackBytes;
+	outMaxAddr = outMinGuardAddr + numStackBytes;
+	outMinAddr = outMinGuardAddr + numGuardBytes;
 #elif defined(__APPLE__)
 	// MacOS uses pthread_get_stackaddr_np, and returns a pointer to the maximum address of the
 	// stack.
 	outMaxAddr = (U8*)pthread_get_stackaddr_np(thread);
 	outMinAddr = outMaxAddr - getNumStackBytesRLimit();
-	numGuardBytes = Uptr(1) << getPageSizeLog2();
+	outMinGuardAddr = outMinAddr - (Uptr(1) << getPageSizeLog2());
 #elif defined(__WAVIX__)
 	Errors::fatal("getCurrentThreadStack is unimplemented on Wavix.");
 #else
 #error unsupported platform
 #endif
-
-	outMinGuardAddr = outMinAddr - numGuardBytes;
 }
 
 void Platform::getCurrentThreadStack(U8*& outMinGuardAddr, U8*& outMinAddr, U8*& outMaxAddr)
@@ -282,14 +283,6 @@ I64 Platform::joinThread(Thread* thread)
 	return reinterpret_cast<I64>(returnValue);
 }
 
-void Platform::exitThread(I64 argument)
-{
-	wavmAssert(threadEntryContext);
-	threadEntryContext->exitCode = argument;
-	siglongjmp(threadEntryContext->exitJump, 1);
-	Errors::unreachable();
-}
-
 NO_ASAN static void* forkThreadEntry(void* argsVoid)
 {
 	std::unique_ptr<ForkThreadArgs> args((ForkThreadArgs*)argsVoid);
@@ -334,58 +327,6 @@ static void memcpyNoASAN(U8* dest, const U8* source, Uptr numBytes)
 #endif
 }
 
-NO_ASAN static Thread* createForkedThread(ForkThreadArgs* forkThreadArgs)
-{
-	Lock<Platform::Mutex> forkedStackLock(forkThreadArgs->forkedStackMutex);
-
-	// Compute the address extent of this thread's stack.
-	U8* minStackGuardAddr;
-	U8* minStackAddr;
-	U8* maxStackAddr;
-	getCurrentThreadStack(minStackGuardAddr, minStackAddr, maxStackAddr);
-	const Uptr numStackBytes
-		= std::max(Uptr(maxStackAddr - minStackAddr), getNumStackBytesRLimit());
-
-	// Use the current stack pointer derive a conservative bounds on the area of the stack that
-	// is active.
-	const U8* minActiveStackAddr = getStackPointer() - 128;
-	const U8* maxActiveStackAddr = threadEntryContext->framePointer;
-	const Uptr numActiveStackBytes = maxActiveStackAddr - minActiveStackAddr;
-
-	if(numActiveStackBytes + PTHREAD_STACK_MIN > numStackBytes)
-	{ Errors::fatal("not enough stack space to fork thread"); }
-	pthread_attr_t threadAttr;
-	errorUnless(!pthread_attr_init(&threadAttr));
-	errorUnless(!pthread_attr_setstacksize(&threadAttr, numStackBytes));
-
-	auto thread = new Thread;
-	errorUnless(!pthread_create(
-		&thread->id, &threadAttr, (void* (*)(void*))forkThreadEntry, forkThreadArgs));
-	errorUnless(!pthread_attr_destroy(&threadAttr));
-
-	U8* forkedMinStackGuardAddr = nullptr;
-	U8* forkedMinStackAddr = nullptr;
-	U8* forkedMaxStackAddr = nullptr;
-	getThreadStack(thread->id, forkedMinStackGuardAddr, forkedMinStackAddr, forkedMaxStackAddr);
-
-	forkedMaxStackAddr -= PTHREAD_STACK_MIN;
-	wavmAssert(Uptr(forkedMaxStackAddr - forkedMinStackAddr) > numActiveStackBytes);
-
-	// Compute the offset to add to stack pointers to translate them to the forked thread's stack.
-	const Iptr forkedStackOffset = forkedMaxStackAddr - maxActiveStackAddr;
-
-	// Translate this thread's saved stack pointer to the forked stack.
-	forkThreadArgs->forkContext.rsp += forkedStackOffset;
-
-	// Translate this thread's entry stack pointer to the forked stack.
-	forkThreadArgs->threadEntryFramePointer = threadEntryContext->framePointer + forkedStackOffset;
-
-	// Copy the contents of this thread's stack to the forked stack.
-	memcpyNoASAN(forkedMaxStackAddr - numActiveStackBytes, minActiveStackAddr, numActiveStackBytes);
-
-	return thread;
-}
-
 NO_ASAN Thread* Platform::forkCurrentThread()
 {
 	auto forkThreadArgs = new ForkThreadArgs;
@@ -395,8 +336,6 @@ NO_ASAN Thread* Platform::forkCurrentThread()
 		Errors::fatal(
 			"Cannot fork a thread that wasn't created by Platform::createThread/forkThread");
 	}
-	if(innermostSignalContext)
-	{ Errors::fatal("Cannot fork a thread with catchSignals on the stack"); }
 
 	// Capture the current execution state in forkThreadArgs->forkContext.
 	// The forked thread will load this execution context, and "return" from this function on the
@@ -404,6 +343,8 @@ NO_ASAN Thread* Platform::forkCurrentThread()
 	const I64 isExecutingInFork = saveExecutionState(&forkThreadArgs->forkContext, 0);
 	if(isExecutingInFork)
 	{
+		innermostSignalContext = forkThreadArgs->innermostSignalContext;
+
 		// Allocate a sigaltstack for the new thread.
 		sigAltStack.init();
 
@@ -411,7 +352,69 @@ NO_ASAN Thread* Platform::forkCurrentThread()
 	}
 	else
 	{
-		return createForkedThread(forkThreadArgs);
+		forkThreadArgs->forkedStackMutex.lock();
+
+		// Compute the address extent of this thread's stack.
+		U8* minStackGuardAddr;
+		U8* minStackAddr;
+		U8* maxStackAddr;
+		getCurrentThreadStack(minStackGuardAddr, minStackAddr, maxStackAddr);
+		const Uptr numStackBytes
+			= std::max(Uptr(maxStackAddr - minStackAddr), getNumStackBytesRLimit());
+
+		// Use the current stack pointer derive a conservative bounds on the area of the stack that
+		// is active.
+		const U8* minActiveStackAddr = getStackPointer() - 128;
+		const U8* maxActiveStackAddr = threadEntryContext->framePointer;
+		const Uptr numActiveStackBytes = maxActiveStackAddr - minActiveStackAddr;
+
+		if(numActiveStackBytes + PTHREAD_STACK_MIN > numStackBytes)
+		{ Errors::fatal("not enough stack space to fork thread"); }
+		pthread_attr_t threadAttr;
+		errorUnless(!pthread_attr_init(&threadAttr));
+		errorUnless(!pthread_attr_setstacksize(&threadAttr, numStackBytes));
+
+		auto thread = new Thread;
+		errorUnless(!pthread_create(
+			&thread->id, &threadAttr, (void* (*)(void*))forkThreadEntry, forkThreadArgs));
+		errorUnless(!pthread_attr_destroy(&threadAttr));
+
+		U8* forkedMinStackGuardAddr = nullptr;
+		U8* forkedMinStackAddr = nullptr;
+		U8* forkedMaxStackAddr = nullptr;
+		getThreadStack(thread->id, forkedMinStackGuardAddr, forkedMinStackAddr, forkedMaxStackAddr);
+
+		forkedMaxStackAddr -= PTHREAD_STACK_MIN;
+		wavmAssert(Uptr(forkedMaxStackAddr - forkedMinStackAddr) > numActiveStackBytes);
+
+		// Compute the offset to add to stack pointers to translate them to the forked thread's
+		// stack.
+		const Iptr forkedStackOffset = forkedMaxStackAddr - maxActiveStackAddr;
+
+		// Translate this thread's saved stack pointer to the forked stack.
+		forkThreadArgs->forkContext.rsp += forkedStackOffset;
+
+		// Translate this thread's entry stack pointer to the forked stack.
+		forkThreadArgs->threadEntryFramePointer
+			= threadEntryContext->framePointer + forkedStackOffset;
+
+		// Copy the contents of this thread's stack to the forked stack.
+		memcpyNoASAN(
+			forkedMaxStackAddr - numActiveStackBytes, minActiveStackAddr, numActiveStackBytes);
+
+		// Fix up the links in the signal context chain for the new stack.
+		forkThreadArgs->innermostSignalContext = innermostSignalContext;
+		for(SignalContext** forkedSignalContextLink = &forkThreadArgs->innermostSignalContext;
+			*forkedSignalContextLink;
+			forkedSignalContextLink = &(*forkedSignalContextLink)->outerContext)
+		{
+			*forkedSignalContextLink = reinterpret_cast<SignalContext*>(
+				reinterpret_cast<Uptr>(*forkedSignalContextLink) + forkedStackOffset);
+		}
+
+		forkThreadArgs->forkedStackMutex.unlock();
+
+		return thread;
 	}
 }
 

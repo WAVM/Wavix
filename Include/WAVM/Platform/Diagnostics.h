@@ -35,6 +35,11 @@ namespace WAVM { namespace Platform {
 			Uptr ip;
 		};
 		std::vector<Frame> stackFrames;
+
+		CallStack() {}
+		CallStack(const CallStack& copy) : stackFrames(copy.stackFrames) {}
+		CallStack(CallStack&& movee) : stackFrames(std::move(movee.stackFrames)) {}
+		~CallStack() {}
 	};
 
 	// Captures the execution context of the caller.
@@ -42,4 +47,10 @@ namespace WAVM { namespace Platform {
 
 	// Describes an instruction pointer.
 	PLATFORM_API bool describeInstructionPointer(Uptr ip, std::string& outDescription);
+
+#if WAVM_ENABLE_ASAN
+	PLATFORM_API void expectLeakedObject(void* object);
+#else
+	inline void expectLeakedObject(void*) {}
+#endif
 }}

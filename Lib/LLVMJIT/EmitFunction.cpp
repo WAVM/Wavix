@@ -332,27 +332,35 @@ void EmitFunctionContext::emit()
 	{ diFunctionParameterTypes.push_back(moduleContext.diValueTypes[(Uptr)parameterType]); }
 	auto diParamArray = moduleContext.diBuilder.getOrCreateTypeArray(diFunctionParameterTypes);
 	auto diFunctionType = moduleContext.diBuilder.createSubroutineType(diParamArray);
-	diFunction = moduleContext.diBuilder.createFunction(moduleContext.diModuleScope,
-														function->getName(),
-														function->getName(),
-														moduleContext.diModuleScope,
-														0,
-														diFunctionType,
-														false,
-														true,
-														0);
+	diFunction = moduleContext.diBuilder.createFunction(
+		moduleContext.diModuleScope,
+		function->getName(),
+		function->getName(),
+		moduleContext.diModuleScope,
+		0,
+		diFunctionType,
+#if LLVM_VERSION_MAJOR >= 8
+		0,
+		llvm::DINode::FlagZero,
+		llvm::DISubprogram::SPFlagDefinition | llvm::DISubprogram::SPFlagOptimized);
+#else
+		false,
+		true,
+		0);
+#endif
 	function->setSubprogram(diFunction);
+
+	// Create an initial basic block for the function.
+	auto entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", function);
 
 	// Create the return basic block, and push the root control context for the function.
 	auto returnBlock = llvm::BasicBlock::Create(llvmContext, "return", function);
 	auto returnPHIs = createPHIs(returnBlock, functionType.results());
+	irBuilder.SetInsertPoint(entryBasicBlock);
+
 	pushControlStack(
 		ControlContext::Type::function, functionType.results(), returnBlock, returnPHIs);
 	pushBranchTarget(functionType.results(), returnBlock, returnPHIs);
-
-	// Create an initial basic block for the function.
-	auto entryBasicBlock = llvm::BasicBlock::Create(llvmContext, "entry", function);
-	irBuilder.SetInsertPoint(entryBasicBlock);
 
 	// Create and initialize allocas for the memory and table base parameters.
 	auto llvmArgIt = function->arg_begin();
@@ -387,7 +395,7 @@ void EmitFunctionContext::emit()
 	{
 		emitRuntimeIntrinsic(
 			"debugEnterFunction",
-			FunctionType({}, {ValueType::anyfunc}),
+			FunctionType({}, {ValueType::funcref}),
 			{llvm::ConstantExpr::getSub(
 				llvm::ConstantExpr::getPtrToInt(function, llvmContext.iptrType),
 				emitLiteral(llvmContext, Uptr(offsetof(Runtime::Function, code))))});
@@ -416,7 +424,7 @@ void EmitFunctionContext::emit()
 	{
 		emitRuntimeIntrinsic(
 			"debugExitFunction",
-			FunctionType({}, {ValueType::anyfunc}),
+			FunctionType({}, {ValueType::funcref}),
 			{llvm::ConstantExpr::getSub(
 				llvm::ConstantExpr::getPtrToInt(function, llvmContext.iptrType),
 				emitLiteral(llvmContext, Uptr(offsetof(Runtime::Function, code))))});
@@ -424,14 +432,4 @@ void EmitFunctionContext::emit()
 
 	// Emit the function return.
 	emitReturn(functionType.results(), stack);
-
-	// If a local escape block was created, add a localescape intrinsic to it with the accumulated
-	// local escape allocas, and insert it before the function's entry block.
-	if(localEscapeBlock)
-	{
-		irBuilder.SetInsertPoint(localEscapeBlock);
-		callLLVMIntrinsic({}, llvm::Intrinsic::localescape, pendingLocalEscapes);
-		irBuilder.CreateBr(&function->getEntryBlock());
-		localEscapeBlock->moveBefore(&function->getEntryBlock());
-	}
 }

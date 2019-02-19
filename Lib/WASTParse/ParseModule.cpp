@@ -91,7 +91,8 @@ static TypeTuple parseTypeTuple(CursorState* cursor)
 	return TypeTuple(parameters);
 }
 
-// An unresolved initializer expression: uses a Reference instead of an index for get_global.
+// An unresolved initializer expression: uses a Reference instead of an index for global.get and
+// ref.func.
 typedef InitializerExpressionBase<Reference> UnresolvedInitializerExpression;
 
 static UnresolvedInitializerExpression parseInitializerExpression(CursorState* cursor)
@@ -130,16 +131,17 @@ static UnresolvedInitializerExpression parseInitializerExpression(CursorState* c
 			result = parseV128(cursor);
 			break;
 		}
-		case t_get_global:
+		case t_global_get:
 		{
 			++cursor->nextToken;
 			Reference globalRef;
 			if(!tryParseNameOrIndexRef(cursor, globalRef))
 			{
 				parseErrorf(cursor->parseState, cursor->nextToken, "expected global name or index");
+				throw RecoverParseException();
 			}
 			result = UnresolvedInitializerExpression(
-				UnresolvedInitializerExpression::Type::get_global, globalRef);
+				UnresolvedInitializerExpression::Type::global_get, globalRef);
 			break;
 		}
 		case t_ref_null:
@@ -148,9 +150,22 @@ static UnresolvedInitializerExpression parseInitializerExpression(CursorState* c
 			result = nullptr;
 			break;
 		}
+		case t_ref_func:
+		{
+			++cursor->nextToken;
+			Reference funcRef;
+			if(!tryParseNameOrIndexRef(cursor, funcRef))
+			{
+				parseErrorf(
+					cursor->parseState, cursor->nextToken, "expected function name or index");
+				throw RecoverParseException();
+			}
+			result = UnresolvedInitializerExpression(
+				UnresolvedInitializerExpression::Type::ref_func, funcRef);
+			break;
+		}
 		default:
 			parseErrorf(cursor->parseState, cursor->nextToken, "expected initializer expression");
-			result.type = UnresolvedInitializerExpression::Type::error;
 			throw RecoverParseException();
 		};
 	});
@@ -174,13 +189,19 @@ static InitializerExpression resolveInitializerExpression(
 		return InitializerExpression(unresolvedExpression.f64);
 	case UnresolvedInitializerExpression::Type::v128_const:
 		return InitializerExpression(unresolvedExpression.v128);
-	case UnresolvedInitializerExpression::Type::get_global:
-		return InitializerExpression(InitializerExpression::Type::get_global,
+	case UnresolvedInitializerExpression::Type::global_get:
+		return InitializerExpression(InitializerExpression::Type::global_get,
 									 resolveRef(moduleState->parseState,
 												moduleState->globalNameToIndexMap,
 												moduleState->module.globals.size(),
-												unresolvedExpression.globalRef));
+												unresolvedExpression.ref));
 	case UnresolvedInitializerExpression::Type::ref_null: return InitializerExpression(nullptr);
+	case UnresolvedInitializerExpression::Type::ref_func:
+		return InitializerExpression(InitializerExpression::Type::ref_func,
+									 resolveRef(moduleState->parseState,
+												moduleState->functionNameToIndexMap,
+												moduleState->module.functions.size(),
+												unresolvedExpression.ref));
 	case UnresolvedInitializerExpression::Type::error: return InitializerExpression();
 	default: Errors::unreachable();
 	}
@@ -791,27 +812,35 @@ static void parseMemory(CursorState* cursor)
 
 static void parseGlobal(CursorState* cursor)
 {
-	parseObjectDefOrImport(cursor,
-						   cursor->moduleState->globalNameToIndexMap,
-						   cursor->moduleState->module.globals,
-						   cursor->moduleState->disassemblyNames.globals,
-						   t_global,
-						   ExternKind::global,
-						   // Parse a global import.
-						   parseGlobalType,
-						   // Parse a global definition
-						   [](CursorState* cursor, const Token*) {
-							   const GlobalType globalType = parseGlobalType(cursor);
-							   // It's safe to immediately resolve the initializer expression,
-							   // because global definitions must occur after global imports, and
-							   // global initializers may only reference imported globals.
-							   const UnresolvedInitializerExpression unresolvedInitializerExpression
-								   = parseInitializerExpression(cursor);
-							   const InitializerExpression initializerExpression
-								   = resolveInitializerExpression(cursor->moduleState,
-																  unresolvedInitializerExpression);
-							   return GlobalDef{globalType, initializerExpression};
-						   });
+	parseObjectDefOrImport(
+		cursor,
+		cursor->moduleState->globalNameToIndexMap,
+		cursor->moduleState->module.globals,
+		cursor->moduleState->disassemblyNames.globals,
+		t_global,
+		ExternKind::global,
+		// Parse a global import.
+		parseGlobalType,
+		// Parse a global definition
+		[](CursorState* cursor, const Token*) {
+			const GlobalType globalType = parseGlobalType(cursor);
+
+			// Parse the unresolved initializer expression, but defer resolving it until all
+			// declarations have been parsed. This allows the initializer to reference
+			// function/global names declared after this global.
+			const UnresolvedInitializerExpression unresolvedInitializerExpression
+				= parseInitializerExpression(cursor);
+			const Uptr globalDefIndex = cursor->moduleState->module.globals.defs.size();
+			cursor->moduleState->postDeclarationCallbacks.push_back(
+				[cursor, globalDefIndex, unresolvedInitializerExpression](
+					ModuleState* moduleState) {
+					cursor->moduleState->module.globals.defs[globalDefIndex].initializer
+						= resolveInitializerExpression(cursor->moduleState,
+													   unresolvedInitializerExpression);
+				});
+
+			return GlobalDef{globalType, InitializerExpression()};
+		});
 }
 
 static void parseExceptionType(CursorState* cursor)
@@ -931,7 +960,7 @@ void WAST::parseModuleBody(CursorState* cursor, IR::Module& outModule)
 			try
 			{
 				IR::validatePreCodeSections(outModule);
-				IR::validatePostCodeSections(outModule, moduleState.deferredCodeValidationState);
+				IR::validatePostCodeSections(outModule);
 			}
 			catch(ValidationException const& validationException)
 			{
@@ -975,7 +1004,8 @@ bool WAST::parseModule(const char* string,
 
 	// Lex the string.
 	LineInfo* lineInfo = nullptr;
-	Token* tokens = lex(string, stringLength, lineInfo);
+	Token* tokens
+		= lex(string, stringLength, lineInfo, outModule.featureSpec.allowLegacyOperatorNames);
 	ParseState parseState(string, lineInfo);
 	CursorState cursor(tokens, &parseState);
 

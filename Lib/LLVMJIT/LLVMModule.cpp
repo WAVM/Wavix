@@ -20,9 +20,9 @@
 #include "WAVM/Inline/Timing.h"
 #include "WAVM/LLVMJIT/LLVMJIT.h"
 #include "WAVM/Logging/Logging.h"
-#include "WAVM/Platform/Exception.h"
 #include "WAVM/Platform/Memory.h"
 #include "WAVM/Platform/Mutex.h"
+#include "WAVM/Platform/Signal.h"
 #include "WAVM/Runtime/RuntimeData.h"
 
 PUSH_DISABLE_WARNINGS_FOR_LLVM_HEADERS
@@ -41,6 +41,10 @@ PUSH_DISABLE_WARNINGS_FOR_LLVM_HEADERS
 #include "llvm/Support/Memory.h"
 #include "llvm/Support/MemoryBuffer.h"
 POP_DISABLE_WARNINGS_FOR_LLVM_HEADERS
+
+#if !USE_WINDOWS_SEH
+#include <cxxabi.h>
+#endif
 
 namespace WAVM { namespace Runtime {
 	struct ExceptionType;
@@ -224,6 +228,8 @@ private:
 
 	U8* allocateBytes(Uptr numBytes, Uptr alignment, Section& section)
 	{
+		if(alignment == 0) { alignment = 1; }
+
 		wavmAssert(section.baseAddress);
 		wavmAssert(!(alignment & (alignment - 1)));
 		wavmAssert(!isFinalized);
@@ -285,12 +291,19 @@ static void disassembleFunction(U8* bytes, Uptr numBytes)
 	LLVMDisasmDispose(disasmRef);
 }
 
-Module::Module(const std::vector<U8>& inObjectBytes,
+Module::Module(const std::vector<U8>& objectBytes,
 			   const HashMap<std::string, Uptr>& importedSymbolMap,
 			   bool shouldLogMetrics)
-: memoryManager(new ModuleMemoryManager()), objectBytes(inObjectBytes)
+: memoryManager(new ModuleMemoryManager())
+#if LLVM_VERSION_MAJOR < 8
+, objectBytes(objectBytes)
+#endif
 {
 	Timing::Timer loadObjectTimer;
+
+#if LLVM_VERSION_MAJOR >= 8
+	std::unique_ptr<llvm::object::ObjectFile> object;
+#endif
 
 	object = cantFail(llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef(
 		llvm::StringRef((const char*)objectBytes.data(), objectBytes.size()), "memory")));
@@ -411,13 +424,13 @@ Module::Module(const std::vector<U8>& inObjectBytes,
 
 	if(USE_WINDOWS_SEH && pdataCopy)
 	{
-		// Lookup the real address of __C_specific_handler.
-		const llvm::JITEvaluatedSymbol sehHandlerSymbol = resolveJITImport("__C_specific_handler");
+		// Lookup the real address of _CxxFrameHandler3.
+		const llvm::JITEvaluatedSymbol sehHandlerSymbol = resolveJITImport("__CxxFrameHandler3");
 		errorUnless(sehHandlerSymbol);
 		const U64 sehHandlerAddress = U64(sehHandlerSymbol.getAddress());
 
 		// Create a trampoline within the image's 2GB address space that jumps to
-		// __C_specific_handler. jmp [rip+0] <64-bit address>
+		// __CxxFrameHandler3. jmp [rip+0] <64-bit address>
 		U8* trampolineBytes = memoryManager->allocateCodeSection(16, 16, 0, "seh_trampoline");
 		trampolineBytes[0] = 0xff;
 		trampolineBytes[1] = 0x25;
@@ -457,7 +470,12 @@ Module::Module(const std::vector<U8>& inObjectBytes,
 	// Notify GDB of the new object.
 	if(!gdbRegistrationListener)
 	{ gdbRegistrationListener = llvm::JITEventListener::createGDBRegistrationListener(); }
+#if LLVM_VERSION_MAJOR >= 8
+	gdbRegistrationListener->notifyObjectLoaded(
+		reinterpret_cast<Uptr>(this), *object, *loadedObject);
+#else
 	gdbRegistrationListener->NotifyObjectEmitted(*object, *loadedObject);
+#endif
 
 	// Create a DWARF context to interpret the debug information in this compilation unit.
 	auto dwarfContext = llvm::DWARFContext::create(*object, &*loadedObject);
@@ -467,6 +485,9 @@ Module::Module(const std::vector<U8>& inObjectBytes,
 		llvm::object::computeSymbolSizes(*object))
 	{
 		llvm::object::SymbolRef symbol = symbolSizePair.first;
+
+		// Only process global symbols, which excludes SEH funclets.
+		if(!(symbol.getFlags() & llvm::object::SymbolRef::SF_Global)) { continue; }
 
 		// Get the type, name, and address of the symbol. Need to be careful not to get the
 		// Expected<T> for each value unless it will be checked for success before continuing.
@@ -529,7 +550,11 @@ Module::Module(const std::vector<U8>& inObjectBytes,
 Module::~Module()
 {
 	// Notify GDB that the object is being unloaded.
+#if LLVM_VERSION_MAJOR >= 8
+	gdbRegistrationListener->notifyFreeingObject(reinterpret_cast<Uptr>(this));
+#else
 	gdbRegistrationListener->NotifyFreeingObject(*object);
+#endif
 
 	// Remove the module from the global address to module map.
 	Lock<Platform::Mutex> addressToModuleMapLock(addressToModuleMapMutex);
@@ -646,8 +671,23 @@ std::shared_ptr<LLVMJIT::Module> LLVMJIT::loadModule(
 	// Bind the tableReferenceBias symbol to the tableReferenceBias.
 	importedSymbolMap.addOrFail("tableReferenceBias", tableReferenceBias);
 
-	importedSymbolMap.addOrFail("userExceptionTypeInfo",
-								reinterpret_cast<Uptr>(Platform::getUserExceptionTypeInfo()));
+#if !USE_WINDOWS_SEH
+	// Use __cxxabiv1::__cxa_current_exception_type to get a reference to the std::type_info for
+	// Runtime::Exception* without enabling RTTI.
+	std::type_info* runtimeExceptionPointerTypeInfo = nullptr;
+	try
+	{
+		throw(Runtime::Exception*) nullptr;
+	}
+	catch(Runtime::Exception*)
+	{
+		runtimeExceptionPointerTypeInfo = __cxxabiv1::__cxa_current_exception_type();
+	}
+
+	// Bind the std::type_info for Runtime::Exception.
+	importedSymbolMap.addOrFail("runtimeExceptionTypeInfo",
+								reinterpret_cast<Uptr>(runtimeExceptionPointerTypeInfo));
+#endif
 
 	// Load the module.
 	return std::make_shared<Module>(objectFileBytes, importedSymbolMap, true);

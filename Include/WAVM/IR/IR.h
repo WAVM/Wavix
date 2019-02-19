@@ -40,8 +40,10 @@ namespace WAVM { namespace IR {
 		bool sharedTables = true;
 		bool functionRefInstruction = true;
 		bool requireSharedFlagForAtomicOperators = false; // (true is standard)
+		bool allowLegacyOperatorNames = true;
 
 		Uptr maxLocals = 65536;
 		Uptr maxLabelsPerFunction = UINTPTR_MAX;
+		Uptr maxDataSegments = UINTPTR_MAX;
 	};
 }}

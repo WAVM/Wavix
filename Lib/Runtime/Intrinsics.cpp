@@ -69,9 +69,11 @@ Intrinsics::Global::Global(Intrinsics::Module& moduleRef,
 	moduleRef.impl->globalMap.set(name, this);
 }
 
-Global* Intrinsics::Global::instantiate(Compartment* compartment)
+Runtime::Global* Intrinsics::Global::instantiate(Compartment* compartment)
 {
-	return createGlobal(compartment, IR::GlobalType(type, false), value);
+	Runtime::Global* global = createGlobal(compartment, IR::GlobalType(type, false));
+	initializeGlobal(global, value);
+	return global;
 }
 
 Intrinsics::Table::Table(Intrinsics::Module& moduleRef,
@@ -168,7 +170,7 @@ ModuleInstance* Intrinsics::instantiateModule(Compartment* compartment,
 
 	Lock<Platform::Mutex> compartmentLock(compartment->mutex);
 	const Uptr id = compartment->moduleInstances.add(UINTPTR_MAX, nullptr);
-	if(id == UINTPTR_MAX) { throwException(Exception::outOfMemoryType, {}); }
+	if(id == UINTPTR_MAX) { throwException(ExceptionTypes::outOfMemory, {}); }
 	auto moduleInstance = new ModuleInstance(compartment,
 											 id,
 											 std::move(exportMap),

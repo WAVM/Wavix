@@ -155,30 +155,30 @@ static Runtime::ExceptionType* getExpectedExceptionType(WAST::ExpectedTrapType e
 	switch(expectedType)
 	{
 	case WAST::ExpectedTrapType::outOfBoundsMemoryAccess:
-		return Runtime::Exception::outOfBoundsMemoryAccessType;
+		return Runtime::ExceptionTypes::outOfBoundsMemoryAccess;
 	case WAST::ExpectedTrapType::outOfBoundsTableAccess:
-		return Runtime::Exception::outOfBoundsTableAccessType;
+		return Runtime::ExceptionTypes::outOfBoundsTableAccess;
 	case WAST::ExpectedTrapType::outOfBoundsDataSegmentAccess:
-		return Runtime::Exception::outOfBoundsDataSegmentAccessType;
+		return Runtime::ExceptionTypes::outOfBoundsDataSegmentAccess;
 	case WAST::ExpectedTrapType::outOfBoundsElemSegmentAccess:
-		return Runtime::Exception::outOfBoundsElemSegmentAccessType;
-	case WAST::ExpectedTrapType::stackOverflow: return Runtime::Exception::stackOverflowType;
+		return Runtime::ExceptionTypes::outOfBoundsElemSegmentAccess;
+	case WAST::ExpectedTrapType::stackOverflow: return Runtime::ExceptionTypes::stackOverflow;
 	case WAST::ExpectedTrapType::integerDivideByZeroOrIntegerOverflow:
-		return Runtime::Exception::integerDivideByZeroOrOverflowType;
+		return Runtime::ExceptionTypes::integerDivideByZeroOrOverflow;
 	case WAST::ExpectedTrapType::invalidFloatOperation:
-		return Runtime::Exception::invalidFloatOperationType;
+		return Runtime::ExceptionTypes::invalidFloatOperation;
 	case WAST::ExpectedTrapType::invokeSignatureMismatch:
-		return Runtime::Exception::invokeSignatureMismatchType;
+		return Runtime::ExceptionTypes::invokeSignatureMismatch;
 	case WAST::ExpectedTrapType::reachedUnreachable:
-		return Runtime::Exception::reachedUnreachableType;
+		return Runtime::ExceptionTypes::reachedUnreachable;
 	case WAST::ExpectedTrapType::indirectCallSignatureMismatch:
-		return Runtime::Exception::indirectCallSignatureMismatchType;
+		return Runtime::ExceptionTypes::indirectCallSignatureMismatch;
 	case WAST::ExpectedTrapType::uninitializedTableElement:
-		return Runtime::Exception::uninitializedTableElementType;
-	case WAST::ExpectedTrapType::outOfMemory: return Runtime::Exception::outOfMemoryType;
+		return Runtime::ExceptionTypes::uninitializedTableElement;
+	case WAST::ExpectedTrapType::outOfMemory: return Runtime::ExceptionTypes::outOfMemory;
 	case WAST::ExpectedTrapType::misalignedAtomicMemoryAccess:
-		return Runtime::Exception::misalignedAtomicMemoryAccessType;
-	case WAST::ExpectedTrapType::invalidArgument: return Runtime::Exception::invalidArgumentType;
+		return Runtime::ExceptionTypes::misalignedAtomicMemoryAccess;
+	case WAST::ExpectedTrapType::invalidArgument: return Runtime::ExceptionTypes::invalidArgument;
 	default: Errors::unreachable();
 	};
 }
@@ -413,17 +413,18 @@ static void processCommand(TestScriptState& state, const Command* command)
 							   asString(actionResults).c_str());
 				}
 			},
-			[&](Runtime::Exception&& exception) {
+			[&](Runtime::Exception* exception) {
 				Runtime::ExceptionType* expectedType
 					= getExpectedExceptionType(assertCommand->expectedType);
-				if(exception.type != expectedType)
+				if(exception->type != expectedType)
 				{
 					testErrorf(state,
 							   assertCommand->action->locus,
 							   "expected %s trap but got %s trap",
 							   describeExceptionType(expectedType).c_str(),
-							   describeExceptionType(exception.type).c_str());
+							   describeExceptionType(exception->type).c_str());
 				}
+				destroyException(exception);
 			});
 		break;
 	}
@@ -465,26 +466,25 @@ static void processCommand(TestScriptState& state, const Command* command)
 							   asString(actionResults).c_str());
 				}
 			},
-			[&](Runtime::Exception&& exception) {
-				if(exception.type != expectedExceptionType)
+			[&](Runtime::Exception* exception) {
+				if(exception->type != expectedExceptionType)
 				{
 					testErrorf(state,
 							   assertCommand->action->locus,
 							   "expected %s exception but got %s exception",
 							   describeExceptionType(expectedExceptionType).c_str(),
-							   describeExceptionType(exception.type).c_str());
+							   describeExceptionType(exception->type).c_str());
 				}
 				else
 				{
 					TypeTuple exceptionParameterTypes
 						= getExceptionTypeParameters(expectedExceptionType);
-					wavmAssert(exception.arguments.size() == exceptionParameterTypes.size());
 
-					for(Uptr argumentIndex = 0; argumentIndex < exception.arguments.size();
+					for(Uptr argumentIndex = 0; argumentIndex < exceptionParameterTypes.size();
 						++argumentIndex)
 					{
 						IR::Value argumentValue(exceptionParameterTypes[argumentIndex],
-												exception.arguments[argumentIndex]);
+												exception->arguments[argumentIndex]);
 						if(argumentValue != assertCommand->expectedArguments[argumentIndex])
 						{
 							testErrorf(
@@ -497,6 +497,7 @@ static void processCommand(TestScriptState& state, const Command* command)
 						}
 					}
 				}
+				destroyException(exception);
 			});
 		break;
 	}
@@ -535,7 +536,8 @@ static void processCommand(TestScriptState& state, const Command* command)
 					testErrorf(state, assertCommand->locus, "module was linkable");
 				}
 			},
-			[&](Runtime::Exception&& exception) {
+			[&](Runtime::Exception* exception) {
+				destroyException(exception);
 				// If the instantiation throws an exception, the assert_unlinkable succeeds.
 			});
 		break;
@@ -581,7 +583,7 @@ DEFINE_INTRINSIC_GLOBAL(spectest, "global_f64", F64, spectest_global_f64, 0.0)
 DEFINE_INTRINSIC_TABLE(spectest,
 					   spectest_table,
 					   table,
-					   TableType(ReferenceType::anyfunc, false, SizeConstraints{10, 20}))
+					   TableType(ReferenceType::funcref, false, SizeConstraints{10, 20}))
 DEFINE_INTRINSIC_MEMORY(spectest, spectest_memory, memory, MemoryType(false, SizeConstraints{1, 2}))
 DEFINE_INTRINSIC_MEMORY(spectest,
 						spectest_shared_memory,
@@ -648,11 +650,12 @@ static I64 threadMain(void* sharedStateVoid)
 					[&testScriptState, &command] {
 						processCommand(testScriptState, command.get());
 					},
-					[&testScriptState, &command](Runtime::Exception&& exception) {
+					[&testScriptState, &command](Runtime::Exception* exception) {
 						testErrorf(testScriptState,
 								   command->locus,
 								   "unexpected trap: %s",
-								   describeExceptionType(exception.type).c_str());
+								   describeExceptionType(exception->type).c_str());
+						destroyException(exception);
 					});
 			}
 		}
@@ -676,11 +679,6 @@ static void showHelp()
 
 int main(int argc, char** argv)
 {
-	// Treat any unhandled exception (e.g. in a thread) as a fatal error.
-	Runtime::setUnhandledExceptionHandler([](Runtime::Exception&& exception) {
-		Errors::fatalf("Unhandled runtime exception: %s", describeException(exception).c_str());
-	});
-
 	// Suppress metrics output.
 	Log::setCategoryEnabled(Log::metrics, false);
 

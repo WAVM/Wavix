@@ -152,24 +152,17 @@ namespace WAVM { namespace Runtime {
 	visit(invalidArgument);
 
 	// Information about a runtime exception.
-	struct Exception
-	{
-#define DECLARE_INTRINSIC_EXCEPTION_TYPE(name, ...) RUNTIME_API static ExceptionType* name##Type;
+	namespace ExceptionTypes {
+#define DECLARE_INTRINSIC_EXCEPTION_TYPE(name, ...) RUNTIME_API extern ExceptionType* name;
 		ENUM_INTRINSIC_EXCEPTION_TYPES(DECLARE_INTRINSIC_EXCEPTION_TYPE)
 #undef DECLARE_INTRINSIC_EXCEPTION_TYPE
-
-		GCPointer<ExceptionType> type;
-		std::vector<IR::UntaggedValue> arguments;
-		Platform::CallStack callStack;
 	};
 
+	struct Exception;
 	// Creates an exception type instance.
 	RUNTIME_API ExceptionType* createExceptionType(Compartment* compartment,
 												   IR::ExceptionType sig,
 												   std::string&& debugName);
-
-	// Returns a string that describes the given exception cause.
-	RUNTIME_API std::string describeException(const Exception& exception);
 
 	// Returns a string that describes the given exception type.
 	RUNTIME_API std::string describeExceptionType(const ExceptionType* type);
@@ -177,16 +170,45 @@ namespace WAVM { namespace Runtime {
 	// Returns the parameter types for an exception type instance.
 	RUNTIME_API IR::TypeTuple getExceptionTypeParameters(const ExceptionType* type);
 
+	// Creates a runtime exception.
+	RUNTIME_API Exception* createException(ExceptionType* type,
+										   const IR::UntaggedValue* arguments,
+										   Uptr numArguments,
+										   Platform::CallStack&& callStack);
+
+	// Destroys a runtime exception.
+	RUNTIME_API void destroyException(Exception* exception);
+
+	// Returns the type of an exception.
+	RUNTIME_API ExceptionType* getExceptionType(const Exception* exception);
+
+	// Returns a specific argument of an exception.
+	RUNTIME_API IR::UntaggedValue getExceptionArgument(const Exception* exception, Uptr argIndex);
+
+	// Returns a string that describes the given exception cause.
+	RUNTIME_API std::string describeException(const Exception* exception);
+
 	// Throws a runtime exception.
+	[[noreturn]] RUNTIME_API void throwException(Exception* exception);
+
+	// Creates and throws a runtime exception.
 	[[noreturn]] RUNTIME_API void throwException(ExceptionType* type,
-												 std::vector<IR::UntaggedValue>&& arguments = {});
+												 const std::vector<IR::UntaggedValue>& arguments
+												 = {});
 
-	// Calls a thunk and catches any runtime exceptions that occur within it.
+	// Calls a thunk and catches any runtime exceptions that occur within it. Note that the
+	// catchThunk takes ownership of the exception, and is responsible for calling destroyException.
 	RUNTIME_API void catchRuntimeExceptions(const std::function<void()>& thunk,
-											const std::function<void(Exception&&)>& catchThunk);
+											const std::function<void(Exception*)>& catchThunk);
 
-	typedef void (*UnhandledExceptionHandler)(Exception&&);
-	RUNTIME_API void setUnhandledExceptionHandler(UnhandledExceptionHandler handler);
+	// Same as catchRuntimeExceptions, but works on a relocatable stack (e.g. a stack for a thread
+	// that will be forked with Platform::forkCurrentThread).
+	RUNTIME_API void catchRuntimeExceptionsOnRelocatableStack(void (*thunk)(),
+															  void (*catchThunk)(Exception*));
+
+	// Calls a thunk and ensures that any signals that occur within the thunk will be thrown as
+	// runtime exceptions.
+	RUNTIME_API void unwindSignalsAsExceptions(const std::function<void()>& thunk);
 
 	// Describes an instruction pointer.
 	bool describeInstructionPointer(Uptr ip, std::string& outDescription);
@@ -290,10 +312,11 @@ namespace WAVM { namespace Runtime {
 	// Globals
 	//
 
-	// Creates a Global with the specified type and initial value.
-	RUNTIME_API Global* createGlobal(Compartment* compartment,
-									 IR::GlobalType type,
-									 IR::Value initialValue);
+	// Creates a Global with the specified type. The initial value is set to the appropriate zero.
+	RUNTIME_API Global* createGlobal(Compartment* compartment, IR::GlobalType type);
+
+	// Initializes a Global with the specified value. May not be called more than once/Global.
+	RUNTIME_API void initializeGlobal(Global* global, IR::Value value);
 
 	// Reads the current value of a global.
 	RUNTIME_API IR::Value getGlobalValue(const Context* context, Global* global);

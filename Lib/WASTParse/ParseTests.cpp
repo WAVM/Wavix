@@ -13,6 +13,7 @@
 #include "WAVM/IR/Value.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/Serialization.h"
+#include "WAVM/Platform/Diagnostics.h"
 #include "WAVM/Runtime/RuntimeData.h"
 #include "WAVM/WASM/WASM.h"
 #include "WAVM/WASTParse/TestScript.h"
@@ -33,6 +34,9 @@ static Runtime::Function* makeHostRef(Uptr index)
 		function
 			= new Runtime::Function(functionMutableData, UINTPTR_MAX, FunctionType::Encoding{0});
 		functionMutableData->function = function;
+
+		Platform::expectLeakedObject(functionMutableData);
+		Platform::expectLeakedObject(function);
 	}
 	return function;
 }
@@ -77,7 +81,7 @@ static IR::Value parseConstExpression(CursorState* cursor)
 		case t_ref_host:
 		{
 			++cursor->nextToken;
-			result.type = ValueType::anyfunc;
+			result.type = ValueType::funcref;
 			result.function = makeHostRef(parseIptr(cursor));
 			break;
 		}
@@ -496,7 +500,7 @@ void WAST::parseTestCommands(const char* string,
 {
 	// Lex the input string.
 	LineInfo* lineInfo = nullptr;
-	Token* tokens = lex(string, stringLength, lineInfo);
+	Token* tokens = lex(string, stringLength, lineInfo, featureSpec.allowLegacyOperatorNames);
 	ParseState parseState(string, lineInfo);
 	CursorState cursor(tokens, &parseState);
 

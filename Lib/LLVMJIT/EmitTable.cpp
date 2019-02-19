@@ -27,7 +27,7 @@ void EmitFunctionContext::ref_null(NoImm)
 	push(llvm::Constant::getNullValue(llvmContext.anyrefType));
 }
 
-void EmitFunctionContext::ref_isnull(NoImm)
+void EmitFunctionContext::ref_is_null(NoImm)
 {
 	llvm::Value* reference = pop();
 	llvm::Value* null = llvm::Constant::getNullValue(llvmContext.anyrefType);
@@ -89,10 +89,10 @@ void EmitFunctionContext::table_init(ElemSegmentAndTableImm imm)
 		 emitLiteral(llvmContext, imm.elemSegmentIndex)});
 }
 
-void EmitFunctionContext::table_drop(ElemSegmentImm imm)
+void EmitFunctionContext::elem_drop(ElemSegmentImm imm)
 {
 	emitRuntimeIntrinsic(
-		"table.drop",
+		"elem.drop",
 		FunctionType({}, TypeTuple({inferValueType<Uptr>(), inferValueType<Uptr>()})),
 		{moduleContext.moduleInstanceId, emitLiteral(llvmContext, imm.elemSegmentIndex)});
 }
