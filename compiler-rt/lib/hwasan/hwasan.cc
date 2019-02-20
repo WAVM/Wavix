@@ -13,6 +13,7 @@
 
 #include "hwasan.h"
 #include "hwasan_checks.h"
+#include "hwasan_dynamic_shadow.h"
 #include "hwasan_poisoning.h"
 #include "hwasan_report.h"
 #include "hwasan_thread.h"
@@ -57,7 +58,7 @@ Flags *flags() {
 }
 
 int hwasan_inited = 0;
-int hwasan_shadow_inited = 0;
+int hwasan_instrumentation_inited = 0;
 bool hwasan_init_is_running;
 
 int hwasan_report_count = 0;
@@ -189,17 +190,13 @@ static void HwasanFormatMemoryUsage(InternalScopedString &s) {
 #if SANITIZER_ANDROID
 static char *memory_usage_buffer = nullptr;
 
-#define PR_SET_VMA 0x53564d41
-#define PR_SET_VMA_ANON_NAME 0
-
 static void InitMemoryUsage() {
   memory_usage_buffer =
       (char *)MmapOrDie(kMemoryUsageBufferSize, "memory usage string");
   CHECK(memory_usage_buffer);
   memory_usage_buffer[0] = '\0';
-  CHECK(internal_prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME,
-                       (uptr)memory_usage_buffer, kMemoryUsageBufferSize,
-                       (uptr)memory_usage_buffer) == 0);
+  DecorateMapping((uptr)memory_usage_buffer, kMemoryUsageBufferSize,
+                  memory_usage_buffer);
 }
 
 void UpdateMemoryUsage() {
@@ -246,6 +243,22 @@ const char *GetStackFrameDescr(uptr pc) {
   return nullptr;
 }
 
+// Prepare to run instrumented code on the main thread.
+void InitInstrumentation() {
+  if (hwasan_instrumentation_inited) return;
+
+  if (!InitShadow()) {
+    Printf("FATAL: HWAddressSanitizer cannot mmap the shadow memory.\n");
+    DumpProcessMap();
+    Die();
+  }
+
+  InitThreads();
+  hwasanThreadList().CreateCurrentThread();
+
+  hwasan_instrumentation_inited = 1;
+}
+
 } // namespace __hwasan
 
 // Interface.
@@ -254,18 +267,13 @@ using namespace __hwasan;
 
 uptr __hwasan_shadow_memory_dynamic_address;  // Global interface symbol.
 
-void __hwasan_shadow_init() {
-  if (hwasan_shadow_inited) return;
-  if (!InitShadow()) {
-    Printf("FATAL: HWAddressSanitizer cannot mmap the shadow memory.\n");
-    DumpProcessMap();
-    Die();
-  }
-  hwasan_shadow_inited = 1;
-}
-
 void __hwasan_init_frames(uptr beg, uptr end) {
   InitFrameDescriptors(beg, end);
+}
+
+void __hwasan_init_static() {
+  InitShadowGOT();
+  InitInstrumentation();
 }
 
 void __hwasan_init() {
@@ -288,10 +296,11 @@ void __hwasan_init() {
 
   DisableCoreDumperIfNecessary();
 
-  __hwasan_shadow_init();
+  InitInstrumentation();
 
-  InitThreads();
-  hwasanThreadList().CreateCurrentThread();
+  // Needs to be called here because flags()->random_tags might not have been
+  // initialized when InitInstrumentation() was called.
+  GetCurrentThread()->InitRandomState();
 
   MadviseShadow();
 
