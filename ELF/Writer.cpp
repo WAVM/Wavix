@@ -288,10 +288,8 @@ template <class ELFT> static void createSyntheticSections() {
   Out::ProgramHeaders = make<OutputSection>("", 0, SHF_ALLOC);
   Out::ProgramHeaders->Alignment = Config->Wordsize;
 
-  if (needsInterpSection()) {
-    In.Interp = createInterpSection();
-    Add(In.Interp);
-  }
+  if (needsInterpSection())
+    Add(createInterpSection());
 
   if (Config->Strip != StripPolicy::All) {
     In.StrTab = make<StringTableSection>(".strtab", false);
@@ -384,10 +382,8 @@ template <class ELFT> static void createSyntheticSections() {
   In.IgotPlt = make<IgotPltSection>();
   Add(In.IgotPlt);
 
-  if (Config->GdbIndex) {
-    In.GdbIndex = GdbIndexSection::create<ELFT>();
-    Add(In.GdbIndex);
-  }
+  if (Config->GdbIndex)
+    Add(GdbIndexSection::create<ELFT>());
 
   // We always need to add rel[a].plt to output if it has entries.
   // Even for static linking it can contain R_[*]_IRELATIVE relocations.
@@ -1262,8 +1258,8 @@ static void sortSection(OutputSection *Sec,
     auto *ISD = cast<InputSectionDescription>(Sec->SectionCommands[0]);
     std::stable_sort(ISD->Sections.begin(), ISD->Sections.end(),
                      [](const InputSection *A, const InputSection *B) -> bool {
-                       return A->File->PPC64SmallCodeModelRelocs &&
-                              !B->File->PPC64SmallCodeModelRelocs;
+                       return A->File->PPC64SmallCodeModelTocRelocs &&
+                              !B->File->PPC64SmallCodeModelTocRelocs;
                      });
     return;
   }
@@ -1677,10 +1673,33 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
   if (!Config->Relocatable)
     forEachRelSec(scanRelocations<ELFT>);
 
+  addIRelativeRelocs();
+
   if (In.Plt && !In.Plt->empty())
     In.Plt->addSymbols();
   if (In.Iplt && !In.Iplt->empty())
     In.Iplt->addSymbols();
+
+  if (!Config->AllowShlibUndefined) {
+    // Error on undefined symbols in a shared object, if all of its DT_NEEDED
+    // entires are seen. These cases would otherwise lead to runtime errors
+    // reported by the dynamic linker.
+    //
+    // ld.bfd traces all DT_NEEDED to emulate the logic of the dynamic linker to
+    // catch more cases. That is too much for us. Our approach resembles the one
+    // used in ld.gold, achieves a good balance to be useful but not too smart.
+    for (InputFile *File : SharedFiles) {
+      SharedFile<ELFT> *F = cast<SharedFile<ELFT>>(File);
+      F->AllNeededIsKnown = llvm::all_of(F->DtNeeded, [&](StringRef Needed) {
+        return Symtab->SoNames.count(Needed);
+      });
+    }
+    for (Symbol *Sym : Symtab->getSymbols())
+      if (Sym->isUndefined() && !Sym->isWeak())
+        if (auto *F = dyn_cast_or_null<SharedFile<ELFT>>(Sym->File))
+          if (F->AllNeededIsKnown)
+            error(toString(F) + ": undefined reference to " + toString(*Sym));
+  }
 
   // Now that we have defined all possible global symbols including linker-
   // synthesized ones. Visit all symbols to give the finishing touches.
@@ -2361,9 +2380,21 @@ static uint16_t getELFType() {
 
 static uint8_t getAbiVersion() {
   // MIPS non-PIC executable gets ABI version 1.
-  if (Config->EMachine == EM_MIPS && getELFType() == ET_EXEC &&
-      (Config->EFlags & (EF_MIPS_PIC | EF_MIPS_CPIC)) == EF_MIPS_CPIC)
-    return 1;
+  if (Config->EMachine == EM_MIPS) {
+    if (getELFType() == ET_EXEC &&
+        (Config->EFlags & (EF_MIPS_PIC | EF_MIPS_CPIC)) == EF_MIPS_CPIC)
+      return 1;
+    return 0;
+  }
+
+  if (Config->EMachine == EM_AMDGPU) {
+    uint8_t Ver = ObjectFiles[0]->ABIVersion;
+    for (InputFile *File : makeArrayRef(ObjectFiles).slice(1))
+      if (File->ABIVersion != Ver)
+        error("incompatible ABI version: " + toString(File));
+    return Ver;
+  }
+
   return 0;
 }
 
