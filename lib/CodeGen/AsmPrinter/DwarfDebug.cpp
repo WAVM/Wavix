@@ -1978,8 +1978,10 @@ void DebugLocEntry::finalize(const AsmPrinter &AP,
 void DwarfDebug::emitDebugLocEntryLocation(const DebugLocStream::Entry &Entry) {
   // Emit the size.
   Asm->OutStreamer->AddComment("Loc expr size");
-  Asm->emitInt16(DebugLocs.getBytes(Entry).size());
-
+  if (getDwarfVersion() >= 5)
+    Asm->EmitULEB128(DebugLocs.getBytes(Entry).size());
+  else
+    Asm->emitInt16(DebugLocs.getBytes(Entry).size());
   // Emit the entry.
   APByteStreamer Streamer(*Asm);
   emitDebugLocEntry(Streamer, Entry);
@@ -2122,9 +2124,9 @@ void DwarfDebug::emitDebugLoc() {
 }
 
 void DwarfDebug::emitDebugLocDWO() {
-  Asm->OutStreamer->SwitchSection(
-      Asm->getObjFileLowering().getDwarfLocDWOSection());
   for (const auto &List : DebugLocs.getLists()) {
+    Asm->OutStreamer->SwitchSection(
+        Asm->getObjFileLowering().getDwarfLocDWOSection());
     Asm->OutStreamer->EmitLabel(List.Label);
     for (const auto &Entry : DebugLocs.getEntries(List)) {
       // GDB only supports startx_length in pre-standard split-DWARF.

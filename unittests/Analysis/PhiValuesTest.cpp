@@ -26,7 +26,8 @@ TEST(PhiValuesTest, SimplePhi) {
   Type *I32PtrTy = Type::getInt32PtrTy(C);
 
   // Create a function with phis that do not have other phis as incoming values
-  Function *F = cast<Function>(M.getOrInsertFunction("f", FunctionType::get(VoidTy, false)));
+  Function *F = Function::Create(FunctionType::get(VoidTy, false),
+                                 Function::ExternalLinkage, "f", M);
 
   BasicBlock *Entry = BasicBlock::Create(C, "entry", F);
   BasicBlock *If = BasicBlock::Create(C, "if", F);
@@ -36,10 +37,10 @@ TEST(PhiValuesTest, SimplePhi) {
   BranchInst::Create(Then, If);
   BranchInst::Create(Then, Else);
 
-  Value *Val1 = new LoadInst(UndefValue::get(I32PtrTy), "val1", Entry);
-  Value *Val2 = new LoadInst(UndefValue::get(I32PtrTy), "val2", Entry);
-  Value *Val3 = new LoadInst(UndefValue::get(I32PtrTy), "val3", Entry);
-  Value *Val4 = new LoadInst(UndefValue::get(I32PtrTy), "val4", Entry);
+  Value *Val1 = new LoadInst(I32Ty, UndefValue::get(I32PtrTy), "val1", Entry);
+  Value *Val2 = new LoadInst(I32Ty, UndefValue::get(I32PtrTy), "val2", Entry);
+  Value *Val3 = new LoadInst(I32Ty, UndefValue::get(I32PtrTy), "val3", Entry);
+  Value *Val4 = new LoadInst(I32Ty, UndefValue::get(I32PtrTy), "val4", Entry);
 
   PHINode *Phi1 = PHINode::Create(I32Ty, 2, "phi1", Then);
   Phi1->addIncoming(Val1, If);
@@ -92,7 +93,8 @@ TEST(PhiValuesTest, DependentPhi) {
   Type *I32PtrTy = Type::getInt32PtrTy(C);
 
   // Create a function with a phi that has another phi as an incoming value
-  Function *F = cast<Function>(M.getOrInsertFunction("f", FunctionType::get(VoidTy, false)));
+  Function *F = Function::Create(FunctionType::get(VoidTy, false),
+                                 Function::ExternalLinkage, "f", M);
 
   BasicBlock *Entry = BasicBlock::Create(C, "entry", F);
   BasicBlock *If1 = BasicBlock::Create(C, "if1", F);
@@ -108,10 +110,10 @@ TEST(PhiValuesTest, DependentPhi) {
   BranchInst::Create(End, If2);
   BranchInst::Create(End, Else2);
 
-  Value *Val1 = new LoadInst(UndefValue::get(I32PtrTy), "val1", Entry);
-  Value *Val2 = new LoadInst(UndefValue::get(I32PtrTy), "val2", Entry);
-  Value *Val3 = new LoadInst(UndefValue::get(I32PtrTy), "val3", Entry);
-  Value *Val4 = new LoadInst(UndefValue::get(I32PtrTy), "val4", Entry);
+  Value *Val1 = new LoadInst(I32Ty, UndefValue::get(I32PtrTy), "val1", Entry);
+  Value *Val2 = new LoadInst(I32Ty, UndefValue::get(I32PtrTy), "val2", Entry);
+  Value *Val3 = new LoadInst(I32Ty, UndefValue::get(I32PtrTy), "val3", Entry);
+  Value *Val4 = new LoadInst(I32Ty, UndefValue::get(I32PtrTy), "val4", Entry);
 
   PHINode *Phi1 = PHINode::Create(I32Ty, 2, "phi1", Then);
   Phi1->addIncoming(Val1, If1);

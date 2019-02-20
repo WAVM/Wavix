@@ -22,6 +22,7 @@
 #include "Error.h"
 #include "ObjDumper.h"
 #include "WindowsResourceDumper.h"
+#include "llvm/DebugInfo/CodeView/GlobalTypeTableBuilder.h"
 #include "llvm/DebugInfo/CodeView/MergingTypeTableBuilder.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/COFFImportFile.h"
@@ -105,6 +106,11 @@ namespace opts {
   // Also -sd in llvm-readobj mode.
   cl::opt<bool> SectionData("section-data",
     cl::desc("Display section data for each section shown."));
+
+  // -section-mapping
+  cl::opt<cl::boolOrDefault>
+      SectionMapping("section-mapping",
+                     cl::desc("Display the section to segment mapping."));
 
   // -relocations, -relocs, -r
   cl::opt<bool> Relocations("relocations",
@@ -212,6 +218,12 @@ namespace opts {
   cl::opt<bool>
       CodeViewMergedTypes("codeview-merged-types",
                           cl::desc("Display the merged CodeView type stream"));
+
+  // -codeview-ghash
+  cl::opt<bool> CodeViewEnableGHash(
+      "codeview-ghash",
+      cl::desc(
+          "Enable global hashing for CodeView type stream de-duplication"));
 
   // -codeview-subsection-bytes
   cl::opt<bool> CodeViewSubsectionBytes(
@@ -411,13 +423,17 @@ static bool isMipsArch(unsigned Arch) {
 namespace {
 struct ReadObjTypeTableBuilder {
   ReadObjTypeTableBuilder()
-      : Allocator(), IDTable(Allocator), TypeTable(Allocator) {}
+      : Allocator(), IDTable(Allocator), TypeTable(Allocator),
+        GlobalIDTable(Allocator), GlobalTypeTable(Allocator) {}
 
   llvm::BumpPtrAllocator Allocator;
   llvm::codeview::MergingTypeTableBuilder IDTable;
   llvm::codeview::MergingTypeTableBuilder TypeTable;
+  llvm::codeview::GlobalTypeTableBuilder GlobalIDTable;
+  llvm::codeview::GlobalTypeTableBuilder GlobalTypeTable;
+  std::vector<OwningBinary<Binary>> Binaries;
 };
-}
+} // namespace
 static ReadObjTypeTableBuilder CVTypes;
 
 /// Creates an format-specific object file dumper.
@@ -474,8 +490,8 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer) {
     Dumper->printDynamicTable();
   if (opts::NeededLibraries)
     Dumper->printNeededLibraries();
-  if (opts::ProgramHeaders)
-    Dumper->printProgramHeaders();
+  if (opts::ProgramHeaders || opts::SectionMapping == cl::BOU_TRUE)
+    Dumper->printProgramHeaders(opts::ProgramHeaders, opts::SectionMapping);
   if (!opts::StringDump.empty())
     llvm::for_each(opts::StringDump, [&Dumper, Obj](StringRef SectionName) {
       Dumper->printSectionAsString(Obj, SectionName);
@@ -537,7 +553,9 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer) {
     if (opts::CodeView)
       Dumper->printCodeViewDebugInfo();
     if (opts::CodeViewMergedTypes)
-      Dumper->mergeCodeViewTypes(CVTypes.IDTable, CVTypes.TypeTable);
+      Dumper->mergeCodeViewTypes(CVTypes.IDTable, CVTypes.TypeTable,
+                                 CVTypes.GlobalIDTable, CVTypes.GlobalTypeTable,
+                                 opts::CodeViewEnableGHash);
   }
   if (Obj->isMachO()) {
     if (opts::MachODataInCode)
@@ -626,6 +644,8 @@ static void dumpInput(StringRef File) {
     dumpWindowsResourceFile(WinRes);
   else
     reportError(File, readobj_error::unrecognized_file_format);
+
+  CVTypes.Binaries.push_back(std::move(*BinaryOrErr));
 }
 
 /// Registers aliases that should only be allowed by readobj.
@@ -715,7 +735,12 @@ int main(int argc, const char *argv[]) {
 
   if (opts::CodeViewMergedTypes) {
     ScopedPrinter W(outs());
-    dumpCodeViewMergedTypes(W, CVTypes.IDTable, CVTypes.TypeTable);
+    if (opts::CodeViewEnableGHash)
+      dumpCodeViewMergedTypes(W, CVTypes.GlobalIDTable.records(),
+                              CVTypes.GlobalTypeTable.records());
+    else
+      dumpCodeViewMergedTypes(W, CVTypes.IDTable.records(),
+                              CVTypes.TypeTable.records());
   }
 
   return 0;

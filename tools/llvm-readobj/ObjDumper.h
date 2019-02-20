@@ -14,6 +14,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/CommandLine.h"
 
 namespace llvm {
 namespace object {
@@ -21,8 +22,9 @@ class COFFImportFile;
 class ObjectFile;
 }
 namespace codeview {
+class GlobalTypeTableBuilder;
 class MergingTypeTableBuilder;
-}
+} // namespace codeview
 
 class ScopedPrinter;
 
@@ -40,13 +42,20 @@ public:
     if (PrintDynamicSymbols)
       printDynamicSymbols();
   }
+  virtual void printProgramHeaders(bool PrintProgramHeaders,
+                                   cl::boolOrDefault PrintSectionMapping) {
+    if (PrintProgramHeaders)
+      printProgramHeaders();
+    if (PrintSectionMapping == cl::BOU_TRUE)
+      printSectionMapping();
+  }
+
   virtual void printUnwindInfo() = 0;
 
   // Only implemented for ELF at this time.
   virtual void printDynamicRelocations() { }
   virtual void printDynamicTable() { }
   virtual void printNeededLibraries() { }
-  virtual void printProgramHeaders() { }
   virtual void printSectionAsHex(StringRef SectionName) {}
   virtual void printHashTable() { }
   virtual void printGnuHashTable() { }
@@ -80,7 +89,10 @@ public:
   virtual void printCodeViewDebugInfo() { }
   virtual void
   mergeCodeViewTypes(llvm::codeview::MergingTypeTableBuilder &CVIDs,
-                     llvm::codeview::MergingTypeTableBuilder &CVTypes) {}
+                     llvm::codeview::MergingTypeTableBuilder &CVTypes,
+                     llvm::codeview::GlobalTypeTableBuilder &GlobalCVIDs,
+                     llvm::codeview::GlobalTypeTableBuilder &GlobalCVTypes,
+                     bool GHash) {}
 
   // Only implemented for MachO.
   virtual void printMachODataInCode() { }
@@ -99,8 +111,10 @@ protected:
   ScopedPrinter &W;
 
 private:
-  virtual void printSymbols() {};
-  virtual void printDynamicSymbols() {};
+  virtual void printSymbols() {}
+  virtual void printDynamicSymbols() {}
+  virtual void printProgramHeaders() {}
+  virtual void printSectionMapping() {}
 };
 
 std::error_code createCOFFDumper(const object::ObjectFile *Obj,
@@ -122,9 +136,9 @@ std::error_code createWasmDumper(const object::ObjectFile *Obj,
 void dumpCOFFImportFile(const object::COFFImportFile *File,
                         ScopedPrinter &Writer);
 
-void dumpCodeViewMergedTypes(
-    ScopedPrinter &Writer, llvm::codeview::MergingTypeTableBuilder &IDTable,
-    llvm::codeview::MergingTypeTableBuilder &TypeTable);
+void dumpCodeViewMergedTypes(ScopedPrinter &Writer,
+                             ArrayRef<ArrayRef<uint8_t>> IpiRecords,
+                             ArrayRef<ArrayRef<uint8_t>> TpiRecords);
 
 } // namespace llvm
 

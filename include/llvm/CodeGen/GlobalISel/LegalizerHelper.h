@@ -86,7 +86,7 @@ public:
   /// Legalize a vector instruction by increasing the number of vector elements
   /// involved and ignoring the added elements later.
   LegalizeResult moreElementsVector(MachineInstr &MI, unsigned TypeIdx,
-                                    LLT WideTy);
+                                    LLT MoreTy);
 
   /// Expose MIRBuilder so clients can set their own RecordInsertInstruction
   /// functions
@@ -114,11 +114,54 @@ private:
   void widenScalarDst(MachineInstr &MI, LLT WideTy, unsigned OpIdx = 0,
                       unsigned TruncOpcode = TargetOpcode::G_TRUNC);
 
+  // Legalize a single operand \p OpIdx of the machine instruction \p MI as a
+  // Def by truncating the operand's type to \p NarrowTy, replacing in place and
+  // extending back with \p ExtOpcode.
+  void narrowScalarDst(MachineInstr &MI, LLT NarrowTy, unsigned OpIdx,
+                       unsigned ExtOpcode);
+  /// Legalize a single operand \p OpIdx of the machine instruction \p MI as a
+  /// Def by performing it with additional vector elements and extracting the
+  /// result elements, and replacing the vreg of the operand in place.
+  void moreElementsVectorDst(MachineInstr &MI, LLT MoreTy, unsigned OpIdx);
+
+  /// Legalize a single operand \p OpIdx of the machine instruction \p MI as a
+  /// Use by producing a vector with undefined high elements, extracting the
+  /// original vector type, and replacing the vreg of the operand in place.
+  void moreElementsVectorSrc(MachineInstr &MI, LLT MoreTy, unsigned OpIdx);
+
+  LegalizeResult
+  widenScalarMergeValues(MachineInstr &MI, unsigned TypeIdx, LLT WideTy);
+  LegalizeResult
+  widenScalarUnmergeValues(MachineInstr &MI, unsigned TypeIdx, LLT WideTy);
+  LegalizeResult
+  widenScalarExtract(MachineInstr &MI, unsigned TypeIdx, LLT WideTy);
+  LegalizeResult
+  widenScalarInsert(MachineInstr &MI, unsigned TypeIdx, LLT WideTy);
+
   /// Helper function to split a wide generic register into bitwise blocks with
   /// the given Type (which implies the number of blocks needed). The generic
   /// registers created are appended to Ops, starting at bit 0 of Reg.
   void extractParts(unsigned Reg, LLT Ty, int NumParts,
                     SmallVectorImpl<unsigned> &VRegs);
+
+  /// Version which handles irregular splits.
+  bool extractParts(unsigned Reg, LLT RegTy, LLT MainTy,
+                    LLT &LeftoverTy,
+                    SmallVectorImpl<unsigned> &VRegs,
+                    SmallVectorImpl<unsigned> &LeftoverVRegs);
+
+  /// Helper function to build a wide generic register \p DstReg of type \p
+  /// RegTy from smaller parts. This will produce a G_MERGE_VALUES,
+  /// G_BUILD_VECTOR, G_CONCAT_VECTORS, or sequence of G_INSERT as appropriate
+  /// for the types.
+  ///
+  /// \p PartRegs must be registers of type \p PartTy.
+  ///
+  /// If \p ResultTy does not evenly break into \p PartTy sized pieces, the
+  /// remainder must be specified with \p LeftoverRegs of type \p LeftoverTy.
+  void insertParts(unsigned DstReg, LLT ResultTy,
+                   LLT PartTy, ArrayRef<unsigned> PartRegs,
+                   LLT LeftoverTy = LLT(), ArrayRef<unsigned> LeftoverRegs = {});
 
   LegalizeResult fewerElementsVectorImplicitDef(MachineInstr &MI,
                                                 unsigned TypeIdx, LLT NarrowTy);
@@ -128,6 +171,12 @@ private:
   LegalizeResult fewerElementsVectorBasic(MachineInstr &MI, unsigned TypeIdx,
                                           LLT NarrowTy);
 
+  /// Legalize a instruction with a vector type where each operand may have a
+  /// different element type. All type indexes must have the same number of
+  /// elements.
+  LegalizeResult fewerElementsVectorMultiEltType(MachineInstr &MI,
+                                                 unsigned TypeIdx, LLT NarrowTy);
+
   LegalizeResult fewerElementsVectorCasts(MachineInstr &MI, unsigned TypeIdx,
                                           LLT NarrowTy);
 
@@ -135,9 +184,20 @@ private:
   fewerElementsVectorCmp(MachineInstr &MI, unsigned TypeIdx, LLT NarrowTy);
 
   LegalizeResult
-  fewerElementsVectorLoadStore(MachineInstr &MI, unsigned TypeIdx, LLT NarrowTy);
+  fewerElementsVectorSelect(MachineInstr &MI, unsigned TypeIdx, LLT NarrowTy);
 
+  LegalizeResult
+  reduceLoadStoreWidth(MachineInstr &MI, unsigned TypeIdx, LLT NarrowTy);
+
+  LegalizeResult narrowScalarShiftByConstant(MachineInstr &MI, const APInt &Amt,
+                                             LLT HalfTy, LLT ShiftAmtTy);
+
+  LegalizeResult narrowScalarShift(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
   LegalizeResult narrowScalarMul(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
+  LegalizeResult narrowScalarExtract(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
+  LegalizeResult narrowScalarInsert(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
+
+  LegalizeResult narrowScalarSelect(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
 
   LegalizeResult lowerBitCount(MachineInstr &MI, unsigned TypeIdx, LLT Ty);
 

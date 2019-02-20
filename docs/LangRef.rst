@@ -4640,6 +4640,8 @@ parameter, and it will be included in the ``variables:`` field of its
                           type: !3)
     !2 = !DILocalVariable(name: "y", scope: !5, file: !2, line: 7, type: !3)
 
+.. _DIExpression:
+
 DIExpression
 """"""""""""
 
@@ -5150,7 +5152,11 @@ identifies the callback function as the second argument of the broker (``i64
 2``) and the sole argument of the callback function as the third one of the
 broker function (``i64 3``).
 
-.. code-block:: llvm
+.. FIXME why does the llvm-sphinx-docs builder give a highlighting
+   error if the below is set to highlight as 'llvm', despite that we
+   have misc.highlighting_failure set?
+
+.. code-block:: text
 
     declare !callback !1 dso_local i32 @pthread_create(i64*, %union.pthread_attr_t*, i8* (i8*)*, i8*)
 
@@ -5164,7 +5170,11 @@ values (each identified by a ``i64 -1``) and afterwards all
 variadic arguments that are passed to the ``__kmpc_fork_call`` call (due to the
 final ``i1 true``).
 
-.. code-block:: llvm
+.. FIXME why does the llvm-sphinx-docs builder give a highlighting
+   error if the below is set to highlight as 'llvm', despite that we
+   have misc.highlighting_failure set?
+
+.. code-block:: text
 
     declare !callback !0 dso_local void @__kmpc_fork_call(%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...)
 
@@ -6503,6 +6513,7 @@ control flow, not values (the one exception being the
 The terminator instructions are: ':ref:`ret <i_ret>`',
 ':ref:`br <i_br>`', ':ref:`switch <i_switch>`',
 ':ref:`indirectbr <i_indirectbr>`', ':ref:`invoke <i_invoke>`',
+':ref:`callbr <i_callbr>`'
 ':ref:`resume <i_resume>`', ':ref:`catchswitch <i_catchswitch>`',
 ':ref:`catchret <i_catchret>`',
 ':ref:`cleanupret <i_cleanupret>`',
@@ -6826,6 +6837,85 @@ Example:
                   unwind label %TestCleanup              ; i32:retval set
       %retval = invoke coldcc i32 %Testfnptr(i32 15) to label %Continue
                   unwind label %TestCleanup              ; i32:retval set
+
+.. _i_callbr:
+
+'``callbr``' Instruction
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      <result> = callbr [cconv] [ret attrs] [addrspace(<num>)] [<ty>|<fnty> <fnptrval>(<function args>) [fn attrs]
+                    [operand bundles] to label <normal label> or jump [other labels]
+
+Overview:
+"""""""""
+
+The '``callbr``' instruction causes control to transfer to a specified
+function, with the possibility of control flow transfer to either the
+'``normal``' label or one of the '``other``' labels.
+
+This instruction should only be used to implement the "goto" feature of gcc
+style inline assembly. Any other usage is an error in the IR verifier.
+
+Arguments:
+""""""""""
+
+This instruction requires several arguments:
+
+#. The optional "cconv" marker indicates which :ref:`calling
+   convention <callingconv>` the call should use. If none is
+   specified, the call defaults to using C calling conventions.
+#. The optional :ref:`Parameter Attributes <paramattrs>` list for return
+   values. Only '``zeroext``', '``signext``', and '``inreg``' attributes
+   are valid here.
+#. The optional addrspace attribute can be used to indicate the address space
+   of the called function. If it is not specified, the program address space
+   from the :ref:`datalayout string<langref_datalayout>` will be used.
+#. '``ty``': the type of the call instruction itself which is also the
+   type of the return value. Functions that return no value are marked
+   ``void``.
+#. '``fnty``': shall be the signature of the function being called. The
+   argument types must match the types implied by this signature. This
+   type can be omitted if the function is not varargs.
+#. '``fnptrval``': An LLVM value containing a pointer to a function to
+   be called. In most cases, this is a direct function call, but
+   indirect ``callbr``'s are just as possible, calling an arbitrary pointer
+   to function value.
+#. '``function args``': argument list whose types match the function
+   signature argument types and parameter attributes. All arguments must
+   be of :ref:`first class <t_firstclass>` type. If the function signature
+   indicates the function accepts a variable number of arguments, the
+   extra arguments can be specified.
+#. '``normal label``': the label reached when the called function
+   executes a '``ret``' instruction.
+#. '``other labels``': the labels reached when a callee transfers control
+   to a location other than the normal '``normal label``'
+#. The optional :ref:`function attributes <fnattrs>` list.
+#. The optional :ref:`operand bundles <opbundles>` list.
+
+Semantics:
+""""""""""
+
+This instruction is designed to operate as a standard '``call``'
+instruction in most regards. The primary difference is that it
+establishes an association with additional labels to define where control
+flow goes after the call.
+
+The only use of this today is to implement the "goto" feature of gcc inline
+assembly where additional labels can be provided as locations for the inline
+assembly to jump to.
+
+Example:
+""""""""
+
+.. code-block:: text
+
+      callbr void asm "", "r,x"(i32 %x, i8 *blockaddress(@foo, %fail))
+                  to label %normal or jump [label %fail]
 
 .. _i_resume:
 
@@ -8274,15 +8364,16 @@ boundary compatible with the type.
 Semantics:
 """"""""""
 
-Memory is allocated; a pointer is returned. The operation is undefined
-if there is insufficient stack space for the allocation. '``alloca``'d
-memory is automatically released when the function returns. The
-'``alloca``' instruction is commonly used to represent automatic
-variables that must have an address available. When the function returns
-(either with the ``ret`` or ``resume`` instructions), the memory is
-reclaimed. Allocating zero bytes is legal, but the returned pointer may not
-be unique. The order in which memory is allocated (ie., which way the stack
-grows) is not specified.
+Memory is allocated; a pointer is returned. The allocated memory is
+uninitialized, and loading from uninitialized memory produces an undefined
+value. The operation itself is undefined if there is insufficient stack
+space for the allocation.'``alloca``'d memory is automatically released
+when the function returns. The '``alloca``' instruction is commonly used
+to represent automatic variables that must have an address available. When
+the function returns (either with the ``ret`` or ``resume`` instructions),
+the memory is reclaimed. Allocating zero bytes is legal, but the returned
+pointer may not be unique. The order in which memory is allocated (ie.,
+which way the stack grows) is not specified.
 
 Example:
 """"""""
@@ -13079,7 +13170,8 @@ Arguments
 """"""""""
 
 The arguments (%a and %b) and the result may be of integer types of any bit
-width, but they must have the same bit width. ``%a`` and ``%b`` are the two
+width, but they must have the same bit width. The arguments may also work with
+int vectors of the same length and int size. ``%a`` and ``%b`` are the two
 values that will undergo signed fixed point multiplication. The argument
 ``%scale`` represents the scale of both operands, and must be a constant
 integer.
@@ -13095,7 +13187,7 @@ If the result value cannot be precisely represented in the given scale, the
 value is rounded up or down to the closest representable value. The rounding
 direction is unspecified.
 
-It is undefined behavior if the source value does not fit within the range of
+It is undefined behavior if the result value does not fit within the range of
 the fixed point type.
 
 
@@ -13110,6 +13202,65 @@ Examples
 
       ; The result in the following could be rounded up to -2 or down to -2.5
       %res = call i4 @llvm.smul.fix.i4(i4 3, i4 -3, i32 1)  ; %res = -5 (or -4) (1.5 x -1.5 = -2.25)
+
+
+'``llvm.umul.fix.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax
+"""""""
+
+This is an overloaded intrinsic. You can use ``llvm.umul.fix``
+on any integer bit width or vectors of integers.
+
+::
+
+      declare i16 @llvm.umul.fix.i16(i16 %a, i16 %b, i32 %scale)
+      declare i32 @llvm.umul.fix.i32(i32 %a, i32 %b, i32 %scale)
+      declare i64 @llvm.umul.fix.i64(i64 %a, i64 %b, i32 %scale)
+      declare <4 x i32> @llvm.umul.fix.v4i32(<4 x i32> %a, <4 x i32> %b, i32 %scale)
+
+Overview
+"""""""""
+
+The '``llvm.umul.fix``' family of intrinsic functions perform unsigned
+fixed point multiplication on 2 arguments of the same scale.
+
+Arguments
+""""""""""
+
+The arguments (%a and %b) and the result may be of integer types of any bit
+width, but they must have the same bit width. The arguments may also work with
+int vectors of the same length and int size. ``%a`` and ``%b`` are the two
+values that will undergo unsigned fixed point multiplication. The argument
+``%scale`` represents the scale of both operands, and must be a constant
+integer.
+
+Semantics:
+""""""""""
+
+This operation performs unsigned fixed point multiplication on the 2 arguments of a
+specified scale. The result will also be returned in the same scale specified
+in the third argument.
+
+If the result value cannot be precisely represented in the given scale, the
+value is rounded up or down to the closest representable value. The rounding
+direction is unspecified.
+
+It is undefined behavior if the result value does not fit within the range of
+the fixed point type.
+
+
+Examples
+"""""""""
+
+.. code-block:: llvm
+
+      %res = call i4 @llvm.umul.fix.i4(i4 3, i4 2, i32 0)  ; %res = 6 (2 x 3 = 6)
+      %res = call i4 @llvm.umul.fix.i4(i4 3, i4 2, i32 1)  ; %res = 3 (1.5 x 1 = 1.5)
+
+      ; The result in the following could be rounded down to 3.5 or up to 4
+      %res = call i4 @llvm.umul.fix.i4(i4 15, i4 1, i32 1)  ; %res = 7 (or 8) (7.5 x 0.5 = 3.75)
 
 
 Specialised Arithmetic Intrinsics
@@ -15575,40 +15726,40 @@ Syntax:
 
 ::
 
-      declare i32 @llvm.objectsize.i32(i8* <object>, i1 <min>, i1 <nullunknown>)
-      declare i64 @llvm.objectsize.i64(i8* <object>, i1 <min>, i1 <nullunknown>)
+      declare i32 @llvm.objectsize.i32(i8* <object>, i1 <min>, i1 <nullunknown>, i1 <dynamic>)
+      declare i64 @llvm.objectsize.i64(i8* <object>, i1 <min>, i1 <nullunknown>, i1 <dynamic>)
 
 Overview:
 """""""""
 
-The ``llvm.objectsize`` intrinsic is designed to provide information to
-the optimizers to determine at compile time whether a) an operation
-(like memcpy) will overflow a buffer that corresponds to an object, or
-b) that a runtime check for overflow isn't necessary. An object in this
-context means an allocation of a specific class, structure, array, or
-other object.
+The ``llvm.objectsize`` intrinsic is designed to provide information to the
+optimizer to determine whether a) an operation (like memcpy) will overflow a
+buffer that corresponds to an object, or b) that a runtime check for overflow
+isn't necessary. An object in this context means an allocation of a specific
+class, structure, array, or other object.
 
 Arguments:
 """"""""""
 
-The ``llvm.objectsize`` intrinsic takes three arguments. The first argument is
-a pointer to or into the ``object``. The second argument determines whether
-``llvm.objectsize`` returns 0 (if true) or -1 (if false) when the object size
-is unknown. The third argument controls how ``llvm.objectsize`` acts when
-``null`` in address space 0 is used as its pointer argument. If it's ``false``,
+The ``llvm.objectsize`` intrinsic takes four arguments. The first argument is a
+pointer to or into the ``object``. The second argument determines whether
+``llvm.objectsize`` returns 0 (if true) or -1 (if false) when the object size is
+unknown. The third argument controls how ``llvm.objectsize`` acts when ``null``
+in address space 0 is used as its pointer argument. If it's ``false``,
 ``llvm.objectsize`` reports 0 bytes available when given ``null``. Otherwise, if
 the ``null`` is in a non-zero address space or if ``true`` is given for the
-third argument of ``llvm.objectsize``, we assume its size is unknown.
+third argument of ``llvm.objectsize``, we assume its size is unknown. The fourth
+argument to ``llvm.objectsize`` determines if the value should be evaluated at
+runtime.
 
-The second and third arguments only accept constants.
+The second, third, and fourth arguments only accept constants.
 
 Semantics:
 """"""""""
 
-The ``llvm.objectsize`` intrinsic is lowered to a constant representing
-the size of the object concerned. If the size cannot be determined at
-compile time, ``llvm.objectsize`` returns ``i32/i64 -1 or 0`` (depending
-on the ``min`` argument).
+The ``llvm.objectsize`` intrinsic is lowered to a value representing the size of
+the object concerned. If the size cannot be determined, ``llvm.objectsize``
+returns ``i32/i64 -1 or 0`` (depending on the ``min`` argument).
 
 '``llvm.expect``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

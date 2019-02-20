@@ -1523,7 +1523,7 @@ Value *PolynomialMultiplyRecognize::generate(BasicBlock::iterator At,
       ParsedValues &PV) {
   IRBuilder<> B(&*At);
   Module *M = At->getParent()->getParent()->getParent();
-  Value *PMF = Intrinsic::getDeclaration(M, Intrinsic::hexagon_M4_pmpyw);
+  Function *PMF = Intrinsic::getDeclaration(M, Intrinsic::hexagon_M4_pmpyw);
 
   Value *P = PV.P, *Q = PV.Q, *P0 = P;
   unsigned IC = PV.IterCount;
@@ -2253,10 +2253,8 @@ CleanupAndExit:
       Type *Int32PtrTy = Type::getInt32PtrTy(Ctx);
       Type *VoidTy = Type::getVoidTy(Ctx);
       Module *M = Func->getParent();
-      Constant *CF = M->getOrInsertFunction(HexagonVolatileMemcpyName, VoidTy,
-                                            Int32PtrTy, Int32PtrTy, Int32Ty);
-      Function *Fn = cast<Function>(CF);
-      Fn->setLinkage(Function::ExternalLinkage);
+      FunctionCallee Fn = M->getOrInsertFunction(
+          HexagonVolatileMemcpyName, VoidTy, Int32PtrTy, Int32PtrTy, Int32Ty);
 
       const SCEV *OneS = SE->getConstant(Int32Ty, 1);
       const SCEV *BECount32 = SE->getTruncateOrZeroExtend(BECount, Int32Ty);

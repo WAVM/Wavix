@@ -598,7 +598,7 @@ void MemorySSAUpdater::applyUpdates(ArrayRef<CFGUpdate> Updates,
 
   if (!RevDeleteUpdates.empty()) {
     // Update for inserted edges: use newDT and snapshot CFG as if deletes had
-    // not occured.
+    // not occurred.
     // FIXME: This creates a new DT, so it's more expensive to do mix
     // delete/inserts vs just inserts. We can do an incremental update on the DT
     // to revert deletes, than re-delete the edges. Teaching DT to do this, is
@@ -696,7 +696,7 @@ void MemorySSAUpdater::applyInsertUpdates(ArrayRef<CFGUpdate> Updates,
 
   // Map a BB to its predecessors: added + previously existing. To get a
   // deterministic order, store predecessors as SetVectors. The order in each
-  // will be defined by teh order in Updates (fixed) and the order given by
+  // will be defined by the order in Updates (fixed) and the order given by
   // children<> (also fixed). Since we further iterate over these ordered sets,
   // we lose the information of multiple edges possibly existing between two
   // blocks, so we'll keep and EdgeCount map for that.
@@ -1051,7 +1051,7 @@ void MemorySSAUpdater::wireOldPredecessorsToNewImmediatePredecessor(
   }
 }
 
-void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA) {
+void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA, bool OptimizePhis) {
   assert(!MSSA->isLiveOnEntryDef(MA) &&
          "Trying to remove the live on entry def");
   // We can only delete phi nodes if they have no uses, or we can replace all
@@ -1069,6 +1069,8 @@ void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA) {
   } else {
     NewDefTarget = cast<MemoryUseOrDef>(MA)->getDefiningAccess();
   }
+
+  SmallSetVector<MemoryPhi *, 4> PhisToCheck;
 
   // Re-point the uses at our defining access
   if (!isa<MemoryUse>(MA) && !MA->use_empty()) {
@@ -1089,6 +1091,9 @@ void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA) {
       Use &U = *MA->use_begin();
       if (auto *MUD = dyn_cast<MemoryUseOrDef>(U.getUser()))
         MUD->resetOptimized();
+      if (OptimizePhis)
+        if (MemoryPhi *MP = dyn_cast<MemoryPhi>(U.getUser()))
+          PhisToCheck.insert(MP);
       U.set(NewDefTarget);
     }
   }
@@ -1097,6 +1102,21 @@ void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA) {
   // are doing things here
   MSSA->removeFromLookups(MA);
   MSSA->removeFromLists(MA);
+
+  // Optionally optimize Phi uses. This will recursively remove trivial phis.
+  if (!PhisToCheck.empty()) {
+    SmallVector<WeakVH, 16> PhisToOptimize{PhisToCheck.begin(),
+                                           PhisToCheck.end()};
+    PhisToCheck.clear();
+
+    unsigned PhisSize = PhisToOptimize.size();
+    while (PhisSize-- > 0)
+      if (MemoryPhi *MP =
+              cast_or_null<MemoryPhi>(PhisToOptimize.pop_back_val())) {
+        auto OperRange = MP->operands();
+        tryRemoveTrivialPhi(MP, OperRange);
+      }
+  }
 }
 
 void MemorySSAUpdater::removeBlocks(

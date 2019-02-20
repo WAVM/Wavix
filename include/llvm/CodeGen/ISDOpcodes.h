@@ -271,12 +271,12 @@ namespace ISD {
     /// resulting value is this minimum value.
     SSUBSAT, USUBSAT,
 
-    /// RESULT = SMULFIX(LHS, RHS, SCALE) - Perform fixed point multiplication on
+    /// RESULT = [US]MULFIX(LHS, RHS, SCALE) - Perform fixed point multiplication on
     /// 2 integers with the same width and scale. SCALE represents the scale of
     /// both operands as fixed point numbers. This SCALE parameter must be a
     /// constant integer. A scale of zero is effectively performing
     /// multiplication on 2 integers.
-    SMULFIX,
+    SMULFIX, UMULFIX,
 
     /// Simple binary floating point operators.
     FADD, FSUB, FMUL, FDIV, FREM,
@@ -579,7 +579,9 @@ namespace ISD {
     /// is often a storage-only type but has native conversions.
     FP16_TO_FP, FP_TO_FP16,
 
-    /// Perform various unary floating-point operations inspired by libm.
+    /// Perform various unary floating-point operations inspired by libm. For
+    /// FPOWI, the result is undefined if if the integer operand doesn't fit
+    /// into 32 bits.
     FNEG, FABS, FSQRT, FCBRT, FSIN, FCOS, FPOWI, FPOW,
     FLOG, FLOG2, FLOG10, FEXP, FEXP2,
     FCEIL, FTRUNC, FRINT, FNEARBYINT, FROUND, FFLOOR,
@@ -664,6 +666,9 @@ namespace ISD {
     /// modes as a single "operand", even though they may have multiple
     /// SDOperands.
     INLINEASM,
+
+    /// INLINEASM_BR - Terminator version of inline asm. Used by asm-goto.
+    INLINEASM_BR,
 
     /// EH_LABEL - Represents a label in mid basic block used to track
     /// locations needed for debug and exception handling tables.  These nodes

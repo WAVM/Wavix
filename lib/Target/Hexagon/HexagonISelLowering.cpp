@@ -578,7 +578,8 @@ HexagonTargetLowering::LowerINLINEASM(SDValue Op, SelectionDAG &DAG) const {
   const HexagonRegisterInfo &HRI = *Subtarget.getRegisterInfo();
   unsigned LR = HRI.getRARegister();
 
-  if (Op.getOpcode() != ISD::INLINEASM || HMFI.hasClobberLR())
+  if ((Op.getOpcode() != ISD::INLINEASM &&
+       Op.getOpcode() != ISD::INLINEASM_BR) || HMFI.hasClobberLR())
     return Op;
 
   unsigned NumOps = Op.getNumOperands();
@@ -1291,6 +1292,7 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BUILD_PAIR,           MVT::i64,   Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG,    MVT::i1,    Expand);
   setOperationAction(ISD::INLINEASM,            MVT::Other, Custom);
+  setOperationAction(ISD::INLINEASM_BR,         MVT::Other, Custom);
   setOperationAction(ISD::PREFETCH,             MVT::Other, Custom);
   setOperationAction(ISD::READCYCLECOUNTER,     MVT::i64,   Custom);
   setOperationAction(ISD::INTRINSIC_VOID,       MVT::Other, Custom);
@@ -2740,7 +2742,7 @@ HexagonTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   unsigned Opc = Op.getOpcode();
 
   // Handle INLINEASM first.
-  if (Opc == ISD::INLINEASM)
+  if (Opc == ISD::INLINEASM || Opc == ISD::INLINEASM_BR)
     return LowerINLINEASM(Op, DAG);
 
   if (isHvxOperation(Op)) {
@@ -3116,12 +3118,12 @@ Value *HexagonTargetLowering::emitLoadLinked(IRBuilder<> &Builder, Value *Addr,
   assert((SZ == 32 || SZ == 64) && "Only 32/64-bit atomic loads supported");
   Intrinsic::ID IntID = (SZ == 32) ? Intrinsic::hexagon_L2_loadw_locked
                                    : Intrinsic::hexagon_L4_loadd_locked;
+  Function *Fn = Intrinsic::getDeclaration(M, IntID);
 
   PointerType *NewPtrTy
     = Builder.getIntNTy(SZ)->getPointerTo(PT->getAddressSpace());
   Addr = Builder.CreateBitCast(Addr, NewPtrTy);
 
-  Value *Fn = Intrinsic::getDeclaration(M, IntID);
   Value *Call = Builder.CreateCall(Fn, Addr, "larx");
 
   return Builder.CreateBitCast(Call, Ty);
@@ -3140,7 +3142,7 @@ Value *HexagonTargetLowering::emitStoreConditional(IRBuilder<> &Builder,
   assert((SZ == 32 || SZ == 64) && "Only 32/64-bit atomic stores supported");
   Intrinsic::ID IntID = (SZ == 32) ? Intrinsic::hexagon_S2_storew_locked
                                    : Intrinsic::hexagon_S4_stored_locked;
-  Value *Fn = Intrinsic::getDeclaration(M, IntID);
+  Function *Fn = Intrinsic::getDeclaration(M, IntID);
 
   unsigned AS = Addr->getType()->getPointerAddressSpace();
   Addr = Builder.CreateBitCast(Addr, CastTy->getPointerTo(AS));

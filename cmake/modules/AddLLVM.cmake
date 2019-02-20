@@ -380,7 +380,7 @@ endfunction(set_windows_version_resource_properties)
 function(llvm_add_library name)
   cmake_parse_arguments(ARG
     "MODULE;SHARED;STATIC;OBJECT;DISABLE_LLVM_LINK_LLVM_DYLIB;SONAME;NO_INSTALL_RPATH"
-    "OUTPUT_NAME;PLUGIN_TOOL"
+    "OUTPUT_NAME;PLUGIN_TOOL;ENTITLEMENTS"
     "ADDITIONAL_HEADERS;DEPENDS;LINK_COMPONENTS;LINK_LIBS;OBJLIBS"
     ${ARGN})
   list(APPEND LLVM_COMMON_DEPENDS ${ARG_DEPENDS})
@@ -584,7 +584,7 @@ function(llvm_add_library name)
 
   if(ARG_SHARED OR ARG_MODULE)
     llvm_externalize_debuginfo(${name})
-    llvm_codesign(${name})
+    llvm_codesign(${name} ENTITLEMENTS ${ARG_ENTITLEMENTS})
   endif()
 endfunction()
 
@@ -911,18 +911,28 @@ macro(add_llvm_utility name)
 
   add_llvm_executable(${name} DISABLE_LLVM_LINK_LLVM_DYLIB ${ARGN})
   set_target_properties(${name} PROPERTIES FOLDER "Utils")
-  if( LLVM_INSTALL_UTILS AND LLVM_BUILD_UTILS )
-    install (TARGETS ${name}
-      RUNTIME DESTINATION ${LLVM_UTILS_INSTALL_DIR}
-      COMPONENT ${name})
-    if (NOT LLVM_ENABLE_IDE)
-      add_llvm_install_targets(install-${name}
-                               DEPENDS ${name}
-                               COMPONENT ${name})
+  if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
+    if (LLVM_INSTALL_UTILS AND LLVM_BUILD_UTILS)
+      if (${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
+          NOT LLVM_DISTRIBUTION_COMPONENTS)
+        set(export_to_llvmexports EXPORT LLVMExports)
+        set_property(GLOBAL PROPERTY LLVM_HAS_EXPORTS True)
+      endif()
+
+      install(TARGETS ${name}
+              ${export_to_llvmexports}
+              RUNTIME DESTINATION ${LLVM_UTILS_INSTALL_DIR}
+              COMPONENT ${name})
+
+      if (NOT LLVM_ENABLE_IDE)
+        add_llvm_install_targets(install-${name}
+                                 DEPENDS ${name}
+                                 COMPONENT ${name})
+      endif()
+      set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS ${name})
+    elseif(LLVM_BUILD_UTILS)
+      set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS_BUILDTREE_ONLY ${name})
     endif()
-    set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS ${name})
-  elseif( LLVM_BUILD_UTILS )
-    set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS_BUILDTREE_ONLY ${name})
   endif()
 endmacro(add_llvm_utility name)
 
@@ -1707,35 +1717,38 @@ function(setup_dependency_debugging name)
   set_target_properties(${name} PROPERTIES RULE_LAUNCH_COMPILE ${sandbox_command})
 endfunction()
 
-# Figure out if we can track VC revisions.
-function(find_first_existing_file out_var)
-  foreach(file ${ARGN})
-    if(EXISTS "${file}")
-      set(${out_var} "${file}" PARENT_SCOPE)
-      return()
-    endif()
-  endforeach()
-endfunction()
-
-macro(find_first_existing_vc_file out_var path)
-    find_program(git_executable NAMES git git.exe git.cmd)
-    # Run from a subdirectory to force git to print an absolute path.
-    execute_process(COMMAND ${git_executable} rev-parse --git-dir
-      WORKING_DIRECTORY ${path}/cmake
-      RESULT_VARIABLE git_result
-      OUTPUT_VARIABLE git_dir
-      ERROR_QUIET)
-    if(git_result EQUAL 0)
-      string(STRIP "${git_dir}" git_dir)
-      set(${out_var} "${git_dir}/logs/HEAD")
-      # some branchless cases (e.g. 'repo') may not yet have .git/logs/HEAD
-      if (NOT EXISTS "${git_dir}/logs/HEAD")
-        file(WRITE "${git_dir}/logs/HEAD" "")
+function(find_first_existing_vc_file path out_var)
+  if(NOT EXISTS "${path}")
+    return()
+  endif()
+  if(EXISTS "${path}/.svn")
+    set(svn_files
+      "${path}/.svn/wc.db"   # SVN 1.7
+      "${path}/.svn/entries" # SVN 1.6
+    )
+    foreach(file IN LISTS svn_files)
+      if(EXISTS "${file}")
+        set(${out_var} "${file}" PARENT_SCOPE)
+        return()
       endif()
-    else()
-      find_first_existing_file(${out_var}
-        "${path}/.svn/wc.db"   # SVN 1.7
-        "${path}/.svn/entries" # SVN 1.6
-      )
+    endforeach()
+  else()
+    find_package(Git)
+    if(GIT_FOUND)
+      execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --git-dir
+        WORKING_DIRECTORY ${path}
+        RESULT_VARIABLE git_result
+        OUTPUT_VARIABLE git_output
+        ERROR_QUIET)
+      if(git_result EQUAL 0)
+        string(STRIP "${git_output}" git_output)
+        get_filename_component(git_dir ${git_output} ABSOLUTE BASE_DIR ${path})
+        # Some branchless cases (e.g. 'repo') may not yet have .git/logs/HEAD
+        if (NOT EXISTS "${git_dir}/logs/HEAD")
+          file(WRITE "${git_dir}/logs/HEAD" "")
+        endif()
+        set(${out_var} "${git_dir}/logs/HEAD" PARENT_SCOPE)
+      endif()
     endif()
-endmacro()
+  endif()
+endfunction()

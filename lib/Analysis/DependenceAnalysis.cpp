@@ -3368,6 +3368,19 @@ static void dumpSmallBitVector(SmallBitVector &BV) {
 }
 #endif
 
+bool DependenceInfo::invalidate(Function &F, const PreservedAnalyses &PA,
+                                FunctionAnalysisManager::Invalidator &Inv) {
+  // Check if the analysis itself has been invalidated.
+  auto PAC = PA.getChecker<DependenceAnalysis>();
+  if (!PAC.preserved() && !PAC.preservedSet<AllAnalysesOn<Function>>())
+    return true;
+
+  // Check transitive dependencies.
+  return Inv.invalidate<AAManager>(F, PA) ||
+         Inv.invalidate<ScalarEvolutionAnalysis>(F, PA) ||
+         Inv.invalidate<LoopAnalysis>(F, PA);
+}
+
 // depends -
 // Returns NULL if there is no dependence.
 // Otherwise, return a Dependence with as many details as possible.
@@ -3509,7 +3522,7 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
   // to either Separable or Coupled).
   //
   // Next, we consider 1 and 2. The intersection of the GroupLoops is empty.
-  // Next, 1 and 3. The intersectionof their GroupLoops = {2}, not empty,
+  // Next, 1 and 3. The intersection of their GroupLoops = {2}, not empty,
   // so Pair[3].Group = {0, 1, 3} and Done = false.
   //
   // Next, we compare 2 against 3. The intersection of the GroupLoops is empty.
