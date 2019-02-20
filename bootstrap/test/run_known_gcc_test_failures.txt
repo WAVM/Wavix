@@ -50,7 +50,52 @@ pr67037.c.o.wasm
 alias-4.c.o.wasm
 
 # relies on handling a SIGFPE signal
-20101011-1.c.o.wasm O0
+20101011-1.c.o.wasm
 
-# not sure why this fails
+# Don't care/won't fix:
+920612-1.c.o.wasm O2 # abort() # UB
+920711-1.c.o.wasm O2 # abort() # UB for 32-bit longs
+pr22493-1.c.o.wasm O2 # abort() # UB
+eeprof-1.c.o.wasm # tests -finstrument-functions
+pr23047.c.o.wasm O2 # tests -fwrapv
+
+# struct-vararg tests
+920625-1.c.o.wasm
+931004-10.c.o.wasm
+931004-12.c.o.wasm
+931004-14.c.o.wasm
+931004-6.c.o.wasm
+pr38151.c.o.wasm
+pr44575.c.o.wasm
+stdarg-1.c.o.wasm
+stdarg-2.c.o.wasm
+stdarg-3.c.o.wasm
+strct-stdarg-1.c.o.wasm
+strct-varg-1.c.o.wasm
+va-arg-6.c.o.wasm
+va-arg-22.c.o.wasm
+
+# Bitfield tests
+bitfld-3.c.o.wasm
+bitfld-5.c.o.wasm
+pr32244-1.c.o.wasm
+pr34971.c.o.wasm
+
+# -fno-strict-aliasing miscompilation
+alias-1.c.o.wasm O2
+pr79043.c.o.wasm O2
+
+# Aborts in native clang
+20021127-1.c.o.wasm O0
+20031003-1.c.o.wasm O0
+
+# Untriaged failures
+20040409-1.c.o.wasm O2
+20040409-2.c.o.wasm O2
+20040409-3.c.o.wasm O2
+fprintf-chk-1.c.o.wasm O2
+printf-chk-1.c.o.wasm O2
+vfprintf-chk-1.c.o.wasm O2
+vprintf-chk-1.c.o.wasm O2
 pr23135.c.o.wasm O0
+990208-1.c.o.wasm
