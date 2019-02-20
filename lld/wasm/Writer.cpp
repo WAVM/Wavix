@@ -41,7 +41,7 @@ using namespace lld::wasm;
 
 static constexpr int StackAlignment = 16;
 static constexpr const char *FunctionTableName = "__indirect_function_table";
-static constexpr const char *kMemoryName = "__memory";
+static constexpr const char *MemoryName = "__memory";
 const char *lld::wasm::DefaultModule = "env";
 
 namespace {
@@ -680,7 +680,7 @@ void Writer::createNameSection() {
     writeUleb128(TableSubsection.OS, 1, "name count");
 
     writeUleb128(TableSubsection.OS, 0, "table index");
-    writeStr(TableSubsection.OS, kFunctionTableName, "symbol name");
+    writeStr(TableSubsection.OS, FunctionTableName, "symbol name");
 
     TableSubsection.writeTo(Section->getStream());
   }
@@ -691,7 +691,7 @@ void Writer::createNameSection() {
     writeUleb128(MemorySubsection.OS, 1, "name count");
 
     writeUleb128(MemorySubsection.OS, 0, "memory index");
-    writeStr(MemorySubsection.OS, kMemoryName, "symbol name");
+    writeStr(MemorySubsection.OS, MemoryName, "symbol name");
 
     MemorySubsection.writeTo(Section->getStream());
   }
@@ -944,7 +944,7 @@ void Writer::calculateExports() {
     return;
 
   if (!Config->Relocatable && !Config->ImportMemory)
-    Exports.push_back(WasmExport{kMemoryName, WASM_EXTERNAL_MEMORY, 0});
+    Exports.push_back(WasmExport{MemoryName, WASM_EXTERNAL_MEMORY, 0});
 
   if (!Config->Relocatable && !Config->ImportTable)
     Exports.push_back(WasmExport{FunctionTableName, WASM_EXTERNAL_TABLE, 0});
