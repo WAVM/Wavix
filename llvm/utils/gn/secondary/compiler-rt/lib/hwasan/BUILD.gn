@@ -46,6 +46,7 @@ source_set("sources") {
     "hwasan_interceptors.cc",
     "hwasan_interface_internal.h",
     "hwasan_linux.cc",
+    "hwasan_malloc_bisect.h",
     "hwasan_mapping.h",
     "hwasan_memintrinsics.cc",
     "hwasan_poisoning.cc",
@@ -74,7 +75,10 @@ static_library("hwasan") {
   output_dir = crt_current_out_dir
   output_name = "clang_rt.hwasan-$crt_current_target"
   complete_static_lib = true
-  configs -= [ "//llvm/utils/gn/build:llvm_code" ]
+  configs -= [
+    "//llvm/utils/gn/build:llvm_code",
+    "//llvm/utils/gn/build:thin_archive",
+  ]
   configs += [ "//llvm/utils/gn/build:crt_code" ]
   deps = [
     ":sources",
@@ -85,7 +89,10 @@ static_library("hwasan_cxx") {
   output_dir = crt_current_out_dir
   output_name = "clang_rt.hwasan_cxx-$crt_current_target"
   complete_static_lib = true
-  configs -= [ "//llvm/utils/gn/build:llvm_code" ]
+  configs -= [
+    "//llvm/utils/gn/build:llvm_code",
+    "//llvm/utils/gn/build:thin_archive",
+  ]
   configs += [ "//llvm/utils/gn/build:crt_code" ]
   deps = [
     ":cxx_sources",

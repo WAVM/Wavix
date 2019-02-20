@@ -14,12 +14,18 @@
 
 %v4f16 = type <4 x half>
 
+; FALLBACK-NOT: remark{{.*}}test_v4f16.sqrt
 define %v4f16 @test_v4f16.sqrt(%v4f16 %a) {
   ; CHECK-LABEL:          test_v4f16.sqrt:
   ; CHECK-NOFP16-COUNT-4: fsqrt s{{[0-9]+}}, s{{[0-9]+}}
   ; CHECK-FP16-NOT:       fcvt
   ; CHECK-FP16:           fsqrt.4h
   ; CHECK-FP16-NEXT:      ret
+  ; GISEL-LABEL:          test_v4f16.sqrt:
+  ; GISEL-NOFP16-COUNT-4: fsqrt s{{[0-9]+}}, s{{[0-9]+}}
+  ; GISEL-FP16-NOT:       fcvt
+  ; GISEL-FP16:           fsqrt.4h
+  ; GISEL-FP16-NEXT:      ret
   %1 = call %v4f16 @llvm.sqrt.v4f16(%v4f16 %a)
   ret %v4f16 %1
 }
@@ -59,10 +65,14 @@ define %v4f16 @test_v4f16.pow(%v4f16 %a, %v4f16 %b) {
   %1 = call %v4f16 @llvm.pow.v4f16(%v4f16 %a, %v4f16 %b)
   ret %v4f16 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v4f16.exp
 define %v4f16 @test_v4f16.exp(%v4f16 %a) {
   ; This operation is expanded, whether with or without +fullfp16.
   ; CHECK-LABEL:   test_v4f16.exp:
   ; CHECK-COUNT-4: bl exp
+  ; GISEL-LABEL:   test_v4f16.exp:
+  ; GISEL-COUNT-4: bl exp
   %1 = call %v4f16 @llvm.exp.v4f16(%v4f16 %a)
   ret %v4f16 %1
 }
@@ -95,10 +105,14 @@ define %v4f16 @test_v4f16.log10(%v4f16 %a) {
   %1 = call %v4f16 @llvm.log10.v4f16(%v4f16 %a)
   ret %v4f16 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v4f16.log2
 define %v4f16 @test_v4f16.log2(%v4f16 %a) {
   ; This operation is expanded, whether with or without +fullfp16.
   ; CHECK-LABEL:   test_v4f16.log2:
   ; CHECK-COUNT-4: bl log2
+  ; GISEL-LABEL:   test_v4f16.log2:
+  ; GISEL-COUNT-4: bl log2
   %1 = call %v4f16 @llvm.log2.v4f16(%v4f16 %a)
   ret %v4f16 %1
 }
@@ -110,21 +124,37 @@ define %v4f16 @test_v4f16.fma(%v4f16 %a, %v4f16 %b, %v4f16 %c) {
   %1 = call %v4f16 @llvm.fma.v4f16(%v4f16 %a, %v4f16 %b, %v4f16 %c)
   ret %v4f16 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v4f16.fabs
 define %v4f16 @test_v4f16.fabs(%v4f16 %a) {
   ; CHECK-LABEL:          test_v4f16.fabs:
   ; CHECK-NOFP16-COUNT-4: fabs s{{[0-9]+}}, s{{[0-9]+}}
   ; CHECK-FP16-NOT:       fcvt
   ; CHECK-FP16:           fabs.4h
   ; CHECK-FP16-NEXT:      ret
+
+  ; GISEL-LABEL:          test_v4f16.fabs:
+  ; GISEL-NOFP16-COUNT-4: fabs s{{[0-9]+}}, s{{[0-9]+}}
+  ; GISEL-FP16-NOT:       fcvt
+  ; GISEL-FP16:           fabs.4h
+  ; GISEL-FP16-NEXT:      ret
   %1 = call %v4f16 @llvm.fabs.v4f16(%v4f16 %a)
   ret %v4f16 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v4f16.floor
 define %v4f16 @test_v4f16.floor(%v4f16 %a) {
   ; CHECK-LABEL:          test_v4f16.floor:
   ; CHECK-NOFP16-COUNT-4: frintm s{{[0-9]+}}, s{{[0-9]+}}
   ; CHECK-FP16-NOT:       fcvt
   ; CHECK-FP16:           frintm.4h
   ; CHECK-FP16-NEXT:      ret
+
+  ; GISEL-LABEL:          test_v4f16.floor:
+  ; GISEL-NOFP16-COUNT-4: frintm s{{[0-9]+}}, s{{[0-9]+}}
+  ; GISEL-FP16-NOT:       fcvt
+  ; GISEL-FP16:           frintm.4h
+  ; GISEL-FP16-NEXT:      ret
   %1 = call %v4f16 @llvm.floor.v4f16(%v4f16 %a)
   ret %v4f16 %1
 }
@@ -193,12 +223,18 @@ declare %v4f16 @llvm.nearbyint.v4f16(%v4f16) #0
 
 %v8f16 = type <8 x half>
 
+; FALLBACK-NOT: remark{{.*}}test_v8f16.sqrt
 define %v8f16 @test_v8f16.sqrt(%v8f16 %a) {
   ; CHECK-LABEL:          test_v8f16.sqrt:
   ; CHECK-NOFP16-COUNT-8: fsqrt s{{[0-9]+}}, s{{[0-9]+}}
   ; CHECK-FP16-NOT:       fcvt
   ; CHECK-FP16:           fsqrt.8h
   ; CHECK-FP16-NEXT:      ret
+  ; GISEL-LABEL:          test_v8f16.sqrt:
+  ; GISEL-NOFP16-COUNT-8: fsqrt s{{[0-9]+}}, s{{[0-9]+}}
+  ; GISEL-FP16-NOT:       fcvt
+  ; GISEL-FP16:           fsqrt.8h
+  ; GISEL-FP16-NEXT:      ret
   %1 = call %v8f16 @llvm.sqrt.v8f16(%v8f16 %a)
   ret %v8f16 %1
 }
@@ -238,10 +274,14 @@ define %v8f16 @test_v8f16.pow(%v8f16 %a, %v8f16 %b) {
   %1 = call %v8f16 @llvm.pow.v8f16(%v8f16 %a, %v8f16 %b)
   ret %v8f16 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v8f16.exp
 define %v8f16 @test_v8f16.exp(%v8f16 %a) {
   ; This operation is expanded, whether with or without +fullfp16.
   ; CHECK-LABEL:   test_v8f16.exp:
   ; CHECK-COUNT-8: bl exp
+  ; GISEL-LABEL:   test_v8f16.exp:
+  ; GISEL-COUNT-8: bl exp
   %1 = call %v8f16 @llvm.exp.v8f16(%v8f16 %a)
   ret %v8f16 %1
 }
@@ -274,10 +314,14 @@ define %v8f16 @test_v8f16.log10(%v8f16 %a) {
   %1 = call %v8f16 @llvm.log10.v8f16(%v8f16 %a)
   ret %v8f16 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v8f16.log2
 define %v8f16 @test_v8f16.log2(%v8f16 %a) {
   ; This operation is expanded, whether with or without +fullfp16.
   ; CHECK-LABEL:   test_v8f16.log2:
   ; CHECK-COUNT-8: bl log2
+  ; GISEL-LABEL:   test_v8f16.log2:
+  ; GISEL-COUNT-8: bl log2
   %1 = call %v8f16 @llvm.log2.v8f16(%v8f16 %a)
   ret %v8f16 %1
 }
@@ -289,21 +333,37 @@ define %v8f16 @test_v8f16.fma(%v8f16 %a, %v8f16 %b, %v8f16 %c) {
   %1 = call %v8f16 @llvm.fma.v8f16(%v8f16 %a, %v8f16 %b, %v8f16 %c)
   ret %v8f16 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v8f16.fabs
 define %v8f16 @test_v8f16.fabs(%v8f16 %a) {
   ; CHECK-LABEL:          test_v8f16.fabs:
   ; CHECK-NOFP16-COUNT-8: fabs s{{[0-9]+}}, s{{[0-9]+}}
   ; CHECK-FP16-NOT:       fcvt
   ; CHECK-FP16:           fabs.8h
   ; CHECK-FP16-NEXT:      ret
+
+  ; GISEL-LABEL:          test_v8f16.fabs:
+  ; GISEL-NOFP16-COUNT-8: fabs s{{[0-9]+}}, s{{[0-9]+}}
+  ; GISEL-FP16-NOT:       fcvt
+  ; GISEL-FP16:           fabs.8h
+  ; GISEL-FP16-NEXT:      ret
   %1 = call %v8f16 @llvm.fabs.v8f16(%v8f16 %a)
   ret %v8f16 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v8f16.floor
 define %v8f16 @test_v8f16.floor(%v8f16 %a) {
   ; CHECK-LABEL:     		  test_v8f16.floor:
   ; CHECK-NOFP16-COUNT-8: frintm s{{[0-9]+}}, s{{[0-9]+}}
   ; CHECK-FP16-NOT:       fcvt
   ; CHECK-FP16:           frintm.8h
   ; CHECK-FP16-NEXT:      ret
+
+  ; GISEL-LABEL:     		  test_v8f16.floor:
+  ; GISEL-NOFP16-COUNT-8: frintm s{{[0-9]+}}, s{{[0-9]+}}
+  ; GISEL-FP16-NOT:       fcvt
+  ; GISEL-FP16:           frintm.8h
+  ; GISEL-FP16-NEXT:      ret
   %1 = call %v8f16 @llvm.floor.v8f16(%v8f16 %a)
   ret %v8f16 %1
 }
@@ -372,9 +432,12 @@ declare %v8f16 @llvm.nearbyint.v8f16(%v8f16) #0
 
 %v2f32 = type <2 x float>
 
+; FALLBACK-NOT: remark{{.*}}test_v2f32.sqrt
 ; CHECK-LABEL: test_v2f32.sqrt:
+; GISEL-LABEL: test_v2f32.sqrt:
 define %v2f32 @test_v2f32.sqrt(%v2f32 %a) {
   ; CHECK: fsqrt.2s
+  ; GISEL: fsqrt.2s
   %1 = call %v2f32 @llvm.sqrt.v2f32(%v2f32 %a)
   ret %v2f32 %1
 }
@@ -408,9 +471,13 @@ define %v2f32 @test_v2f32.pow(%v2f32 %a, %v2f32 %b) {
   %1 = call %v2f32 @llvm.pow.v2f32(%v2f32 %a, %v2f32 %b)
   ret %v2f32 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v2f32.exp
 ; CHECK: test_v2f32.exp:
+; GISEL: test_v2f32.exp:
 define %v2f32 @test_v2f32.exp(%v2f32 %a) {
   ; CHECK: exp
+  ; GISEL: exp
   %1 = call %v2f32 @llvm.exp.v2f32(%v2f32 %a)
   ret %v2f32 %1
 }
@@ -439,9 +506,13 @@ define %v2f32 @test_v2f32.log10(%v2f32 %a) {
   %1 = call %v2f32 @llvm.log10.v2f32(%v2f32 %a)
   ret %v2f32 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v2f32.log2
 ; CHECK: test_v2f32.log2:
+; GISEL: test_v2f32.log2:
 define %v2f32 @test_v2f32.log2(%v2f32 %a) {
   ; CHECK: log
+  ; GISEL: log
   %1 = call %v2f32 @llvm.log2.v2f32(%v2f32 %a)
   ret %v2f32 %1
 }
@@ -451,15 +522,23 @@ define %v2f32 @test_v2f32.fma(%v2f32 %a, %v2f32 %b, %v2f32 %c) {
   %1 = call %v2f32 @llvm.fma.v2f32(%v2f32 %a, %v2f32 %b, %v2f32 %c)
   ret %v2f32 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v2f32.fabs
 ; CHECK-LABEL: test_v2f32.fabs:
+; GISEL-LABEL: test_v2f32.fabs:
 define %v2f32 @test_v2f32.fabs(%v2f32 %a) {
   ; CHECK: fabs.2s
+  ; GISEL: fabs.2s
   %1 = call %v2f32 @llvm.fabs.v2f32(%v2f32 %a)
   ret %v2f32 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v2f32.floor
 ; CHECK-LABEL: test_v2f32.floor:
+; GISEL-LABEL: test_v2f32.floor:
 define %v2f32 @test_v2f32.floor(%v2f32 %a) {
   ; CHECK: frintm.2s
+  ; GISEL: frintm.2s
   %1 = call %v2f32 @llvm.floor.v2f32(%v2f32 %a)
   ret %v2f32 %1
 }
@@ -513,9 +592,12 @@ declare %v2f32 @llvm.nearbyint.v2f32(%v2f32) #0
 
 %v4f32 = type <4 x float>
 
+; FALLBACK-NOT: remark{{.*}}test_v4f32.sqrt
 ; CHECK: test_v4f32.sqrt:
+; GISEL: test_v4f32.sqrt:
 define %v4f32 @test_v4f32.sqrt(%v4f32 %a) {
   ; CHECK: fsqrt.4s
+  ; GISEL: fsqrt.4s
   %1 = call %v4f32 @llvm.sqrt.v4f32(%v4f32 %a)
   ret %v4f32 %1
 }
@@ -549,9 +631,13 @@ define %v4f32 @test_v4f32.pow(%v4f32 %a, %v4f32 %b) {
   %1 = call %v4f32 @llvm.pow.v4f32(%v4f32 %a, %v4f32 %b)
   ret %v4f32 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v4f32.exp
 ; CHECK: test_v4f32.exp:
+; GISEL: test_v4f32.exp:
 define %v4f32 @test_v4f32.exp(%v4f32 %a) {
   ; CHECK: exp
+  ; GISEL: exp
   %1 = call %v4f32 @llvm.exp.v4f32(%v4f32 %a)
   ret %v4f32 %1
 }
@@ -579,9 +665,13 @@ define %v4f32 @test_v4f32.log10(%v4f32 %a) {
   %1 = call %v4f32 @llvm.log10.v4f32(%v4f32 %a)
   ret %v4f32 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v4f32.log2
 ; CHECK: test_v4f32.log2:
+; GISEL: test_v4f32.log2:
 define %v4f32 @test_v4f32.log2(%v4f32 %a) {
   ; CHECK: log
+  ; GISEL: log
   %1 = call %v4f32 @llvm.log2.v4f32(%v4f32 %a)
   ret %v4f32 %1
 }
@@ -591,15 +681,23 @@ define %v4f32 @test_v4f32.fma(%v4f32 %a, %v4f32 %b, %v4f32 %c) {
   %1 = call %v4f32 @llvm.fma.v4f32(%v4f32 %a, %v4f32 %b, %v4f32 %c)
   ret %v4f32 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v4f32.fabs
 ; CHECK: test_v4f32.fabs:
+; GISEL: test_v4f32.fabs:
 define %v4f32 @test_v4f32.fabs(%v4f32 %a) {
   ; CHECK: fabs
+  ; GISEL: fabs
   %1 = call %v4f32 @llvm.fabs.v4f32(%v4f32 %a)
   ret %v4f32 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v4f32.floor
 ; CHECK: test_v4f32.floor:
+; GISEL: test_v4f32.floor:
 define %v4f32 @test_v4f32.floor(%v4f32 %a) {
   ; CHECK: frintm.4s
+  ; GISEL frintm.4s
   %1 = call %v4f32 @llvm.floor.v4f32(%v4f32 %a)
   ret %v4f32 %1
 }
@@ -652,9 +750,12 @@ declare %v4f32 @llvm.nearbyint.v4f32(%v4f32) #0
 ;;; Double vector
 
 %v2f64 = type <2 x double>
+; FALLBACK-NOT: remark{{.*}}test_v2f64.sqrt
 ; CHECK: test_v2f64.sqrt:
+; GISEL: test_v2f64.sqrt:
 define %v2f64 @test_v2f64.sqrt(%v2f64 %a) {
   ; CHECK: fsqrt.2d
+  ; GISEL: fsqrt.2d
   %1 = call %v2f64 @llvm.sqrt.v2f64(%v2f64 %a)
   ret %v2f64 %1
 }
@@ -688,9 +789,13 @@ define %v2f64 @test_v2f64.pow(%v2f64 %a, %v2f64 %b) {
   %1 = call %v2f64 @llvm.pow.v2f64(%v2f64 %a, %v2f64 %b)
   ret %v2f64 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v2f64.exp
 ; CHECK: test_v2f64.exp:
+; GISEL: test_v2f64.exp:
 define %v2f64 @test_v2f64.exp(%v2f64 %a) {
   ; CHECK: exp
+  ; GISEL: exp
   %1 = call %v2f64 @llvm.exp.v2f64(%v2f64 %a)
   ret %v2f64 %1
 }
@@ -719,9 +824,13 @@ define %v2f64 @test_v2f64.log10(%v2f64 %a) {
   %1 = call %v2f64 @llvm.log10.v2f64(%v2f64 %a)
   ret %v2f64 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v2f64.log2
 ; CHECK: test_v2f64.log2:
+; GISEL: test_v2f64.log2:
 define %v2f64 @test_v2f64.log2(%v2f64 %a) {
   ; CHECK: log
+  ; GISEL: log
   %1 = call %v2f64 @llvm.log2.v2f64(%v2f64 %a)
   ret %v2f64 %1
 }
@@ -731,15 +840,23 @@ define %v2f64 @test_v2f64.fma(%v2f64 %a, %v2f64 %b, %v2f64 %c) {
   %1 = call %v2f64 @llvm.fma.v2f64(%v2f64 %a, %v2f64 %b, %v2f64 %c)
   ret %v2f64 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v2f64.fabs
 ; CHECK: test_v2f64.fabs:
+; GISEL: test_v2f64.fabs:
 define %v2f64 @test_v2f64.fabs(%v2f64 %a) {
   ; CHECK: fabs
+  ; GISEL: fabs
   %1 = call %v2f64 @llvm.fabs.v2f64(%v2f64 %a)
   ret %v2f64 %1
 }
+
+; FALLBACK-NOT: remark{{.*}}test_v2f64.floor
 ; CHECK: test_v2f64.floor:
+; GISEL: test_v2f64.floor:
 define %v2f64 @test_v2f64.floor(%v2f64 %a) {
   ; CHECK: frintm.2d
+  ; GISEL: frintm.2d
   %1 = call %v2f64 @llvm.floor.v2f64(%v2f64 %a)
   ret %v2f64 %1
 }

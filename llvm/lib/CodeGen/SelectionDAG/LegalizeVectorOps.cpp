@@ -141,6 +141,7 @@ class VectorLegalizer {
   SDValue ExpandROT(SDValue Op);
   SDValue ExpandFMINNUM_FMAXNUM(SDValue Op);
   SDValue ExpandAddSubSat(SDValue Op);
+  SDValue ExpandFixedPointMul(SDValue Op);
   SDValue ExpandStrictFPOp(SDValue Op);
 
   /// Implements vector promotion.
@@ -424,7 +425,8 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
   case ISD::USUBSAT:
     Action = TLI.getOperationAction(Node->getOpcode(), Node->getValueType(0));
     break;
-  case ISD::SMULFIX: {
+  case ISD::SMULFIX:
+  case ISD::UMULFIX: {
     unsigned Scale = Node->getConstantOperandVal(2);
     Action = TLI.getFixedPointOperationAction(Node->getOpcode(),
                                               Node->getValueType(0), Scale);
@@ -782,6 +784,9 @@ SDValue VectorLegalizer::Expand(SDValue Op) {
   case ISD::UADDSAT:
   case ISD::SADDSAT:
     return ExpandAddSubSat(Op);
+  case ISD::SMULFIX:
+  case ISD::UMULFIX:
+    return ExpandFixedPointMul(Op);
   case ISD::STRICT_FADD:
   case ISD::STRICT_FSUB:
   case ISD::STRICT_FMUL:
@@ -1213,6 +1218,12 @@ SDValue VectorLegalizer::ExpandFMINNUM_FMAXNUM(SDValue Op) {
 
 SDValue VectorLegalizer::ExpandAddSubSat(SDValue Op) {
   if (SDValue Expanded = TLI.expandAddSubSat(Op.getNode(), DAG))
+    return Expanded;
+  return DAG.UnrollVectorOp(Op.getNode());
+}
+
+SDValue VectorLegalizer::ExpandFixedPointMul(SDValue Op) {
+  if (SDValue Expanded = TLI.expandFixedPointMul(Op.getNode(), DAG))
     return Expanded;
   return DAG.UnrollVectorOp(Op.getNode());
 }

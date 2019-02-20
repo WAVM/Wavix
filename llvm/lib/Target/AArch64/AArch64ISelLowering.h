@@ -327,6 +327,9 @@ public:
   bool isZExtFree(EVT VT1, EVT VT2) const override;
   bool isZExtFree(SDValue Val, EVT VT2) const override;
 
+  bool shouldSinkOperands(Instruction *I,
+                          SmallVectorImpl<Use *> &Ops) const override;
+
   bool hasPairedLoad(EVT LoadedType, unsigned &RequiredAligment) const override;
 
   unsigned getMaxSupportedInterleaveFactor() const override { return 4; }
@@ -408,7 +411,7 @@ public:
 
   void insertSSPDeclarations(Module &M) const override;
   Value *getSDagStackGuard(const Module &M) const override;
-  Value *getSSPStackGuardCheck(const Module &M) const override;
+  Function *getSSPStackGuardCheck(const Module &M) const override;
 
   /// If the target has a standard location for the unsafe stack pointer,
   /// returns the address of that location. Otherwise, returns nullptr.
@@ -467,6 +470,12 @@ public:
       return hasAndNotCompare(Y);
 
     return VT.getSizeInBits() >= 64; // vector 'bic'
+  }
+
+  bool shouldExpandShift(SelectionDAG &DAG, SDNode *N) const override {
+    if (DAG.getMachineFunction().getFunction().optForMinSize())
+      return false;
+    return true;
   }
 
   bool shouldTransformSignedTruncationCheck(EVT XVT,

@@ -256,6 +256,11 @@ void LandingPadInst::addClause(Constant *Val) {
 
 Function *CallBase::getCaller() { return getParent()->getParent(); }
 
+unsigned CallBase::getNumSubclassExtraOperandsDynamic() const {
+  assert(getOpcode() == Instruction::CallBr && "Unexpected opcode!");
+  return cast<CallBrInst>(this)->getNumIndirectDests() + 1;
+}
+
 bool CallBase::isIndirectCall() const {
   const Value *V = getCalledValue();
   if (isa<Function>(V) || isa<Constant>(V))
@@ -264,6 +269,21 @@ bool CallBase::isIndirectCall() const {
     if (CI->isInlineAsm())
       return false;
   return true;
+}
+
+/// Tests if this call site must be tail call optimized. Only a CallInst can
+/// be tail call optimized.
+bool CallBase::isMustTailCall() const {
+  if (auto *CI = dyn_cast<CallInst>(this))
+    return CI->isMustTailCall();
+  return false;
+}
+
+/// Tests if this call site is marked as a tail call.
+bool CallBase::isTailCall() const {
+  if (auto *CI = dyn_cast<CallInst>(this))
+    return CI->isTailCall();
+  return false;
 }
 
 Intrinsic::ID CallBase::getIntrinsicID() const {
@@ -428,8 +448,8 @@ CallInst *CallInst::Create(CallInst *CI, ArrayRef<OperandBundleDef> OpB,
                            Instruction *InsertPt) {
   std::vector<Value *> Args(CI->arg_begin(), CI->arg_end());
 
-  auto *NewCI = CallInst::Create(CI->getCalledValue(), Args, OpB, CI->getName(),
-                                 InsertPt);
+  auto *NewCI = CallInst::Create(CI->getFunctionType(), CI->getCalledValue(),
+                                 Args, OpB, CI->getName(), InsertPt);
   NewCI->setTailCallKind(CI->getTailCallKind());
   NewCI->setCallingConv(CI->getCallingConv());
   NewCI->SubclassOptionalData = CI->SubclassOptionalData;
@@ -502,7 +522,7 @@ static Instruction *createMalloc(Instruction *InsertBefore,
   BasicBlock *BB = InsertBefore ? InsertBefore->getParent() : InsertAtEnd;
   Module *M = BB->getParent()->getParent();
   Type *BPTy = Type::getInt8PtrTy(BB->getContext());
-  Value *MallocFunc = MallocF;
+  FunctionCallee MallocFunc = MallocF;
   if (!MallocFunc)
     // prototype malloc as "void *malloc(size_t)"
     MallocFunc = M->getOrInsertFunction("malloc", BPTy, IntPtrTy);
@@ -526,7 +546,7 @@ static Instruction *createMalloc(Instruction *InsertBefore,
     }
   }
   MCall->setTailCall();
-  if (Function *F = dyn_cast<Function>(MallocFunc)) {
+  if (Function *F = dyn_cast<Function>(MallocFunc.getCallee())) {
     MCall->setCallingConv(F->getCallingConv());
     if (!F->returnDoesNotAlias())
       F->setReturnDoesNotAlias();
@@ -599,7 +619,7 @@ static Instruction *createFree(Value *Source,
   Type *VoidTy = Type::getVoidTy(M->getContext());
   Type *IntPtrTy = Type::getInt8PtrTy(M->getContext());
   // prototype free as "void free(void*)"
-  Value *FreeFunc = M->getOrInsertFunction("free", VoidTy, IntPtrTy);
+  FunctionCallee FreeFunc = M->getOrInsertFunction("free", VoidTy, IntPtrTy);
   CallInst *Result = nullptr;
   Value *PtrCast = Source;
   if (InsertBefore) {
@@ -612,7 +632,7 @@ static Instruction *createFree(Value *Source,
     Result = CallInst::Create(FreeFunc, PtrCast, Bundles, "");
   }
   Result->setTailCall();
-  if (Function *F = dyn_cast<Function>(FreeFunc))
+  if (Function *F = dyn_cast<Function>(FreeFunc.getCallee()))
     Result->setCallingConv(F->getCallingConv());
 
   return Result;
@@ -696,9 +716,9 @@ InvokeInst *InvokeInst::Create(InvokeInst *II, ArrayRef<OperandBundleDef> OpB,
                                Instruction *InsertPt) {
   std::vector<Value *> Args(II->arg_begin(), II->arg_end());
 
-  auto *NewII = InvokeInst::Create(II->getCalledValue(), II->getNormalDest(),
-                                   II->getUnwindDest(), Args, OpB,
-                                   II->getName(), InsertPt);
+  auto *NewII = InvokeInst::Create(II->getFunctionType(), II->getCalledValue(),
+                                   II->getNormalDest(), II->getUnwindDest(),
+                                   Args, OpB, II->getName(), InsertPt);
   NewII->setCallingConv(II->getCallingConv());
   NewII->SubclassOptionalData = II->SubclassOptionalData;
   NewII->setAttributes(II->getAttributes());
@@ -709,6 +729,76 @@ InvokeInst *InvokeInst::Create(InvokeInst *II, ArrayRef<OperandBundleDef> OpB,
 
 LandingPadInst *InvokeInst::getLandingPadInst() const {
   return cast<LandingPadInst>(getUnwindDest()->getFirstNonPHI());
+}
+
+//===----------------------------------------------------------------------===//
+//                        CallBrInst Implementation
+//===----------------------------------------------------------------------===//
+
+void CallBrInst::init(FunctionType *FTy, Value *Fn, BasicBlock *Fallthrough,
+                      ArrayRef<BasicBlock *> IndirectDests,
+                      ArrayRef<Value *> Args,
+                      ArrayRef<OperandBundleDef> Bundles,
+                      const Twine &NameStr) {
+  this->FTy = FTy;
+
+  assert((int)getNumOperands() ==
+             ComputeNumOperands(Args.size(), IndirectDests.size(),
+                                CountBundleInputs(Bundles)) &&
+         "NumOperands not set up?");
+  NumIndirectDests = IndirectDests.size();
+  setDefaultDest(Fallthrough);
+  for (unsigned i = 0; i != NumIndirectDests; ++i)
+    setIndirectDest(i, IndirectDests[i]);
+  setCalledOperand(Fn);
+
+#ifndef NDEBUG
+  assert(((Args.size() == FTy->getNumParams()) ||
+          (FTy->isVarArg() && Args.size() > FTy->getNumParams())) &&
+         "Calling a function with bad signature");
+
+  for (unsigned i = 0, e = Args.size(); i != e; i++)
+    assert((i >= FTy->getNumParams() ||
+            FTy->getParamType(i) == Args[i]->getType()) &&
+           "Calling a function with a bad signature!");
+#endif
+
+  std::copy(Args.begin(), Args.end(), op_begin());
+
+  auto It = populateBundleOperandInfos(Bundles, Args.size());
+  (void)It;
+  assert(It + 2 + IndirectDests.size() == op_end() && "Should add up!");
+
+  setName(NameStr);
+}
+
+CallBrInst::CallBrInst(const CallBrInst &CBI)
+    : CallBase(CBI.Attrs, CBI.FTy, CBI.getType(), Instruction::CallBr,
+               OperandTraits<CallBase>::op_end(this) - CBI.getNumOperands(),
+               CBI.getNumOperands()) {
+  setCallingConv(CBI.getCallingConv());
+  std::copy(CBI.op_begin(), CBI.op_end(), op_begin());
+  std::copy(CBI.bundle_op_info_begin(), CBI.bundle_op_info_end(),
+            bundle_op_info_begin());
+  SubclassOptionalData = CBI.SubclassOptionalData;
+  NumIndirectDests = CBI.NumIndirectDests;
+}
+
+CallBrInst *CallBrInst::Create(CallBrInst *CBI, ArrayRef<OperandBundleDef> OpB,
+                               Instruction *InsertPt) {
+  std::vector<Value *> Args(CBI->arg_begin(), CBI->arg_end());
+
+  auto *NewCBI = CallBrInst::Create(CBI->getFunctionType(),
+                                    CBI->getCalledValue(),
+                                    CBI->getDefaultDest(),
+                                    CBI->getIndirectDests(),
+                                    Args, OpB, CBI->getName(), InsertPt);
+  NewCBI->setCallingConv(CBI->getCallingConv());
+  NewCBI->SubclassOptionalData = CBI->SubclassOptionalData;
+  NewCBI->setAttributes(CBI->getAttributes());
+  NewCBI->setDebugLoc(CBI->getDebugLoc());
+  NewCBI->NumIndirectDests = CBI->NumIndirectDests;
+  return NewCBI;
 }
 
 //===----------------------------------------------------------------------===//
@@ -3979,6 +4069,14 @@ InvokeInst *InvokeInst::cloneImpl() const {
     return new(getNumOperands(), DescriptorBytes) InvokeInst(*this);
   }
   return new(getNumOperands()) InvokeInst(*this);
+}
+
+CallBrInst *CallBrInst::cloneImpl() const {
+  if (hasOperandBundles()) {
+    unsigned DescriptorBytes = getNumOperandBundles() * sizeof(BundleOpInfo);
+    return new (getNumOperands(), DescriptorBytes) CallBrInst(*this);
+  }
+  return new (getNumOperands()) CallBrInst(*this);
 }
 
 ResumeInst *ResumeInst::cloneImpl() const { return new (1) ResumeInst(*this); }

@@ -558,7 +558,8 @@ def int_siglongjmp : Intrinsic<[], [llvm_ptr_ty, llvm_i32_ty], [IntrNoReturn]>;
 
 // Internal interface for object size checking
 def int_objectsize : Intrinsic<[llvm_anyint_ty],
-                               [llvm_anyptr_ty, llvm_i1_ty, llvm_i1_ty],
+                               [llvm_anyptr_ty, llvm_i1_ty,
+                                llvm_i1_ty, llvm_i1_ty],
                                [IntrNoMem, IntrSpeculatable]>,
                                GCCBuiltin<"__builtin_object_size">;
 
@@ -846,6 +847,10 @@ def int_usub_sat : Intrinsic<[llvm_anyint_ty],
 //===------------------------- Fixed Point Arithmetic Intrinsics ---------------------===//
 //
 def int_smul_fix : Intrinsic<[llvm_anyint_ty],
+                             [LLVMMatchType<0>, LLVMMatchType<0>, llvm_i32_ty],
+                             [IntrNoMem, IntrSpeculatable, Commutative]>;
+
+def int_umul_fix : Intrinsic<[llvm_anyint_ty],
                              [LLVMMatchType<0>, LLVMMatchType<0>, llvm_i32_ty],
                              [IntrNoMem, IntrSpeculatable, Commutative]>;
 

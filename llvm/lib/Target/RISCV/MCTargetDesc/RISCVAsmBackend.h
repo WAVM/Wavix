@@ -40,6 +40,16 @@ public:
   bool requiresDiffExpressionRelocations() const override {
     return STI.getFeatureBits()[RISCV::FeatureRelax] || ForceRelocs;
   }
+
+  // Return Size with extra Nop Bytes for alignment directive in code section.
+  bool shouldInsertExtraNopBytesForCodeAlign(const MCAlignFragment &AF,
+                                             unsigned &Size) override;
+
+  // Insert target specific fixup type for alignment directive in code section.
+  bool shouldInsertFixupForCodeAlign(MCAssembler &Asm,
+                                     const MCAsmLayout &Layout,
+                                     MCAlignFragment &AF) override;
+
   void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
                   const MCValue &Target, MutableArrayRef<char> Data,
                   uint64_t Value, bool IsResolved,
@@ -79,12 +89,14 @@ public:
       { "fixup_riscv_pcrel_hi20",   12,     20,  MCFixupKindInfo::FKF_IsPCRel },
       { "fixup_riscv_pcrel_lo12_i", 20,     12,  MCFixupKindInfo::FKF_IsPCRel },
       { "fixup_riscv_pcrel_lo12_s",  0,     32,  MCFixupKindInfo::FKF_IsPCRel },
+      { "fixup_riscv_got_hi20",     12,     20,  MCFixupKindInfo::FKF_IsPCRel },
       { "fixup_riscv_jal",          12,     20,  MCFixupKindInfo::FKF_IsPCRel },
       { "fixup_riscv_branch",        0,     32,  MCFixupKindInfo::FKF_IsPCRel },
       { "fixup_riscv_rvc_jump",      2,     11,  MCFixupKindInfo::FKF_IsPCRel },
       { "fixup_riscv_rvc_branch",    0,     16,  MCFixupKindInfo::FKF_IsPCRel },
       { "fixup_riscv_call",          0,     64,  MCFixupKindInfo::FKF_IsPCRel },
-      { "fixup_riscv_relax",         0,      0,  0 }
+      { "fixup_riscv_relax",         0,      0,  0 },
+      { "fixup_riscv_align",         0,      0,  0 }
     };
     static_assert((array_lengthof(Infos)) == RISCV::NumTargetFixupKinds,
                   "Not all fixup kinds added to Infos array");

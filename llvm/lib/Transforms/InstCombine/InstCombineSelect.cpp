@@ -675,6 +675,60 @@ static Value *canonicalizeSaturatedSubtract(const ICmpInst *ICI,
   return IsNegative ? Builder.CreateSub(B, Max) : Builder.CreateSub(Max, B);
 }
 
+static Value *canonicalizeSaturatedAdd(ICmpInst *Cmp, Value *TVal, Value *FVal,
+                                       InstCombiner::BuilderTy &Builder) {
+  if (!Cmp->hasOneUse())
+    return nullptr;
+
+  // Match unsigned saturated add with constant.
+  Value *Cmp0 = Cmp->getOperand(0);
+  Value *Cmp1 = Cmp->getOperand(1);
+  ICmpInst::Predicate Pred = Cmp->getPredicate();
+  Value *X;
+  const APInt *C, *CmpC;
+  if (Pred == ICmpInst::ICMP_ULT &&
+      match(TVal, m_Add(m_Value(X), m_APInt(C))) && X == Cmp0 &&
+      match(FVal, m_AllOnes()) && match(Cmp1, m_APInt(CmpC)) && *CmpC == ~*C) {
+    // Commute compare predicate and select operands:
+    // (X u< ~C) ? (X + C) : -1 --> (X u> ~C) ? -1 : (X + C)
+    Value *NewCmp = Builder.CreateICmp(ICmpInst::ICMP_UGT, X, Cmp1);
+    return Builder.CreateSelect(NewCmp, FVal, TVal);
+  }
+
+  // Match unsigned saturated add of 2 variables with an unnecessary 'not'.
+  // There are 8 commuted variants.
+  // Canonicalize -1 (saturated result) to true value of the select.
+  if (match(FVal, m_AllOnes())) {
+    std::swap(TVal, FVal);
+    std::swap(Cmp0, Cmp1);
+  }
+  if (!match(TVal, m_AllOnes()))
+    return nullptr;
+
+  // Canonicalize predicate to 'ULT'.
+  if (Pred == ICmpInst::ICMP_UGT) {
+    Pred = ICmpInst::ICMP_ULT;
+    std::swap(Cmp0, Cmp1);
+  }
+  if (Pred != ICmpInst::ICMP_ULT)
+    return nullptr;
+
+  // Match unsigned saturated add of 2 variables with an unnecessary 'not'.
+  Value *Y;
+  if (match(Cmp0, m_Not(m_Value(X))) &&
+      match(FVal, m_c_Add(m_Specific(X), m_Value(Y))) && Y == Cmp1) {
+    // Change the comparison to use the sum (false value of the select). That is
+    // a canonical pattern match form for uadd.with.overflow and eliminates a
+    // use of the 'not' op:
+    // (~X u< Y) ? -1 : (X + Y) --> ((X + Y) u< Y) ? -1 : (X + Y)
+    // (~X u< Y) ? -1 : (Y + X) --> ((Y + X) u< Y) ? -1 : (Y + X)
+    Value *NewCmp = Builder.CreateICmp(ICmpInst::ICMP_ULT, FVal, Y);
+    return Builder.CreateSelect(NewCmp, TVal, FVal);
+  }
+
+  return nullptr;
+}
+
 /// Attempt to fold a cttz/ctlz followed by a icmp plus select into a single
 /// call to cttz/ctlz with flag 'is_zero_undef' cleared.
 ///
@@ -1046,6 +1100,9 @@ Instruction *InstCombiner::foldSelectInstWithICmp(SelectInst &SI,
     return replaceInstUsesWith(SI, V);
 
   if (Value *V = canonicalizeSaturatedSubtract(ICI, TrueVal, FalseVal, Builder))
+    return replaceInstUsesWith(SI, V);
+
+  if (Value *V = canonicalizeSaturatedAdd(ICI, TrueVal, FalseVal, Builder))
     return replaceInstUsesWith(SI, V);
 
   return Changed ? &SI : nullptr;

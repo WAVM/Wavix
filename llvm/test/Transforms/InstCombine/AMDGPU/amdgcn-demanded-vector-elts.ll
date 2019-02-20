@@ -2395,7 +2395,29 @@ define amdgpu_ps float @extract_elt0_image_getresinfo_1d_v4f32_i32(i32 %mip, <8 
   ret float %elt0
 }
 
+; Verify that we don't creash on non-constant operand.
+define protected <4 x half> @__llvm_amdgcn_image_sample_d_1darray_v4f16_f32_f32(i32, float, float, float, float, <8 x i32>, <4 x i32>, i1 zeroext, i32, i32) local_unnamed_addr {
+  %tmp = tail call <4 x half> @llvm.amdgcn.image.sample.d.1darray.v4f16.f32.f32(i32 %0, float %1, float %2, float %3, float %4, <8 x i32> %5, <4 x i32> %6, i1 zeroext %7, i32 %8, i32 %9) #1
+  ret <4 x half> %tmp
+}
+
 declare <4 x float> @llvm.amdgcn.image.getresinfo.1d.v4f32.i32(i32, i32, <8 x i32>, i32, i32) #1
+declare <4 x half> @llvm.amdgcn.image.sample.d.1darray.v4f16.f32.f32(i32, float, float, float, float, <8 x i32>, <4 x i32>, i1, i32, i32)
+
+; --------------------------------------------------------------------
+; TFE / LWE
+; --------------------------------------------------------------------
+
+; CHECK-LABEL: @extract_elt0_tfe_image_load_1d_v4f32i32_i32(
+; CHECK-NEXT: %data = call { <4 x float>, i32 } @llvm.amdgcn.image.load.1d.sl_v4f32i32s.i32(i32 15, i32 %s, <8 x i32> %rsrc, i32 0, i32 1)
+define amdgpu_ps float @extract_elt0_tfe_image_load_1d_v4f32i32_i32(i32 %s, <8 x i32> inreg %rsrc) #0 {
+  %data = call { <4 x float>, i32 } @llvm.amdgcn.image.load.1d.sl_v4f32i32s.i32(i32 15, i32 %s, <8 x i32> %rsrc, i32 0, i32 1)
+  %rgba = extractvalue { <4 x float>, i32 } %data, 0
+  %elt0 = extractelement <4 x float> %rgba, i32 0
+  ret float %elt0
+}
+
+declare {<4 x float>, i32} @llvm.amdgcn.image.load.1d.sl_v4f32i32s.i32(i32, i32, <8 x i32>, i32, i32) #1
 
 attributes #0 = { nounwind }
 attributes #1 = { nounwind readonly }

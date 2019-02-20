@@ -905,20 +905,20 @@ public:
                   Name);
   }
 
-  InvokeInst *CreateInvoke(Function *Callee, BasicBlock *NormalDest,
+  InvokeInst *CreateInvoke(FunctionCallee Callee, BasicBlock *NormalDest,
                            BasicBlock *UnwindDest, ArrayRef<Value *> Args,
                            ArrayRef<OperandBundleDef> OpBundles,
                            const Twine &Name = "") {
-    return CreateInvoke(Callee->getFunctionType(), Callee, NormalDest,
-                        UnwindDest, Args, OpBundles, Name);
+    return CreateInvoke(Callee.getFunctionType(), Callee.getCallee(),
+                        NormalDest, UnwindDest, Args, OpBundles, Name);
   }
 
-  InvokeInst *CreateInvoke(Function *Callee, BasicBlock *NormalDest,
+  InvokeInst *CreateInvoke(FunctionCallee Callee, BasicBlock *NormalDest,
                            BasicBlock *UnwindDest,
                            ArrayRef<Value *> Args = None,
                            const Twine &Name = "") {
-    return CreateInvoke(Callee->getFunctionType(), Callee, NormalDest,
-                        UnwindDest, Args, Name);
+    return CreateInvoke(Callee.getFunctionType(), Callee.getCallee(),
+                        NormalDest, UnwindDest, Args, Name);
   }
 
   // Deprecated [opaque pointer types]
@@ -941,6 +941,42 @@ public:
         cast<FunctionType>(
             cast<PointerType>(Callee->getType())->getElementType()),
         Callee, NormalDest, UnwindDest, Args, Name);
+  }
+
+  /// \brief Create a callbr instruction.
+  CallBrInst *CreateCallBr(FunctionType *Ty, Value *Callee,
+                           BasicBlock *DefaultDest,
+                           ArrayRef<BasicBlock *> IndirectDests,
+                           ArrayRef<Value *> Args = None,
+                           const Twine &Name = "") {
+    return Insert(CallBrInst::Create(Ty, Callee, DefaultDest, IndirectDests,
+                                     Args), Name);
+  }
+  CallBrInst *CreateCallBr(FunctionType *Ty, Value *Callee,
+                           BasicBlock *DefaultDest,
+                           ArrayRef<BasicBlock *> IndirectDests,
+                           ArrayRef<Value *> Args,
+                           ArrayRef<OperandBundleDef> OpBundles,
+                           const Twine &Name = "") {
+    return Insert(
+        CallBrInst::Create(Ty, Callee, DefaultDest, IndirectDests, Args,
+                           OpBundles), Name);
+  }
+
+  CallBrInst *CreateCallBr(FunctionCallee Callee, BasicBlock *DefaultDest,
+                           ArrayRef<BasicBlock *> IndirectDests,
+                           ArrayRef<Value *> Args = None,
+                           const Twine &Name = "") {
+    return CreateCallBr(Callee.getFunctionType(), Callee.getCallee(),
+                        DefaultDest, IndirectDests, Args, Name);
+  }
+  CallBrInst *CreateCallBr(FunctionCallee Callee, BasicBlock *DefaultDest,
+                           ArrayRef<BasicBlock *> IndirectDests,
+                           ArrayRef<Value *> Args,
+                           ArrayRef<OperandBundleDef> OpBundles,
+                           const Twine &Name = "") {
+    return CreateCallBr(Callee.getFunctionType(), Callee.getCallee(),
+                        DefaultDest, IndirectDests, Args, Name);
   }
 
   ResumeInst *CreateResume(Value *Exn) {
@@ -1988,16 +2024,17 @@ public:
     return Insert(CI, Name);
   }
 
-  CallInst *CreateCall(Function *Callee, ArrayRef<Value *> Args = None,
+  CallInst *CreateCall(FunctionCallee Callee, ArrayRef<Value *> Args = None,
                        const Twine &Name = "", MDNode *FPMathTag = nullptr) {
-    return CreateCall(Callee->getFunctionType(), Callee, Args, Name, FPMathTag);
+    return CreateCall(Callee.getFunctionType(), Callee.getCallee(), Args, Name,
+                      FPMathTag);
   }
 
-  CallInst *CreateCall(Function *Callee, ArrayRef<Value *> Args,
+  CallInst *CreateCall(FunctionCallee Callee, ArrayRef<Value *> Args,
                        ArrayRef<OperandBundleDef> OpBundles,
                        const Twine &Name = "", MDNode *FPMathTag = nullptr) {
-    return CreateCall(Callee->getFunctionType(), Callee, Args, OpBundles, Name,
-                      FPMathTag);
+    return CreateCall(Callee.getFunctionType(), Callee.getCallee(), Args,
+                      OpBundles, Name, FPMathTag);
   }
 
   // Deprecated [opaque pointer types]
