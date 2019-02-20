@@ -40,6 +40,8 @@ bool WebAssemblyTargetInfo::hasFeature(StringRef Feature) const {
       .Case("nontrapping-fptoint", HasNontrappingFPToInt)
       .Case("sign-ext", HasSignExt)
       .Case("exception-handling", HasExceptionHandling)
+      .Case("bulk-memory", HasBulkMemory)
+      .Case("atomics", HasAtomics)
       .Default(false);
 }
 
@@ -59,6 +61,16 @@ void WebAssemblyTargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__wasm_simd128__");
   if (SIMDLevel >= UnimplementedSIMD128)
     Builder.defineMacro("__wasm_unimplemented_simd128__");
+  if (HasNontrappingFPToInt)
+    Builder.defineMacro("__wasm_nontrapping_fptoint__");
+  if (HasSignExt)
+    Builder.defineMacro("__wasm_sign_ext__");
+  if (HasExceptionHandling)
+    Builder.defineMacro("__wasm_exception_handling__");
+  if (HasBulkMemory)
+    Builder.defineMacro("__wasm_bulk_memory__");
+  if (HasAtomics)
+    Builder.defineMacro("__wasm_atomics__");
 }
 
 void WebAssemblyTargetInfo::setSIMDLevel(llvm::StringMap<bool> &Features,
@@ -81,6 +93,7 @@ bool WebAssemblyTargetInfo::initFeatureMap(
   if (CPU == "bleeding-edge") {
     Features["nontrapping-fptoint"] = true;
     Features["sign-ext"] = true;
+    Features["atomics"] = true;
     setSIMDLevel(Features, SIMD128);
   }
   // Other targets do not consider user-configured features here, but while we
@@ -93,6 +106,10 @@ bool WebAssemblyTargetInfo::initFeatureMap(
     Features["sign-ext"] = true;
   if (HasExceptionHandling)
     Features["exception-handling"] = true;
+  if (HasBulkMemory)
+    Features["bulk-memory"] = true;
+  if (HasAtomics)
+    Features["atomics"] = true;
 
   return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
 }
@@ -138,6 +155,22 @@ bool WebAssemblyTargetInfo::handleTargetFeatures(
     }
     if (Feature == "-exception-handling") {
       HasExceptionHandling = false;
+      continue;
+    }
+    if (Feature == "+bulk-memory") {
+      HasBulkMemory = true;
+      continue;
+    }
+    if (Feature == "-bulk-memory") {
+      HasBulkMemory = false;
+      continue;
+    }
+    if (Feature == "+atomics") {
+      HasAtomics = true;
+      continue;
+    }
+    if (Feature == "-atomics") {
+      HasAtomics = false;
       continue;
     }
 
