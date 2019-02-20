@@ -112,6 +112,7 @@ static I64 mainThreadEntry(void* threadVoid)
 		[](Exception* exception) {
 			Lock<Platform::Mutex> resultLock(getCurrentThread()->resultMutex);
 			getCurrentThread()->result = -1;
+			destroyException(exception);
 		});
 
 	// Wake any threads waiting for this process to exit.
