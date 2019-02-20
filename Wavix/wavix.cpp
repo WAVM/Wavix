@@ -454,5 +454,6 @@ int main(int argc, const char** argv)
 		if(waiterIt != process->waiters.end()) { process->waiters.erase(waiterIt); }
 	}
 
-	return EXIT_SUCCESS;
+	Lock<Platform::Mutex> threadsLock(process->threadsMutex);
+	return int(process->threads[0]->result);
 }

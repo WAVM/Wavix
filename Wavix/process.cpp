@@ -101,7 +101,7 @@ static I64 mainThreadEntry(void* threadVoid)
 							 getCurrentThread()->context, getCurrentThread()->mainFunction, nullptr)
 							 ->i64;
 			}
-			catch(ExitThreadException exitThreadException)
+			catch(ExitThreadException const& exitThreadException)
 			{
 				result = exitThreadException.code;
 			}
@@ -304,18 +304,12 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_exit", I32, __syscall_exit, I32 exit
 {
 	traceSyscallf("exit", "(%i)", exitCode);
 
-	// Wake any threads waiting for this process to exit.
-	signalProcessWaiters(currentProcess);
-
 	throw ExitThreadException{exitCode};
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_exit_group", I32, __syscall_exit_group, I32 exitCode)
 {
 	traceSyscallf("exit_group", "(%i)", exitCode);
-
-	// Wake any threads waiting for this process to exit.
-	signalProcessWaiters(currentProcess);
 
 	throw ExitThreadException{exitCode};
 }
@@ -482,7 +476,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	}
 
 	// Exit the calling thread.
-	throw ExitThreadException{0};
+	throw ExitThreadException{-1};
 
 	Errors::unreachable();
 }
@@ -609,9 +603,6 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 						  I32 signalNumber)
 {
 	traceSyscallf("tkill", "(%i,%i)", threadId, signalNumber);
-
-	// Wake any threads waiting for this process to exit.
-	signalProcessWaiters(currentProcess);
 
 	throw ExitThreadException{-1};
 }
