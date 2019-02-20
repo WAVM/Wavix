@@ -28,7 +28,6 @@
 #include "clang/Basic/SourceManager.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
@@ -59,7 +58,7 @@ class LazyRuntimeFunction {
   CodeGenModule *CGM;
   llvm::FunctionType *FTy;
   const char *FunctionName;
-  llvm::Constant *Function;
+  llvm::FunctionCallee Function;
 
 public:
   /// Constructor leaves this class uninitialized, because it is intended to
@@ -89,16 +88,13 @@ public:
 
   /// Overloaded cast operator, allows the class to be implicitly cast to an
   /// LLVM constant.
-  operator llvm::Constant *() {
+  operator llvm::FunctionCallee() {
     if (!Function) {
       if (!FunctionName)
         return nullptr;
       Function = CGM->CreateRuntimeFunction(FTy, FunctionName);
     }
     return Function;
-  }
-  operator llvm::Function *() {
-    return cast<llvm::Function>((llvm::Constant *)*this);
   }
 };
 
@@ -613,15 +609,15 @@ public:
                                    const ObjCProtocolDecl *PD) override;
   void GenerateProtocol(const ObjCProtocolDecl *PD) override;
   llvm::Function *ModuleInitFunction() override;
-  llvm::Constant *GetPropertyGetFunction() override;
-  llvm::Constant *GetPropertySetFunction() override;
-  llvm::Constant *GetOptimizedPropertySetFunction(bool atomic,
-                                                  bool copy) override;
-  llvm::Constant *GetSetStructFunction() override;
-  llvm::Constant *GetGetStructFunction() override;
-  llvm::Constant *GetCppAtomicObjectGetFunction() override;
-  llvm::Constant *GetCppAtomicObjectSetFunction() override;
-  llvm::Constant *EnumerationMutationFunction() override;
+  llvm::FunctionCallee GetPropertyGetFunction() override;
+  llvm::FunctionCallee GetPropertySetFunction() override;
+  llvm::FunctionCallee GetOptimizedPropertySetFunction(bool atomic,
+                                                       bool copy) override;
+  llvm::FunctionCallee GetSetStructFunction() override;
+  llvm::FunctionCallee GetGetStructFunction() override;
+  llvm::FunctionCallee GetCppAtomicObjectGetFunction() override;
+  llvm::FunctionCallee GetCppAtomicObjectSetFunction() override;
+  llvm::FunctionCallee EnumerationMutationFunction() override;
 
   void EmitTryStmt(CodeGenFunction &CGF,
                    const ObjCAtTryStmt &S) override;
@@ -690,9 +686,9 @@ protected:
     llvm::Value *args[] = {
             EnforceType(Builder, Receiver, IdTy),
             EnforceType(Builder, cmd, SelectorTy) };
-    llvm::CallSite imp = CGF.EmitRuntimeCallOrInvoke(MsgLookupFn, args);
+    llvm::CallBase *imp = CGF.EmitRuntimeCallOrInvoke(MsgLookupFn, args);
     imp->setMetadata(msgSendMDKind, node);
-    return imp.getInstruction();
+    return imp;
   }
 
   llvm::Value *LookupIMPSuper(CodeGenFunction &CGF, Address ObjCSuper,
@@ -749,7 +745,7 @@ class CGObjCGNUstep : public CGObjCGNU {
                            llvm::Value *cmd, llvm::MDNode *node,
                            MessageSendInfo &MSI) override {
       CGBuilderTy &Builder = CGF.Builder;
-      llvm::Function *LookupFn = SlotLookupFn;
+      llvm::FunctionCallee LookupFn = SlotLookupFn;
 
       // Store the receiver on the stack so that we can reload it later
       Address ReceiverPtr =
@@ -765,20 +761,20 @@ class CGObjCGNUstep : public CGObjCGNU {
       }
 
       // The lookup function is guaranteed not to capture the receiver pointer.
-      LookupFn->addParamAttr(0, llvm::Attribute::NoCapture);
+      if (auto *LookupFn2 = dyn_cast<llvm::Function>(LookupFn.getCallee()))
+        LookupFn2->addParamAttr(0, llvm::Attribute::NoCapture);
 
       llvm::Value *args[] = {
               EnforceType(Builder, ReceiverPtr.getPointer(), PtrToIdTy),
               EnforceType(Builder, cmd, SelectorTy),
               EnforceType(Builder, self, IdTy) };
-      llvm::CallSite slot = CGF.EmitRuntimeCallOrInvoke(LookupFn, args);
-      slot.setOnlyReadsMemory();
+      llvm::CallBase *slot = CGF.EmitRuntimeCallOrInvoke(LookupFn, args);
+      slot->setOnlyReadsMemory();
       slot->setMetadata(msgSendMDKind, node);
 
       // Load the imp from the slot
       llvm::Value *imp = Builder.CreateAlignedLoad(
-          Builder.CreateStructGEP(nullptr, slot.getInstruction(), 4),
-          CGF.getPointerAlign());
+          Builder.CreateStructGEP(nullptr, slot, 4), CGF.getPointerAlign());
 
       // The lookup function may have changed the receiver, so make sure we use
       // the new one.
@@ -858,7 +854,7 @@ class CGObjCGNUstep : public CGObjCGNU {
                                 PtrTy, PtrTy);
     }
 
-    llvm::Constant *GetCppAtomicObjectGetFunction() override {
+    llvm::FunctionCallee GetCppAtomicObjectGetFunction() override {
       // The optimised functions were added in version 1.7 of the GNUstep
       // runtime.
       assert (CGM.getLangOpts().ObjCRuntime.getVersion() >=
@@ -866,7 +862,7 @@ class CGObjCGNUstep : public CGObjCGNU {
       return CxxAtomicObjectGetFn;
     }
 
-    llvm::Constant *GetCppAtomicObjectSetFunction() override {
+    llvm::FunctionCallee GetCppAtomicObjectSetFunction() override {
       // The optimised functions were added in version 1.7 of the GNUstep
       // runtime.
       assert (CGM.getLangOpts().ObjCRuntime.getVersion() >=
@@ -874,8 +870,8 @@ class CGObjCGNUstep : public CGObjCGNU {
       return CxxAtomicObjectSetFn;
     }
 
-    llvm::Constant *GetOptimizedPropertySetFunction(bool atomic,
-                                                    bool copy) override {
+    llvm::FunctionCallee GetOptimizedPropertySetFunction(bool atomic,
+                                                         bool copy) override {
       // The optimised property functions omit the GC check, and so are not
       // safe to use in GC mode.  The standard functions are fast in GC mode,
       // so there is less advantage in using them.
@@ -953,7 +949,7 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
       Types.push_back(Arg->getType());
     llvm::FunctionType *FT = llvm::FunctionType::get(B.getVoidTy(), Types,
         false);
-    llvm::Value *Fn = CGM.CreateRuntimeFunction(FT, FunctionName);
+    llvm::FunctionCallee Fn = CGM.CreateRuntimeFunction(FT, FunctionName);
     B.CreateCall(Fn, Args);
   }
 
@@ -1730,7 +1726,6 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
           CGM.getContext().getCharWidth());
       // struct objc_ivar ivars[]
       auto ivarArrayBuilder = ivarListBuilder.beginArray();
-      CodeGenTypes &Types = CGM.getTypes();
       for (const ObjCIvarDecl *IVD = classDecl->all_declared_ivar_begin(); IVD;
            IVD = IVD->getNextIvar()) {
         auto ivarTy = IVD->getType();
@@ -1764,8 +1759,7 @@ class CGObjCGNUstep2 : public CGObjCGNUstep {
         ivarBuilder.add(OffsetVar);
         // Ivar size
         ivarBuilder.addInt(Int32Ty,
-            td.getTypeSizeInBits(Types.ConvertType(ivarTy)) /
-              CGM.getContext().getCharWidth());
+            CGM.getContext().getTypeSizeInChars(ivarTy).getQuantity());
         // Alignment will be stored as a base-2 log of the alignment.
         int align = llvm::Log2_32(Context.getTypeAlignInChars(ivarTy).getQuantity());
         // Objects that require more than 2^64-byte alignment should be impossible!
@@ -1937,14 +1931,14 @@ protected:
             EnforceType(Builder, Receiver, IdTy),
             EnforceType(Builder, cmd, SelectorTy) };
 
-    llvm::CallSite imp;
+    llvm::CallBase *imp;
     if (CGM.ReturnTypeUsesSRet(MSI.CallInfo))
       imp = CGF.EmitRuntimeCallOrInvoke(MsgLookupFnSRet, args);
     else
       imp = CGF.EmitRuntimeCallOrInvoke(MsgLookupFn, args);
 
     imp->setMetadata(msgSendMDKind, node);
-    return imp.getInstruction();
+    return imp;
   }
 
   llvm::Value *LookupIMPSuper(CodeGenFunction &CGF, Address ObjCSuper,
@@ -2173,9 +2167,8 @@ llvm::Value *CGObjCGNU::GetClassNamed(CodeGenFunction &CGF,
   if (!isWeak)
     EmitClassRef(Name);
 
-  llvm::Constant *ClassLookupFn =
-    CGM.CreateRuntimeFunction(llvm::FunctionType::get(IdTy, PtrToInt8Ty, true),
-                              "objc_lookup_class");
+  llvm::FunctionCallee ClassLookupFn = CGM.CreateRuntimeFunction(
+      llvm::FunctionType::get(IdTy, PtrToInt8Ty, true), "objc_lookup_class");
   return CGF.EmitNounwindRuntimeCall(ClassLookupFn, ClassName);
 }
 
@@ -2431,7 +2424,7 @@ CGObjCGNU::GenerateMessageSendSuper(CodeGenFunction &CGF,
     ReceiverClass = EnforceType(Builder, ReceiverClass, IdTy);
   } else {
     if (isCategoryImpl) {
-      llvm::Constant *classLookupFunction = nullptr;
+      llvm::FunctionCallee classLookupFunction = nullptr;
       if (IsClassMessage)  {
         classLookupFunction = CGM.CreateRuntimeFunction(llvm::FunctionType::get(
               IdTy, PtrTy, true), "objc_get_meta_class");
@@ -2480,10 +2473,8 @@ CGObjCGNU::GenerateMessageSendSuper(CodeGenFunction &CGF,
   Address ObjCSuper = CGF.CreateTempAlloca(ObjCSuperTy,
                               CGF.getPointerAlign());
 
-  Builder.CreateStore(Receiver,
-                   Builder.CreateStructGEP(ObjCSuper, 0, CharUnits::Zero()));
-  Builder.CreateStore(ReceiverClass,
-                   Builder.CreateStructGEP(ObjCSuper, 1, CGF.getPointerSize()));
+  Builder.CreateStore(Receiver, Builder.CreateStructGEP(ObjCSuper, 0));
+  Builder.CreateStore(ReceiverClass, Builder.CreateStructGEP(ObjCSuper, 1));
 
   ObjCSuper = EnforceType(Builder, ObjCSuper, PtrToObjCSuperTy);
 
@@ -2500,7 +2491,7 @@ CGObjCGNU::GenerateMessageSendSuper(CodeGenFunction &CGF,
 
   CGCallee callee(CGCalleeInfo(), imp);
 
-  llvm::Instruction *call;
+  llvm::CallBase *call;
   RValue msgRet = CGF.EmitCall(MSI.CallInfo, callee, Return, ActualArgs, &call);
   call->setMetadata(msgSendMDKind, node);
   return msgRet;
@@ -2594,16 +2585,21 @@ CGObjCGNU::GenerateMessageSend(CodeGenFunction &CGF,
     case CodeGenOptions::Mixed:
     case CodeGenOptions::NonLegacy:
       if (CGM.ReturnTypeUsesFPRet(ResultType)) {
-        imp = CGM.CreateRuntimeFunction(llvm::FunctionType::get(IdTy, IdTy, true),
-                                  "objc_msgSend_fpret");
+        imp =
+            CGM.CreateRuntimeFunction(llvm::FunctionType::get(IdTy, IdTy, true),
+                                      "objc_msgSend_fpret")
+                .getCallee();
       } else if (CGM.ReturnTypeUsesSRet(MSI.CallInfo)) {
         // The actual types here don't matter - we're going to bitcast the
         // function anyway
-        imp = CGM.CreateRuntimeFunction(llvm::FunctionType::get(IdTy, IdTy, true),
-                                  "objc_msgSend_stret");
+        imp =
+            CGM.CreateRuntimeFunction(llvm::FunctionType::get(IdTy, IdTy, true),
+                                      "objc_msgSend_stret")
+                .getCallee();
       } else {
-        imp = CGM.CreateRuntimeFunction(llvm::FunctionType::get(IdTy, IdTy, true),
-                                  "objc_msgSend");
+        imp = CGM.CreateRuntimeFunction(
+                     llvm::FunctionType::get(IdTy, IdTy, true), "objc_msgSend")
+                  .getCallee();
       }
   }
 
@@ -2612,7 +2608,7 @@ CGObjCGNU::GenerateMessageSend(CodeGenFunction &CGF,
 
   imp = EnforceType(Builder, imp, MSI.MessengerType);
 
-  llvm::Instruction *call;
+  llvm::CallBase *call;
   CGCallee callee(CGCalleeInfo(), imp);
   RValue msgRet = CGF.EmitCall(MSI.CallInfo, callee, Return, ActualArgs, &call);
   call->setMetadata(msgSendMDKind, node);
@@ -3696,7 +3692,8 @@ llvm::Function *CGObjCGNU::ModuleInitFunction() {
 
   llvm::FunctionType *FT =
     llvm::FunctionType::get(Builder.getVoidTy(), module->getType(), true);
-  llvm::Value *Register = CGM.CreateRuntimeFunction(FT, "__objc_exec_class");
+  llvm::FunctionCallee Register =
+      CGM.CreateRuntimeFunction(FT, "__objc_exec_class");
   Builder.CreateCall(Register, module);
 
   if (!ClassAliases.empty()) {
@@ -3765,36 +3762,36 @@ llvm::Function *CGObjCGNU::GenerateMethod(const ObjCMethodDecl *OMD,
   return Method;
 }
 
-llvm::Constant *CGObjCGNU::GetPropertyGetFunction() {
+llvm::FunctionCallee CGObjCGNU::GetPropertyGetFunction() {
   return GetPropertyFn;
 }
 
-llvm::Constant *CGObjCGNU::GetPropertySetFunction() {
+llvm::FunctionCallee CGObjCGNU::GetPropertySetFunction() {
   return SetPropertyFn;
 }
 
-llvm::Constant *CGObjCGNU::GetOptimizedPropertySetFunction(bool atomic,
-                                                           bool copy) {
+llvm::FunctionCallee CGObjCGNU::GetOptimizedPropertySetFunction(bool atomic,
+                                                                bool copy) {
   return nullptr;
 }
 
-llvm::Constant *CGObjCGNU::GetGetStructFunction() {
+llvm::FunctionCallee CGObjCGNU::GetGetStructFunction() {
   return GetStructPropertyFn;
 }
 
-llvm::Constant *CGObjCGNU::GetSetStructFunction() {
+llvm::FunctionCallee CGObjCGNU::GetSetStructFunction() {
   return SetStructPropertyFn;
 }
 
-llvm::Constant *CGObjCGNU::GetCppAtomicObjectGetFunction() {
+llvm::FunctionCallee CGObjCGNU::GetCppAtomicObjectGetFunction() {
   return nullptr;
 }
 
-llvm::Constant *CGObjCGNU::GetCppAtomicObjectSetFunction() {
+llvm::FunctionCallee CGObjCGNU::GetCppAtomicObjectSetFunction() {
   return nullptr;
 }
 
-llvm::Constant *CGObjCGNU::EnumerationMutationFunction() {
+llvm::FunctionCallee CGObjCGNU::EnumerationMutationFunction() {
   return EnumerationMutationFn;
 }
 
@@ -3843,13 +3840,14 @@ void CGObjCGNU::EmitThrowStmt(CodeGenFunction &CGF,
     // that was passed into the `@catch` block, then this code path is not
     // reached and we will instead call `objc_exception_throw` with an explicit
     // argument.
-    CGF.EmitRuntimeCallOrInvoke(ExceptionReThrowFn).setDoesNotReturn();
+    llvm::CallBase *Throw = CGF.EmitRuntimeCallOrInvoke(ExceptionReThrowFn);
+    Throw->setDoesNotReturn();
   }
   else {
     ExceptionAsObject = CGF.Builder.CreateBitCast(ExceptionAsObject, IdTy);
-    llvm::CallSite Throw =
+    llvm::CallBase *Throw =
         CGF.EmitRuntimeCallOrInvoke(ExceptionThrowFn, ExceptionAsObject);
-    Throw.setDoesNotReturn();
+    Throw->setDoesNotReturn();
   }
   CGF.Builder.CreateUnreachable();
   if (ClearInsertionPoint)
@@ -3860,8 +3858,7 @@ llvm::Value * CGObjCGNU::EmitObjCWeakRead(CodeGenFunction &CGF,
                                           Address AddrWeakObj) {
   CGBuilderTy &B = CGF.Builder;
   AddrWeakObj = EnforceType(B, AddrWeakObj, PtrToIdTy);
-  return B.CreateCall(WeakReadFn.getType(), WeakReadFn,
-                      AddrWeakObj.getPointer());
+  return B.CreateCall(WeakReadFn, AddrWeakObj.getPointer());
 }
 
 void CGObjCGNU::EmitObjCWeakAssign(CodeGenFunction &CGF,
@@ -3869,8 +3866,7 @@ void CGObjCGNU::EmitObjCWeakAssign(CodeGenFunction &CGF,
   CGBuilderTy &B = CGF.Builder;
   src = EnforceType(B, src, IdTy);
   dst = EnforceType(B, dst, PtrToIdTy);
-  B.CreateCall(WeakAssignFn.getType(), WeakAssignFn,
-               {src, dst.getPointer()});
+  B.CreateCall(WeakAssignFn, {src, dst.getPointer()});
 }
 
 void CGObjCGNU::EmitObjCGlobalAssign(CodeGenFunction &CGF,
@@ -3881,8 +3877,7 @@ void CGObjCGNU::EmitObjCGlobalAssign(CodeGenFunction &CGF,
   dst = EnforceType(B, dst, PtrToIdTy);
   // FIXME. Add threadloca assign API
   assert(!threadlocal && "EmitObjCGlobalAssign - Threal Local API NYI");
-  B.CreateCall(GlobalAssignFn.getType(), GlobalAssignFn,
-               {src, dst.getPointer()});
+  B.CreateCall(GlobalAssignFn, {src, dst.getPointer()});
 }
 
 void CGObjCGNU::EmitObjCIvarAssign(CodeGenFunction &CGF,
@@ -3891,8 +3886,7 @@ void CGObjCGNU::EmitObjCIvarAssign(CodeGenFunction &CGF,
   CGBuilderTy &B = CGF.Builder;
   src = EnforceType(B, src, IdTy);
   dst = EnforceType(B, dst, IdTy);
-  B.CreateCall(IvarAssignFn.getType(), IvarAssignFn,
-               {src, dst.getPointer(), ivarOffset});
+  B.CreateCall(IvarAssignFn, {src, dst.getPointer(), ivarOffset});
 }
 
 void CGObjCGNU::EmitObjCStrongCastAssign(CodeGenFunction &CGF,
@@ -3900,8 +3894,7 @@ void CGObjCGNU::EmitObjCStrongCastAssign(CodeGenFunction &CGF,
   CGBuilderTy &B = CGF.Builder;
   src = EnforceType(B, src, IdTy);
   dst = EnforceType(B, dst, PtrToIdTy);
-  B.CreateCall(StrongCastAssignFn.getType(), StrongCastAssignFn,
-               {src, dst.getPointer()});
+  B.CreateCall(StrongCastAssignFn, {src, dst.getPointer()});
 }
 
 void CGObjCGNU::EmitGCMemmoveCollectable(CodeGenFunction &CGF,
@@ -3912,8 +3905,7 @@ void CGObjCGNU::EmitGCMemmoveCollectable(CodeGenFunction &CGF,
   DestPtr = EnforceType(B, DestPtr, PtrTy);
   SrcPtr = EnforceType(B, SrcPtr, PtrTy);
 
-  B.CreateCall(MemMoveFn.getType(), MemMoveFn,
-               {DestPtr.getPointer(), SrcPtr.getPointer(), Size});
+  B.CreateCall(MemMoveFn, {DestPtr.getPointer(), SrcPtr.getPointer(), Size});
 }
 
 llvm::GlobalVariable *CGObjCGNU::ObjCIvarOffsetVariable(

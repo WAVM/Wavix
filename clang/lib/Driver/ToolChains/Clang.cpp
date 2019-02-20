@@ -519,6 +519,7 @@ static bool useFramePointerForTargetByDefault(const ArgList &Args,
   case llvm::Triple::xcore:
   case llvm::Triple::wasm32:
   case llvm::Triple::wasm64:
+  case llvm::Triple::msp430:
     // XCore never wants frame pointers, regardless of OS.
     // WebAssembly never wants frame pointers.
     return false;
@@ -3464,13 +3465,25 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       NormalizedTriple = C.getSingleOffloadToolChain<Action::OFK_Host>()
                              ->getTriple()
                              .normalize();
-    else
+    else {
+      // Host-side compilation.
       NormalizedTriple =
           (IsCuda ? C.getSingleOffloadToolChain<Action::OFK_Cuda>()
                   : C.getSingleOffloadToolChain<Action::OFK_HIP>())
               ->getTriple()
               .normalize();
-
+      if (IsCuda) {
+        // We need to figure out which CUDA version we're compiling for, as that
+        // determines how we load and launch GPU kernels.
+        auto *CTC = static_cast<const toolchains::CudaToolChain *>(
+            C.getSingleOffloadToolChain<Action::OFK_Cuda>());
+        assert(CTC && "Expected valid CUDA Toolchain.");
+        if (CTC && CTC->CudaInstallation.version() != CudaVersion::UNKNOWN)
+          CmdArgs.push_back(Args.MakeArgString(
+              Twine("-target-sdk-version=") +
+              CudaVersionToString(CTC->CudaInstallation.version())));
+      }
+    }
     CmdArgs.push_back("-aux-triple");
     CmdArgs.push_back(Args.MakeArgString(NormalizedTriple));
   }
@@ -3797,6 +3810,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-pic-is-pie");
   }
 
+  if (RelocationModel == llvm::Reloc::ROPI ||
+      RelocationModel == llvm::Reloc::ROPI_RWPI)
+    CmdArgs.push_back("-fropi");
+  if (RelocationModel == llvm::Reloc::RWPI ||
+      RelocationModel == llvm::Reloc::ROPI_RWPI)
+    CmdArgs.push_back("-frwpi");
+
   if (Arg *A = Args.getLastArg(options::OPT_meabi)) {
     CmdArgs.push_back("-meabi");
     CmdArgs.push_back(A->getValue());
@@ -3810,7 +3830,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(A->getValue());
   }
   else
-    CmdArgs.push_back(Args.MakeArgString(TC.getThreadModel()));
+    CmdArgs.push_back(Args.MakeArgString(TC.getThreadModel(Args)));
 
   Args.AddLastArg(CmdArgs, options::OPT_fveclib);
 
@@ -5062,6 +5082,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   for (const Arg *A : Args.filtered(options::OPT_fplugin_EQ)) {
     CmdArgs.push_back("-load");
     CmdArgs.push_back(A->getValue());
+    A->claim();
+  }
+
+  // Forward -fpass-plugin=name.so to -cc1.
+  for (const Arg *A : Args.filtered(options::OPT_fpass_plugin_EQ)) {
+    CmdArgs.push_back(
+        Args.MakeArgString(Twine("-fpass-plugin=") + A->getValue()));
     A->claim();
   }
 
