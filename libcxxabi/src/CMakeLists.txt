@@ -189,7 +189,7 @@ if (LIBCXXABI_ENABLE_SHARED)
   if(COMMAND llvm_setup_rpath)
     llvm_setup_rpath(cxxabi_shared)
   endif()
-  target_link_libraries(cxxabi_shared ${LIBCXXABI_LIBRARIES} ${LIBCXXABI_SHARED_LIBRARIES})
+  target_link_libraries(cxxabi_shared PRIVATE ${LIBCXXABI_LIBRARIES} ${LIBCXXABI_SHARED_LIBRARIES})
   set_target_properties(cxxabi_shared
                         PROPERTIES
                           CXX_EXTENSIONS
@@ -218,11 +218,15 @@ endif()
 if (LIBCXXABI_ENABLE_STATIC)
   if (LIBCXXABI_USE_LLVM_UNWINDER AND LIBCXXABI_STATICALLY_LINK_UNWINDER_IN_STATIC_LIBRARY)
     if (TARGET unwind_static OR HAVE_LIBUNWIND)
-      list(APPEND cxxabi_static_sources $<TARGET_OBJECTS:unwind_objects>)
+      if(LIBUNWIND_HERMETIC_STATIC_LIBRARY)
+        list(APPEND cxxabi_static_sources $<TARGET_OBJECTS:unwind_static_objects>)
+      else()
+        list(APPEND cxxabi_static_sources $<TARGET_OBJECTS:unwind_objects>)
+      endif()
     endif()
   endif()
   add_library(cxxabi_static STATIC ${cxxabi_static_sources})
-  target_link_libraries(cxxabi_static ${LIBCXXABI_LIBRARIES} ${LIBCXXABI_STATIC_LIBRARIES})
+  target_link_libraries(cxxabi_static PRIVATE ${LIBCXXABI_LIBRARIES} ${LIBCXXABI_STATIC_LIBRARIES})
   set_target_properties(cxxabi_static
                         PROPERTIES
                           CXX_EXTENSIONS
