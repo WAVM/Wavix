@@ -10,6 +10,7 @@
 #include "Config.h"
 #include "InputFiles.h"
 #include "Symbols.h"
+#include "lld/Common/Args.h"
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Strings.h"
 #include "lld/Common/TargetOptionsCommandFlags.h"
@@ -42,7 +43,7 @@ using namespace lld::coff;
 
 static std::unique_ptr<lto::LTO> createLTO() {
   lto::Config C;
-  C.Options = InitTargetOptionsFromCodeGenFlags();
+  C.Options = initTargetOptionsFromCodeGenFlags();
 
   // Always emit a section per function/datum with LTO. LLVM LTO should get most
   // of the benefit of linker GC, but there are still opportunities for ICF.
@@ -59,8 +60,9 @@ static std::unique_ptr<lto::LTO> createLTO() {
   C.DisableVerify = true;
   C.DiagHandler = diagnosticHandler;
   C.OptLevel = Config->LTOO;
-  C.CPU = GetCPUStr();
-  C.MAttrs = GetMAttrs();
+  C.CPU = getCPUStr();
+  C.MAttrs = getMAttrs();
+  C.CGOptLevel = args::getCGOptLevel(Config->LTOO);
 
   if (Config->SaveTemps)
     checkError(C.addSaveTemps(std::string(Config->OutputFile) + ".",

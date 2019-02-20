@@ -12,6 +12,7 @@
 #include "LinkerScript.h"
 #include "SymbolTable.h"
 #include "Symbols.h"
+#include "lld/Common/Args.h"
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/TargetOptionsCommandFlags.h"
 #include "llvm/ADT/STLExtras.h"
@@ -67,7 +68,7 @@ static lto::Config createConfig() {
   lto::Config C;
 
   // LLD supports the new relocations and address-significance tables.
-  C.Options = InitTargetOptionsFromCodeGenFlags();
+  C.Options = initTargetOptionsFromCodeGenFlags();
   C.Options.RelaxELFRelocations = true;
   C.Options.EmitAddrsig = true;
 
@@ -82,12 +83,13 @@ static lto::Config createConfig() {
   else
     C.RelocModel = Reloc::Static;
 
-  C.CodeModel = GetCodeModelFromCMModel();
+  C.CodeModel = getCodeModelFromCMModel();
   C.DisableVerify = Config->DisableVerify;
   C.DiagHandler = diagnosticHandler;
   C.OptLevel = Config->LTOO;
-  C.CPU = GetCPUStr();
-  C.MAttrs = GetMAttrs();
+  C.CPU = getCPUStr();
+  C.MAttrs = getMAttrs();
+  C.CGOptLevel = args::getCGOptLevel(Config->LTOO);
 
   // Set up a custom pipeline if we've been asked to.
   C.OptPipeline = Config->LTONewPmPasses;

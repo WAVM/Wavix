@@ -329,7 +329,7 @@ void ScriptParser::readEntry() {
 void ScriptParser::readExtern() {
   expect("(");
   while (!errorCount() && !consume(")"))
-    Config->Undefined.push_back(next());
+    Config->Undefined.push_back(unquote(next()));
 }
 
 void ScriptParser::readGroup() {
@@ -389,11 +389,13 @@ static std::pair<ELFKind, uint16_t> parseBfdName(StringRef S) {
       .Case("elf32-iamcu", {ELF32LEKind, EM_IAMCU})
       .Case("elf32-littlearm", {ELF32LEKind, EM_ARM})
       .Case("elf32-x86-64", {ELF32LEKind, EM_X86_64})
+      .Case("elf64-aarch64", {ELF64LEKind, EM_AARCH64})
       .Case("elf64-littleaarch64", {ELF64LEKind, EM_AARCH64})
+      .Case("elf32-powerpc", {ELF32BEKind, EM_PPC})
       .Case("elf64-powerpc", {ELF64BEKind, EM_PPC64})
       .Case("elf64-powerpcle", {ELF64LEKind, EM_PPC64})
       .Case("elf64-x86-64", {ELF64LEKind, EM_X86_64})
-      .Case("elf32-tradbigmips", {ELF32BEKind, EM_MIPS})
+      .Cases("elf32-tradbigmips", "elf32-bigmips", {ELF32BEKind, EM_MIPS})
       .Case("elf32-ntradbigmips", {ELF32BEKind, EM_MIPS})
       .Case("elf32-tradlittlemips", {ELF32LEKind, EM_MIPS})
       .Case("elf32-ntradlittlemips", {ELF32LEKind, EM_MIPS})
@@ -407,11 +409,14 @@ static std::pair<ELFKind, uint16_t> parseBfdName(StringRef S) {
 void ScriptParser::readOutputFormat() {
   expect("(");
 
-  StringRef S = unquote(next());
+  StringRef Name = unquote(next());
+  StringRef S = Name;
+  if (S.consume_back("-freebsd"))
+    Config->OSABI = ELFOSABI_FREEBSD;
 
   std::tie(Config->EKind, Config->EMachine) = parseBfdName(S);
   if (Config->EMachine == EM_NONE)
-    setError("unknown output format name: " + S);
+    setError("unknown output format name: " + Name);
   if (S == "elf32-ntradlittlemips" || S == "elf32-ntradbigmips")
     Config->MipsN32Abi = true;
 

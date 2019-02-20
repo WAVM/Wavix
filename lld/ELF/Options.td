@@ -30,7 +30,7 @@ def Bstatic: F<"Bstatic">, HelpText<"Do not link against shared libraries">;
 def build_id: F<"build-id">, HelpText<"Alias for --build-id=fast">;
 
 def build_id_eq: J<"build-id=">, HelpText<"Generate build ID note">,
-  MetaVarName<"[fast,md5,sha,uuid,0x<hexstring>]">;
+  MetaVarName<"[fast,md5,sha1,uuid,0x<hexstring>]">;
 
 defm check_sections: B<"check-sections",
     "Check section addresses for overlaps (default)",
@@ -62,6 +62,10 @@ defm Ttext: Eq<"Ttext", "Same as --section-start with .text as the sectionname">
 defm allow_multiple_definition: B<"allow-multiple-definition",
     "Allow multiple definitions",
     "Do not allow multiple definitions (default)">;
+
+defm allow_shlib_undefined: B<"allow-shlib-undefined",
+    "Allow unresolved references in shared libraries (default when linking a shared library)",
+    "Do not allow unresolved references in shared libraries (default when linking an executable)">;
 
 defm apply_dynamic_relocs: B<"apply-dynamic-relocs",
     "Apply link-time values for dynamic relocations",
@@ -492,12 +496,10 @@ def plugin_opt_thinlto: J<"plugin-opt=thinlto">;
 def plugin_opt_slash: J<"plugin-opt=/">;
 
 // Options listed below are silently ignored for now for compatibility.
-def: F<"allow-shlib-undefined">;
 def: F<"detect-odr-violations">;
 def: Flag<["-"], "g">;
 def: F<"long-plt">;
 def: F<"no-add-needed">;
-def: F<"no-allow-shlib-undefined">;
 def: F<"no-copy-dt-needed-entries">;
 def: F<"no-ctors-in-init-array">;
 def: F<"no-keep-memory">;
