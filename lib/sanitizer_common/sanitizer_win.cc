@@ -229,7 +229,7 @@ bool MmapFixedNoReserve(uptr fixed_addr, uptr size, const char *name) {
 
 // Memory space mapped by 'MmapFixedOrDie' must have been reserved by
 // 'MmapFixedNoAccess'.
-void *MmapFixedOrDie(uptr fixed_addr, uptr size) {
+void *MmapFixedOrDie(uptr fixed_addr, uptr size, const char *name) {
   void *p = VirtualAlloc((LPVOID)fixed_addr, size,
       MEM_COMMIT, PAGE_READWRITE);
   if (p == 0) {
@@ -243,11 +243,12 @@ void *MmapFixedOrDie(uptr fixed_addr, uptr size) {
 
 // Uses fixed_addr for now.
 // Will use offset instead once we've implemented this function for real.
-uptr ReservedAddressRange::Map(uptr fixed_addr, uptr size) {
+uptr ReservedAddressRange::Map(uptr fixed_addr, uptr size, const char *name) {
   return reinterpret_cast<uptr>(MmapFixedOrDieOnFatalError(fixed_addr, size));
 }
 
-uptr ReservedAddressRange::MapOrDie(uptr fixed_addr, uptr size) {
+uptr ReservedAddressRange::MapOrDie(uptr fixed_addr, uptr size,
+                                    const char *name) {
   return reinterpret_cast<uptr>(MmapFixedOrDie(fixed_addr, size));
 }
 
@@ -260,7 +261,7 @@ void ReservedAddressRange::Unmap(uptr addr, uptr size) {
   UnmapOrDie(reinterpret_cast<void*>(addr), size);
 }
 
-void *MmapFixedOrDieOnFatalError(uptr fixed_addr, uptr size) {
+void *MmapFixedOrDieOnFatalError(uptr fixed_addr, uptr size, const char *name) {
   void *p = VirtualAlloc((LPVOID)fixed_addr, size,
       MEM_COMMIT, PAGE_READWRITE);
   if (p == 0) {
@@ -486,8 +487,14 @@ bool IsPathSeparator(const char c) {
   return c == '\\' || c == '/';
 }
 
+static bool IsAlpha(char c) {
+  c = ToLower(c);
+  return c >= 'a' && c <= 'z';
+}
+
 bool IsAbsolutePath(const char *path) {
-  UNIMPLEMENTED();
+  return path != nullptr && IsAlpha(path[0]) && path[1] == ':' &&
+         IsPathSeparator(path[2]);
 }
 
 void SleepForSeconds(int seconds) {
