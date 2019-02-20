@@ -110,6 +110,8 @@ static I64 mainThreadEntry(void* threadVoid)
 			getCurrentThread()->result = result;
 		},
 		[](Exception* exception) {
+			Log::printf(Log::error, "Runtime exception: %s", describeException(exception).c_str());
+
 			Lock<Platform::Mutex> resultLock(getCurrentThread()->resultMutex);
 			getCurrentThread()->result = -1;
 			destroyException(exception);
