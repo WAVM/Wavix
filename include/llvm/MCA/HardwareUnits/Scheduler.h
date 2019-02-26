@@ -120,6 +120,14 @@ class Scheduler : public HardwareUnit {
   // Each bit of the mask represents an unavailable resource.
   uint64_t BusyResourceUnits;
 
+  // Counts the number of instructions in the pending set that were dispatched
+  // during this cycle.
+  unsigned NumDispatchedToThePendingSet;
+
+  // True if the previous pipeline Stage was unable to dispatch a full group of
+  // opcodes because scheduler buffers (or LS queues) were unavailable.
+  bool HadTokenStall;
+
   /// Verify the given selection strategy and set the Strategy member
   /// accordingly.  If no strategy is provided, the DefaultSchedulerStrategy is
   /// used.
@@ -155,7 +163,8 @@ public:
 
   Scheduler(std::unique_ptr<ResourceManager> RM, LSUnit &Lsu,
             std::unique_ptr<SchedulerStrategy> SelectStrategy)
-      : LSU(Lsu), Resources(std::move(RM)), BusyResourceUnits(0) {
+      : LSU(Lsu), Resources(std::move(RM)), BusyResourceUnits(0),
+        NumDispatchedToThePendingSet(0), HadTokenStall(false) {
     initializeStrategy(std::move(SelectStrategy));
   }
 
@@ -168,15 +177,12 @@ public:
     SC_DISPATCH_GROUP_STALL,
   };
 
-  /// Check if the instruction in 'IR' can be dispatched and returns an answer
-  /// in the form of a Status value.
+  /// Check if the instruction in 'IR' can be dispatched during this cycle.
+  /// Return SC_AVAILABLE if both scheduler and LS resources are available.
   ///
-  /// The DispatchStage is responsible for querying the Scheduler before
-  /// dispatching new instructions. This routine is used for performing such
-  /// a query.  If the instruction 'IR' can be dispatched, then true is
-  /// returned, otherwise false is returned with Event set to the stall type.
-  /// Internally, it also checks if the load/store unit is available.
-  Status isAvailable(const InstRef &IR) const;
+  /// This method internally sets field HadTokenStall based on the Scheduler
+  /// Status value.
+  Status isAvailable(const InstRef &IR);
 
   /// Reserves buffer and LSUnit queue resources that are necessary to issue
   /// this instruction.
@@ -184,11 +190,7 @@ public:
   /// Returns true if instruction IR is ready to be issued to the underlying
   /// pipelines. Note that this operation cannot fail; it assumes that a
   /// previous call to method `isAvailable(IR)` returned `SC_AVAILABLE`.
-  void dispatch(const InstRef &IR);
-
-  /// Returns true if IR is ready to be executed by the underlying pipelines.
-  /// This method assumes that IR has been previously dispatched.
-  bool isReady(const InstRef &IR) const;
+  bool dispatch(const InstRef &IR);
 
   /// Issue an instruction and populates a vector of used pipeline resources,
   /// and a vector of instructions that transitioned to the ready state as a
@@ -232,6 +234,10 @@ public:
   }
   bool isReadySetEmpty() const { return ReadySet.empty(); }
   bool isWaitSetEmpty() const { return WaitSet.empty(); }
+
+  // Returns true if the dispatch logic couldn't dispatch a full group due to
+  // unavailable scheduler and/or LS resources.
+  bool hadTokenStall() const { return HadTokenStall; }
 
 #ifndef NDEBUG
   // Update the ready queues.

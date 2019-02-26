@@ -1273,6 +1273,12 @@ SDValue SelectionDAG::getIntPtrConstant(uint64_t Val, const SDLoc &DL,
   return getConstant(Val, DL, TLI->getPointerTy(getDataLayout()), isTarget);
 }
 
+SDValue SelectionDAG::getShiftAmountConstant(uint64_t Val, EVT VT,
+                                             const SDLoc &DL, bool LegalTypes) {
+  EVT ShiftVT = TLI->getShiftAmountTy(VT, getDataLayout(), LegalTypes);
+  return getConstant(Val, DL, ShiftVT);
+}
+
 SDValue SelectionDAG::getConstantFP(const APFloat &V, const SDLoc &DL, EVT VT,
                                     bool isTarget) {
   return getConstantFP(*ConstantFP::get(*getContext(), V), DL, VT, isTarget);
@@ -2102,9 +2108,13 @@ SDValue SelectionDAG::GetDemandedBits(SDValue V, const APInt &Mask) {
     break;
   case ISD::AND: {
     // X & -1 -> X (ignoring bits which aren't demanded).
-    ConstantSDNode *AndVal = isConstOrConstSplat(V.getOperand(1));
-    if (AndVal && Mask.isSubsetOf(AndVal->getAPIntValue()))
-      return V.getOperand(0);
+    // Also handle the case where masked out bits in X are known to be zero.
+    if (ConstantSDNode *RHSC = isConstOrConstSplat(V.getOperand(1))) {
+      const APInt &AndVal = RHSC->getAPIntValue();
+      if (Mask.isSubsetOf(AndVal) ||
+          Mask.isSubsetOf(computeKnownBits(V.getOperand(0)).Zero | AndVal))
+        return V.getOperand(0);
+    }
     break;
   }
   case ISD::ANY_EXTEND: {
@@ -2241,30 +2251,6 @@ bool SelectionDAG::isSplatValue(SDValue V, bool AllowUndefs) {
   APInt DemandedElts = APInt::getAllOnesValue(NumElts);
   return isSplatValue(V, DemandedElts, UndefElts) &&
          (AllowUndefs || !UndefElts);
-}
-
-/// Helper function that checks to see if a node is a constant or a
-/// build vector of splat constants at least within the demanded elts.
-static ConstantSDNode *isConstOrDemandedConstSplat(SDValue N,
-                                                   const APInt &DemandedElts) {
-  if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(N))
-    return CN;
-  if (N.getOpcode() != ISD::BUILD_VECTOR)
-    return nullptr;
-  EVT VT = N.getValueType();
-  ConstantSDNode *Cst = nullptr;
-  unsigned NumElts = VT.getVectorNumElements();
-  assert(DemandedElts.getBitWidth() == NumElts && "Unexpected vector size");
-  for (unsigned i = 0; i != NumElts; ++i) {
-    if (!DemandedElts[i])
-      continue;
-    ConstantSDNode *C = dyn_cast<ConstantSDNode>(N.getOperand(i));
-    if (!C || (Cst && Cst->getAPIntValue() != C->getAPIntValue()) ||
-        C->getValueType(0) != VT.getScalarType())
-      return nullptr;
-    Cst = C;
-  }
-  return Cst;
 }
 
 /// If a SHL/SRA/SRL node has a constant or splat constant shift amount that
@@ -2707,8 +2693,7 @@ KnownBits SelectionDAG::computeKnownBits(SDValue Op, const APInt &DemandedElts,
     break;
   case ISD::FSHL:
   case ISD::FSHR:
-    if (ConstantSDNode *C =
-            isConstOrDemandedConstSplat(Op.getOperand(2), DemandedElts)) {
+    if (ConstantSDNode *C = isConstOrConstSplat(Op.getOperand(2), DemandedElts)) {
       unsigned Amt = C->getAPIntValue().urem(BitWidth);
 
       // For fshl, 0-shift returns the 1st arg.
@@ -3145,10 +3130,10 @@ KnownBits SelectionDAG::computeKnownBits(SDValue Op, const APInt &DemandedElts,
     // the minimum of the clamp min/max range.
     bool IsMax = (Opcode == ISD::SMAX);
     ConstantSDNode *CstLow = nullptr, *CstHigh = nullptr;
-    if ((CstLow = isConstOrDemandedConstSplat(Op.getOperand(1), DemandedElts)))
+    if ((CstLow = isConstOrConstSplat(Op.getOperand(1), DemandedElts)))
       if (Op.getOperand(0).getOpcode() == (IsMax ? ISD::SMIN : ISD::SMAX))
-        CstHigh = isConstOrDemandedConstSplat(Op.getOperand(0).getOperand(1),
-                                              DemandedElts);
+        CstHigh =
+            isConstOrConstSplat(Op.getOperand(0).getOperand(1), DemandedElts);
     if (CstLow && CstHigh) {
       if (!IsMax)
         std::swap(CstLow, CstHigh);
@@ -3429,7 +3414,7 @@ unsigned SelectionDAG::ComputeNumSignBits(SDValue Op, const APInt &DemandedElts,
     Tmp = ComputeNumSignBits(Op.getOperand(0), DemandedElts, Depth+1);
     // SRA X, C   -> adds C sign bits.
     if (ConstantSDNode *C =
-            isConstOrDemandedConstSplat(Op.getOperand(1), DemandedElts)) {
+            isConstOrConstSplat(Op.getOperand(1), DemandedElts)) {
       APInt ShiftVal = C->getAPIntValue();
       ShiftVal += Tmp;
       Tmp = ShiftVal.uge(VTBits) ? VTBits : ShiftVal.getZExtValue();
@@ -3437,7 +3422,7 @@ unsigned SelectionDAG::ComputeNumSignBits(SDValue Op, const APInt &DemandedElts,
     return Tmp;
   case ISD::SHL:
     if (ConstantSDNode *C =
-            isConstOrDemandedConstSplat(Op.getOperand(1), DemandedElts)) {
+            isConstOrConstSplat(Op.getOperand(1), DemandedElts)) {
       // shl destroys sign bits.
       Tmp = ComputeNumSignBits(Op.getOperand(0), DemandedElts, Depth+1);
       if (C->getAPIntValue().uge(VTBits) ||      // Bad shift.
@@ -3477,10 +3462,10 @@ unsigned SelectionDAG::ComputeNumSignBits(SDValue Op, const APInt &DemandedElts,
     // the minimum of the clamp min/max range.
     bool IsMax = (Opcode == ISD::SMAX);
     ConstantSDNode *CstLow = nullptr, *CstHigh = nullptr;
-    if ((CstLow = isConstOrDemandedConstSplat(Op.getOperand(1), DemandedElts)))
+    if ((CstLow = isConstOrConstSplat(Op.getOperand(1), DemandedElts)))
       if (Op.getOperand(0).getOpcode() == (IsMax ? ISD::SMIN : ISD::SMAX))
-        CstHigh = isConstOrDemandedConstSplat(Op.getOperand(0).getOperand(1),
-                                              DemandedElts);
+        CstHigh =
+            isConstOrConstSplat(Op.getOperand(0).getOperand(1), DemandedElts);
     if (CstLow && CstHigh) {
       if (!IsMax)
         std::swap(CstLow, CstHigh);
@@ -6502,6 +6487,36 @@ SDValue SelectionDAG::getMemIntrinsicNode(unsigned Opcode, const SDLoc &dl,
   return SDValue(N, 0);
 }
 
+SDValue SelectionDAG::getLifetimeNode(bool IsStart, const SDLoc &dl,
+                                      SDValue Chain, int FrameIndex,
+                                      int64_t Size, int64_t Offset) {
+  const unsigned Opcode = IsStart ? ISD::LIFETIME_START : ISD::LIFETIME_END;
+  const auto VTs = getVTList(MVT::Other);
+  SDValue Ops[2] = {
+      Chain,
+      getFrameIndex(FrameIndex,
+                    getTargetLoweringInfo().getFrameIndexTy(getDataLayout()),
+                    true)};
+
+  FoldingSetNodeID ID;
+  AddNodeIDNode(ID, Opcode, VTs, Ops);
+  ID.AddInteger(FrameIndex);
+  ID.AddInteger(Size);
+  ID.AddInteger(Offset);
+  void *IP = nullptr;
+  if (SDNode *E = FindNodeOrInsertPos(ID, dl, IP))
+    return SDValue(E, 0);
+
+  LifetimeSDNode *N = newSDNode<LifetimeSDNode>(
+      Opcode, dl.getIROrder(), dl.getDebugLoc(), VTs, Size, Offset);
+  createOperands(N, Ops);
+  CSEMap.InsertNode(N, IP);
+  InsertNode(N);
+  SDValue V(N, 0);
+  NewSDValueDbgMsg(V, "Creating new node: ", this);
+  return V;
+}
+
 /// InferPointerInfo - If the specified ptr/offset is a frame index, infer a
 /// MachinePointerInfo record from it.  This is particularly useful because the
 /// code generator has many cases where it doesn't bother passing in a
@@ -8553,6 +8568,24 @@ ConstantSDNode *llvm::isConstOrConstSplat(SDValue N, bool AllowUndefs) {
   return nullptr;
 }
 
+ConstantSDNode *llvm::isConstOrConstSplat(SDValue N, const APInt &DemandedElts,
+                                          bool AllowUndefs) {
+  if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(N))
+    return CN;
+
+  if (BuildVectorSDNode *BV = dyn_cast<BuildVectorSDNode>(N)) {
+    BitVector UndefElements;
+    ConstantSDNode *CN = BV->getConstantSplatNode(DemandedElts, &UndefElements);
+
+    // BuildVectors can truncate their operands. Ignore that case here.
+    if (CN && (UndefElements.none() || AllowUndefs) &&
+        CN->getValueType(0) == N.getValueType().getScalarType())
+      return CN;
+  }
+
+  return nullptr;
+}
+
 ConstantFPSDNode *llvm::isConstOrConstSplatFP(SDValue N, bool AllowUndefs) {
   if (ConstantFPSDNode *CN = dyn_cast<ConstantFPSDNode>(N))
     return CN;
@@ -8560,6 +8593,23 @@ ConstantFPSDNode *llvm::isConstOrConstSplatFP(SDValue N, bool AllowUndefs) {
   if (BuildVectorSDNode *BV = dyn_cast<BuildVectorSDNode>(N)) {
     BitVector UndefElements;
     ConstantFPSDNode *CN = BV->getConstantFPSplatNode(&UndefElements);
+    if (CN && (UndefElements.none() || AllowUndefs))
+      return CN;
+  }
+
+  return nullptr;
+}
+
+ConstantFPSDNode *llvm::isConstOrConstSplatFP(SDValue N,
+                                              const APInt &DemandedElts,
+                                              bool AllowUndefs) {
+  if (ConstantFPSDNode *CN = dyn_cast<ConstantFPSDNode>(N))
+    return CN;
+
+  if (BuildVectorSDNode *BV = dyn_cast<BuildVectorSDNode>(N)) {
+    BitVector UndefElements;
+    ConstantFPSDNode *CN =
+        BV->getConstantFPSplatNode(DemandedElts, &UndefElements);
     if (CN && (UndefElements.none() || AllowUndefs))
       return CN;
   }
@@ -8918,6 +8968,56 @@ SDValue SelectionDAG::UnrollVectorOp(SDNode *N, unsigned ResNE) {
   return getBuildVector(VecVT, dl, Scalars);
 }
 
+std::pair<SDValue, SDValue> SelectionDAG::UnrollVectorOverflowOp(
+    SDNode *N, unsigned ResNE) {
+  unsigned Opcode = N->getOpcode();
+  assert((Opcode == ISD::UADDO || Opcode == ISD::SADDO ||
+          Opcode == ISD::USUBO || Opcode == ISD::SSUBO ||
+          Opcode == ISD::UMULO || Opcode == ISD::SMULO) &&
+         "Expected an overflow opcode");
+
+  EVT ResVT = N->getValueType(0);
+  EVT OvVT = N->getValueType(1);
+  EVT ResEltVT = ResVT.getVectorElementType();
+  EVT OvEltVT = OvVT.getVectorElementType();
+  SDLoc dl(N);
+
+  // If ResNE is 0, fully unroll the vector op.
+  unsigned NE = ResVT.getVectorNumElements();
+  if (ResNE == 0)
+    ResNE = NE;
+  else if (NE > ResNE)
+    NE = ResNE;
+
+  SmallVector<SDValue, 8> LHSScalars;
+  SmallVector<SDValue, 8> RHSScalars;
+  ExtractVectorElements(N->getOperand(0), LHSScalars, 0, NE);
+  ExtractVectorElements(N->getOperand(1), RHSScalars, 0, NE);
+
+  EVT SVT = TLI->getSetCCResultType(getDataLayout(), *getContext(), ResEltVT);
+  SDVTList VTs = getVTList(ResEltVT, SVT);
+  SmallVector<SDValue, 8> ResScalars;
+  SmallVector<SDValue, 8> OvScalars;
+  for (unsigned i = 0; i < NE; ++i) {
+    SDValue Res = getNode(Opcode, dl, VTs, LHSScalars[i], RHSScalars[i]);
+    SDValue Ov =
+        getSelect(dl, OvEltVT, Res.getValue(1),
+                  getBoolConstant(true, dl, OvEltVT, ResVT),
+                  getConstant(0, dl, OvEltVT));
+
+    ResScalars.push_back(Res);
+    OvScalars.push_back(Ov);
+  }
+
+  ResScalars.append(ResNE - NE, getUNDEF(ResEltVT));
+  OvScalars.append(ResNE - NE, getUNDEF(OvEltVT));
+
+  EVT NewResVT = EVT::getVectorVT(*getContext(), ResEltVT, ResNE);
+  EVT NewOvVT = EVT::getVectorVT(*getContext(), OvEltVT, ResNE);
+  return std::make_pair(getBuildVector(NewResVT, dl, ResScalars),
+                        getBuildVector(NewOvVT, dl, OvScalars));
+}
+
 bool SelectionDAG::areNonVolatileConsecutiveLoads(LoadSDNode *LD,
                                                   LoadSDNode *Base,
                                                   unsigned Bytes,
@@ -9103,13 +9203,20 @@ bool BuildVectorSDNode::isConstantSplat(APInt &SplatValue, APInt &SplatUndef,
   return true;
 }
 
-SDValue BuildVectorSDNode::getSplatValue(BitVector *UndefElements) const {
+SDValue BuildVectorSDNode::getSplatValue(const APInt &DemandedElts,
+                                         BitVector *UndefElements) const {
   if (UndefElements) {
     UndefElements->clear();
     UndefElements->resize(getNumOperands());
   }
+  assert(getNumOperands() == DemandedElts.getBitWidth() &&
+         "Unexpected vector size");
+  if (!DemandedElts)
+    return SDValue();
   SDValue Splatted;
   for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
+    if (!DemandedElts[i])
+      continue;
     SDValue Op = getOperand(i);
     if (Op.isUndef()) {
       if (UndefElements)
@@ -9122,17 +9229,37 @@ SDValue BuildVectorSDNode::getSplatValue(BitVector *UndefElements) const {
   }
 
   if (!Splatted) {
-    assert(getOperand(0).isUndef() &&
+    unsigned FirstDemandedIdx = DemandedElts.countTrailingZeros();
+    assert(getOperand(FirstDemandedIdx).isUndef() &&
            "Can only have a splat without a constant for all undefs.");
-    return getOperand(0);
+    return getOperand(FirstDemandedIdx);
   }
 
   return Splatted;
 }
 
+SDValue BuildVectorSDNode::getSplatValue(BitVector *UndefElements) const {
+  APInt DemandedElts = APInt::getAllOnesValue(getNumOperands());
+  return getSplatValue(DemandedElts, UndefElements);
+}
+
+ConstantSDNode *
+BuildVectorSDNode::getConstantSplatNode(const APInt &DemandedElts,
+                                        BitVector *UndefElements) const {
+  return dyn_cast_or_null<ConstantSDNode>(
+      getSplatValue(DemandedElts, UndefElements));
+}
+
 ConstantSDNode *
 BuildVectorSDNode::getConstantSplatNode(BitVector *UndefElements) const {
   return dyn_cast_or_null<ConstantSDNode>(getSplatValue(UndefElements));
+}
+
+ConstantFPSDNode *
+BuildVectorSDNode::getConstantFPSplatNode(const APInt &DemandedElts,
+                                          BitVector *UndefElements) const {
+  return dyn_cast_or_null<ConstantFPSDNode>(
+      getSplatValue(DemandedElts, UndefElements));
 }
 
 ConstantFPSDNode *
