@@ -750,12 +750,9 @@ ExprResult Sema::BuildCXXThrow(SourceLocation OpLoc, Expr *Ex,
                                bool IsThrownVarInScope) {
   // Don't report an error if 'throw' is used in system headers.
   if (!getLangOpts().CXXExceptions &&
-      !getSourceManager().isInSystemHeader(OpLoc)) {
+      !getSourceManager().isInSystemHeader(OpLoc) && !getLangOpts().CUDA) {
     // Delay error emission for the OpenMP device code.
-    if (LangOpts.OpenMP && LangOpts.OpenMPIsDevice)
-      diagIfOpenMPDeviceCode(OpLoc, diag::err_exceptions_disabled) << "throw";
-    else
-      Diag(OpLoc, diag::err_exceptions_disabled) << "throw";
+    targetDiag(OpLoc, diag::err_exceptions_disabled) << "throw";
   }
 
   // Exceptions aren't allowed in CUDA device code.

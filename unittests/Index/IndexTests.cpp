@@ -57,6 +57,7 @@ struct TestSymbol {
   std::string QName;
   Position WrittenPos;
   Position DeclPos;
+  SymbolInfo SymInfo;
   // FIXME: add more information.
 };
 
@@ -78,6 +79,7 @@ public:
     if (!ND)
       return true;
     TestSymbol S;
+    S.SymInfo = getSymbolInfo(D);
     S.QName = ND->getQualifiedNameAsString();
     S.WrittenPos = Position::fromSourceLocation(Loc, AST->getSourceManager());
     S.DeclPos =
@@ -140,6 +142,7 @@ using testing::UnorderedElementsAre;
 MATCHER_P(QName, Name, "") { return arg.QName == Name; }
 MATCHER_P(WrittenAt, Pos, "") { return arg.WrittenPos == Pos; }
 MATCHER_P(DeclAt, Pos, "") { return arg.DeclPos == Pos; }
+MATCHER_P(Kind, SymKind, "") { return arg.SymInfo.Kind == SymKind; }
 
 TEST(IndexTest, Simple) {
   auto Index = std::make_shared<Indexer>();
@@ -214,6 +217,44 @@ TEST(IndexTest, IndexTemplateInstantiationPartial) {
   EXPECT_THAT(Index->Symbols,
               Contains(AllOf(QName("Foo"), WrittenAt(Position(8, 7)),
                              DeclAt(Position(5, 12)))));
+}
+
+TEST(IndexTest, IndexTypeParmDecls) {
+  std::string Code = R"cpp(
+    template <typename T, int I, template<typename> class C, typename NoRef>
+    struct Foo {
+      T t = I;
+      C<int> x;
+    };
+  )cpp";
+  auto Index = std::make_shared<Indexer>();
+  IndexingOptions Opts;
+  tooling::runToolOnCode(new IndexAction(Index, Opts), Code);
+  EXPECT_THAT(Index->Symbols, AllOf(Not(Contains(QName("Foo::T"))),
+                                    Not(Contains(QName("Foo::I"))),
+                                    Not(Contains(QName("Foo::C"))),
+                                    Not(Contains(QName("Foo::NoRef")))));
+
+  Opts.IndexTemplateParameters = true;
+  Index->Symbols.clear();
+  tooling::runToolOnCode(new IndexAction(Index, Opts), Code);
+  EXPECT_THAT(Index->Symbols,
+              AllOf(Contains(QName("Foo::T")), Contains(QName("Foo::I")),
+                    Contains(QName("Foo::C")), Contains(QName("Foo::NoRef"))));
+}
+
+TEST(IndexTest, UsingDecls) {
+  std::string Code = R"cpp(
+    void foo(int bar);
+    namespace std {
+      using ::foo;
+    }
+  )cpp";
+  auto Index = std::make_shared<Indexer>();
+  IndexingOptions Opts;
+  tooling::runToolOnCode(new IndexAction(Index, Opts), Code);
+  EXPECT_THAT(Index->Symbols,
+              Contains(AllOf(QName("std::foo"), Kind(SymbolKind::Using))));
 }
 
 } // namespace
