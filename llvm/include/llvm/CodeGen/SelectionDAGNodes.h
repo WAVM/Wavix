@@ -1629,8 +1629,18 @@ bool isBitwiseNot(SDValue V);
 /// Returns the SDNode if it is a constant splat BuildVector or constant int.
 ConstantSDNode *isConstOrConstSplat(SDValue N, bool AllowUndefs = false);
 
+/// Returns the SDNode if it is a demanded constant splat BuildVector or
+/// constant int.
+ConstantSDNode *isConstOrConstSplat(SDValue N, const APInt &DemandedElts,
+                                    bool AllowUndefs = false);
+
 /// Returns the SDNode if it is a constant splat BuildVector or constant float.
 ConstantFPSDNode *isConstOrConstSplatFP(SDValue N, bool AllowUndefs = false);
+
+/// Returns the SDNode if it is a demanded constant splat BuildVector or
+/// constant float.
+ConstantFPSDNode *isConstOrConstSplatFP(SDValue N, const APInt &DemandedElts,
+                                        bool AllowUndefs = false);
 
 /// Return true if the value is a constant 0 integer or a splatted vector of
 /// a constant 0 integer (with no undefs by default).
@@ -1689,6 +1699,37 @@ public:
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::FrameIndex ||
            N->getOpcode() == ISD::TargetFrameIndex;
+  }
+};
+
+/// This SDNode is used for LIFETIME_START/LIFETIME_END values, which indicate
+/// the offet and size that are started/ended in the underlying FrameIndex.
+class LifetimeSDNode : public SDNode {
+  int64_t Size;
+  int64_t Offset; // -1 if offset is unknown.
+public:
+  LifetimeSDNode(unsigned Opcode, unsigned Order, const DebugLoc &dl,
+                 SDVTList VTs, int64_t Size, int64_t Offset)
+      : SDNode(Opcode, Order, dl, VTs), Size(Size), Offset(Offset) {}
+
+  int64_t getFrameIndex() const {
+    return cast<FrameIndexSDNode>(getOperand(1))->getIndex();
+  }
+
+  bool hasOffset() const { return Offset >= 0; }
+  int64_t getOffset() const {
+    assert(hasOffset() && "offset is unknown");
+    return Offset;
+  }
+  int64_t getSize() const {
+    assert(hasOffset() && "offset is unknown");
+    return Size;
+  }
+
+  // Methods to support isa and dyn_cast
+  static bool classof(const SDNode *N) {
+    return N->getOpcode() == ISD::LIFETIME_START ||
+           N->getOpcode() == ISD::LIFETIME_END;
   }
 };
 
@@ -1837,11 +1878,30 @@ public:
                        unsigned MinSplatBits = 0,
                        bool isBigEndian = false) const;
 
+  /// Returns the demanded splatted value or a null value if this is not a
+  /// splat.
+  ///
+  /// The DemandedElts mask indicates the elements that must be in the splat.
+  /// If passed a non-null UndefElements bitvector, it will resize it to match
+  /// the vector width and set the bits where elements are undef.
+  SDValue getSplatValue(const APInt &DemandedElts,
+                        BitVector *UndefElements = nullptr) const;
+
   /// Returns the splatted value or a null value if this is not a splat.
   ///
   /// If passed a non-null UndefElements bitvector, it will resize it to match
   /// the vector width and set the bits where elements are undef.
   SDValue getSplatValue(BitVector *UndefElements = nullptr) const;
+
+  /// Returns the demanded splatted constant or null if this is not a constant
+  /// splat.
+  ///
+  /// The DemandedElts mask indicates the elements that must be in the splat.
+  /// If passed a non-null UndefElements bitvector, it will resize it to match
+  /// the vector width and set the bits where elements are undef.
+  ConstantSDNode *
+  getConstantSplatNode(const APInt &DemandedElts,
+                       BitVector *UndefElements = nullptr) const;
 
   /// Returns the splatted constant or null if this is not a constant
   /// splat.
@@ -1850,6 +1910,16 @@ public:
   /// the vector width and set the bits where elements are undef.
   ConstantSDNode *
   getConstantSplatNode(BitVector *UndefElements = nullptr) const;
+
+  /// Returns the demanded splatted constant FP or null if this is not a
+  /// constant FP splat.
+  ///
+  /// The DemandedElts mask indicates the elements that must be in the splat.
+  /// If passed a non-null UndefElements bitvector, it will resize it to match
+  /// the vector width and set the bits where elements are undef.
+  ConstantFPSDNode *
+  getConstantFPSplatNode(const APInt &DemandedElts,
+                         BitVector *UndefElements = nullptr) const;
 
   /// Returns the splatted constant FP or null if this is not a constant
   /// FP splat.

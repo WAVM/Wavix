@@ -1545,6 +1545,18 @@ LegalizerHelper::lower(MachineInstr &MI, unsigned TypeIdx, LLT Ty) {
   case TargetOpcode::G_CTTZ:
   case TargetOpcode::G_CTPOP:
     return lowerBitCount(MI, TypeIdx, Ty);
+  case G_UADDO: {
+    unsigned Res = MI.getOperand(0).getReg();
+    unsigned CarryOut = MI.getOperand(1).getReg();
+    unsigned LHS = MI.getOperand(2).getReg();
+    unsigned RHS = MI.getOperand(3).getReg();
+
+    MIRBuilder.buildAdd(Res, LHS, RHS);
+    MIRBuilder.buildICmp(CmpInst::ICMP_ULT, CarryOut, Res, RHS);
+
+    MI.eraseFromParent();
+    return Legalized;
+  }
   case G_UADDE: {
     unsigned Res = MI.getOperand(0).getReg();
     unsigned CarryOut = MI.getOperand(1).getReg();
@@ -2129,11 +2141,15 @@ LegalizerHelper::fewerElementsVector(MachineInstr &MI, unsigned TypeIdx,
   case G_FSIN:
   case G_FSQRT:
   case G_BSWAP:
-  case G_CTLZ:
     return fewerElementsVectorBasic(MI, TypeIdx, NarrowTy);
   case G_SHL:
   case G_LSHR:
   case G_ASHR:
+  case G_CTLZ:
+  case G_CTLZ_ZERO_UNDEF:
+  case G_CTTZ:
+  case G_CTTZ_ZERO_UNDEF:
+  case G_CTPOP:
     return fewerElementsVectorMultiEltType(MI, TypeIdx, NarrowTy);
   case G_ZEXT:
   case G_SEXT:
@@ -2403,6 +2419,14 @@ LegalizerHelper::moreElementsVector(MachineInstr &MI, unsigned TypeIdx,
       return UnableToLegalize;
     Observer.changingInstr(MI);
     moreElementsVectorSrc(MI, MoreTy, 1);
+    Observer.changedInstr(MI);
+    return Legalized;
+  case TargetOpcode::G_INSERT:
+    if (TypeIdx != 0)
+      return UnableToLegalize;
+    Observer.changingInstr(MI);
+    moreElementsVectorSrc(MI, MoreTy, 1);
+    moreElementsVectorDst(MI, MoreTy, 0);
     Observer.changedInstr(MI);
     return Legalized;
   case TargetOpcode::G_SELECT:

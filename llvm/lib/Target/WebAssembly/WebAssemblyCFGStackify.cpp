@@ -75,16 +75,12 @@ class WebAssemblyCFGStackify final : public MachineFunctionPass {
   DenseMap<const MachineInstr *, MachineBasicBlock *> TryToEHPad;
   // <EH pad, TRY marker> map
   DenseMap<const MachineBasicBlock *, MachineInstr *> EHPadToTry;
-  // <LOOP|TRY marker, Loop/exception bottom BB> map
-  DenseMap<const MachineInstr *, MachineBasicBlock *> BeginToBottom;
 
   // Helper functions to register scope information created by marker
   // instructions.
   void registerScope(MachineInstr *Begin, MachineInstr *End);
   void registerTryScope(MachineInstr *Begin, MachineInstr *End,
                         MachineBasicBlock *EHPad);
-
-  MachineBasicBlock *getBottom(const MachineInstr *Begin);
 
 public:
   static char ID; // Pass identification, replacement for typeid
@@ -179,27 +175,6 @@ void WebAssemblyCFGStackify::registerTryScope(MachineInstr *Begin,
   EHPadToTry[EHPad] = Begin;
 }
 
-// Given a LOOP/TRY marker, returns its bottom BB. Use cached information if any
-// to prevent recomputation.
-MachineBasicBlock *
-WebAssemblyCFGStackify::getBottom(const MachineInstr *Begin) {
-  const auto &MLI = getAnalysis<MachineLoopInfo>();
-  const auto &WEI = getAnalysis<WebAssemblyExceptionInfo>();
-  if (BeginToBottom.count(Begin))
-    return BeginToBottom[Begin];
-  if (Begin->getOpcode() == WebAssembly::LOOP) {
-    MachineLoop *L = MLI.getLoopFor(Begin->getParent());
-    assert(L);
-    BeginToBottom[Begin] = WebAssembly::getBottom(L);
-  } else if (Begin->getOpcode() == WebAssembly::TRY) {
-    WebAssemblyException *WE = WEI.getExceptionFor(TryToEHPad[Begin]);
-    assert(WE);
-    BeginToBottom[Begin] = WebAssembly::getBottom(WE);
-  } else
-    assert(false);
-  return BeginToBottom[Begin];
-}
-
 /// Insert a BLOCK marker for branches to MBB (if needed).
 void WebAssemblyCFGStackify::placeBlockMarker(MachineBasicBlock &MBB) {
   // This should have been handled in placeTryMarker.
@@ -268,7 +243,9 @@ void WebAssemblyCFGStackify::placeBlockMarker(MachineBasicBlock &MBB) {
     // the BLOCK.
     if (MI.getOpcode() == WebAssembly::LOOP ||
         MI.getOpcode() == WebAssembly::TRY) {
-      if (MBB.getNumber() > getBottom(&MI)->getNumber())
+      auto *BottomBB =
+          &*std::prev(MachineFunction::iterator(BeginToEnd[&MI]->getParent()));
+      if (MBB.getNumber() > BottomBB->getNumber())
         AfterSet.insert(&MI);
 #ifndef NDEBUG
       else
@@ -472,11 +449,11 @@ void WebAssemblyCFGStackify::placeTryMarker(MachineBasicBlock &MBB) {
     MF.push_back(Label);
     Iter = std::next(MachineFunction::iterator(Bottom));
   }
-  MachineBasicBlock *AfterTry = &*Iter;
+  MachineBasicBlock *Cont = &*Iter;
 
-  assert(AfterTry != &MF.front());
+  assert(Cont != &MF.front());
   MachineBasicBlock *LayoutPred =
-      &*std::prev(MachineFunction::iterator(AfterTry));
+      &*std::prev(MachineFunction::iterator(Cont));
 
   // If the nearest common dominator is inside a more deeply nested context,
   // walk out to the nearest scope which isn't more deeply nested.
@@ -568,7 +545,7 @@ void WebAssemblyCFGStackify::placeTryMarker(MachineBasicBlock &MBB) {
   // Decide where in Header to put the END_TRY.
   BeforeSet.clear();
   AfterSet.clear();
-  for (const auto &MI : *AfterTry) {
+  for (const auto &MI : *Cont) {
 #ifndef NDEBUG
     // END_TRY should precede existing LOOP markers.
     if (MI.getOpcode() == WebAssembly::LOOP)
@@ -595,14 +572,14 @@ void WebAssemblyCFGStackify::placeTryMarker(MachineBasicBlock &MBB) {
   }
 
   // Mark the end of the TRY.
-  InsertPos = getEarliestInsertPos(AfterTry, BeforeSet, AfterSet);
+  InsertPos = getEarliestInsertPos(Cont, BeforeSet, AfterSet);
   MachineInstr *End =
-      BuildMI(*AfterTry, InsertPos, Bottom->findBranchDebugLoc(),
+      BuildMI(*Cont, InsertPos, Bottom->findBranchDebugLoc(),
               TII.get(WebAssembly::END_TRY));
   registerTryScope(Begin, End, &MBB);
 
   // Track the farthest-spanning scope that ends at this point.
-  int Number = AfterTry->getNumber();
+  int Number = Cont->getNumber();
   if (!ScopeTops[Number] ||
       ScopeTops[Number]->getNumber() > Header->getNumber())
     ScopeTops[Number] = Header;
@@ -718,12 +695,6 @@ void WebAssemblyCFGStackify::rewriteDepthImmediates(MachineFunction &MF) {
       MachineInstr &MI = *I;
       switch (MI.getOpcode()) {
       case WebAssembly::BLOCK:
-        assert(ScopeTops[Stack.back()->getNumber()]->getNumber() <=
-                   MBB.getNumber() &&
-               "Block/try should be balanced");
-        Stack.pop_back();
-        break;
-
       case WebAssembly::TRY:
         assert(ScopeTops[Stack.back()->getNumber()]->getNumber() <=
                    MBB.getNumber() &&
@@ -770,7 +741,6 @@ void WebAssemblyCFGStackify::releaseMemory() {
   EndToBegin.clear();
   TryToEHPad.clear();
   EHPadToTry.clear();
-  BeginToBottom.clear();
 }
 
 bool WebAssemblyCFGStackify::runOnMachineFunction(MachineFunction &MF) {
