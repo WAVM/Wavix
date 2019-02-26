@@ -55,9 +55,6 @@ bool index::isFunctionLocalSymbol(const Decl *D) {
   if (isa<ParmVarDecl>(D))
     return true;
 
-  if (isa<TemplateTemplateParmDecl>(D))
-    return true;
-
   if (isa<ObjCTypeParamDecl>(D))
     return true;
 
@@ -318,6 +315,10 @@ SymbolInfo index::getSymbolInfo(const Decl *D) {
       Info.SubKind = SymbolSubKind::UsingValue;
       Info.Lang = SymbolLanguage::CXX;
       Info.Properties |= (SymbolPropertySet)SymbolProperty::Generic;
+      break;
+    case Decl::Using:
+      Info.Kind = SymbolKind::Using;
+      Info.Lang = SymbolLanguage::CXX;
       break;
     case Decl::Binding:
       Info.Kind = SymbolKind::Variable;
