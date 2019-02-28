@@ -67,12 +67,9 @@ pr23047.c.o.wasm O2 # tests -fwrapv
 931004-6.c.o.wasm
 pr38151.c.o.wasm
 pr44575.c.o.wasm
-stdarg-1.c.o.wasm
-stdarg-2.c.o.wasm
 stdarg-3.c.o.wasm
 strct-stdarg-1.c.o.wasm
 strct-varg-1.c.o.wasm
-va-arg-6.c.o.wasm
 va-arg-22.c.o.wasm
 
 # Bitfield tests
