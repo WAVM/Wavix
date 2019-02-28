@@ -91,7 +91,7 @@ def AllBuilds():
       Build('libcxxabi', LibCXXABI),
       Build('libcxx', LibCXX),
       Build('bash', Bash),
-      Build('coreutils', CoreUtils),
+      #Build('coreutils', CoreUtils),
       Build('HelloWorld', HelloWorld),
       Build('WAVM', WAVM),
   ]
