@@ -5,7 +5,7 @@ find_package(WAVM REQUIRED CONFIG)
 find_package(LLVM REQUIRED CONFIG)
 
 add_executable(wavix file.cpp file.h memory.cpp process.cpp wavix.cpp errno.h process.h wavix.h)
-target_link_libraries(wavix WAVM::Logging WAVM::IR WAVM::WASM WAVM::Runtime)
+target_link_libraries(wavix WAVM::WAVM)
 install(TARGETS wavix DESTINATION bin)
 
 # This adds the WAVM RPATH to the installed binary.
