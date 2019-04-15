@@ -24,6 +24,7 @@ using namespace lld;
 using namespace lld::wasm;
 
 DefinedFunction *WasmSym::CallCtors;
+DefinedFunction *WasmSym::ApplyRelocs;
 DefinedData *WasmSym::DsoHandle;
 DefinedData *WasmSym::DataEnd;
 DefinedData *WasmSym::HeapBase;
@@ -91,6 +92,12 @@ void Symbol::setOutputSymbolIndex(uint32_t Index) {
                     << "\n");
   assert(OutputSymbolIndex == INVALID_INDEX);
   OutputSymbolIndex = Index;
+}
+
+void Symbol::setGOTIndex(uint32_t Index) {
+  LLVM_DEBUG(dbgs() << "setGOTIndex " << Name << " -> " << Index << "\n");
+  assert(GOTIndex == INVALID_INDEX);
+  GOTIndex = Index;
 }
 
 bool Symbol::isWeak() const {

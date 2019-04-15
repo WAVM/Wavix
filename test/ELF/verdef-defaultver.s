@@ -150,8 +150,8 @@
 # EXE-NEXT:  ]
 # EXE-NEXT:  Version symbols {
 # EXE-NEXT:    Section Name: .gnu.version
-# EXE-NEXT:    Address: 0x200228
-# EXE-NEXT:    Offset: 0x228
+# EXE-NEXT:    Address: 0x200260
+# EXE-NEXT:    Offset: 0x260
 # EXE-NEXT:    Link: 1
 # EXE-NEXT:    Symbols [
 # EXE-NEXT:      Symbol {
@@ -179,18 +179,20 @@
 # EXE-NEXT:      Version: 1
 # EXE-NEXT:      Count: 2
 # EXE-NEXT:      FileName: shared
-# EXE-NEXT:      Entry {
-# EXE-NEXT:        Hash: 1425
-# EXE-NEXT:        Flags: 0x0
-# EXE-NEXT:        Index: 2
-# EXE-NEXT:        Name: V1
-# EXE-NEXT:      }
-# EXE-NEXT:      Entry {
-# EXE-NEXT:        Hash: 1426
-# EXE-NEXT:        Flags: 0x0
-# EXE-NEXT:        Index: 3
-# EXE-NEXT:        Name: V2
-# EXE-NEXT:      }
+# EXE-NEXT:      Entries [
+# EXE-NEXT:        Entry {
+# EXE-NEXT:          Hash: 1425
+# EXE-NEXT:          Flags: 0x0
+# EXE-NEXT:          Index: 2
+# EXE-NEXT:          Name: V1
+# EXE-NEXT:        }
+# EXE-NEXT:        Entry {
+# EXE-NEXT:          Hash: 1426
+# EXE-NEXT:          Flags: 0x0
+# EXE-NEXT:          Index: 3
+# EXE-NEXT:          Name: V2
+# EXE-NEXT:        }
+# EXE-NEXT:      ]
 # EXE-NEXT:    }
 # EXE-NEXT:  }
 
