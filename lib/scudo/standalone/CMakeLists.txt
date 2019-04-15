@@ -34,17 +34,43 @@ if(ANDROID)
 endif()
 
 set(SCUDO_SOURCES
+  checksum.cc
+  crc32_hw.cc
   common.cc
+  flags.cc
+  flags_parser.cc
   fuchsia.cc
-  linux.cc)
+  linux.cc
+  report.cc
+  string_utils.cc)
+
+# Enable the SSE 4.2 instruction set for crc32_hw.cc, if available.
+if (COMPILER_RT_HAS_MSSE4_2_FLAG)
+  set_source_files_properties(crc32_hw.cc PROPERTIES COMPILE_FLAGS -msse4.2)
+endif()
+
+# Enable the AArch64 CRC32 feature for crc32_hw.cc, if available.
+# Note that it is enabled by default starting with armv8.1-a.
+if (COMPILER_RT_HAS_MCRC_FLAG)
+  set_source_files_properties(crc32_hw.cc PROPERTIES COMPILE_FLAGS -mcrc)
+endif()
 
 set(SCUDO_HEADERS
-  platform.h
-  internal_defs.h
   atomic_helpers.h
+  bytemap.h
+  checksum.h
+  flags.h
+  flags_parser.h
+  interface.h
+  internal_defs.h
+  linux.h
   list.h
   mutex.h
-  linux.h)
+  platform.h
+  report.h
+  stats.h
+  string_utils.h
+  vector.h)
 
 if(COMPILER_RT_HAS_SCUDO_STANDALONE)
   add_compiler_rt_object_libraries(RTScudoStandalone

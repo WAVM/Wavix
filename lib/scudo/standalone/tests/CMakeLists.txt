@@ -12,7 +12,7 @@ set(SCUDO_UNITTEST_CFLAGS
   -I${COMPILER_RT_SOURCE_DIR}/lib/scudo/standalone
   -DGTEST_HAS_RTTI=0)
 
-set(SCUDO_TEST_ARCH ${SCUDO_SUPPORTED_ARCH})
+set(SCUDO_TEST_ARCH ${SCUDO_STANDALONE_SUPPORTED_ARCH})
 
 # gtests requires c++
 set(LINK_FLAGS)
@@ -34,7 +34,7 @@ macro(add_scudo_unittest testname)
   if(COMPILER_RT_HAS_SCUDO_STANDALONE)
     foreach(arch ${SCUDO_TEST_ARCH})
       set(ScudoUnitTestsObjects)
-      add_library("RTScudoStandalone.test.${arch}"
+      add_library("RTScudoStandalone.test.${arch}" STATIC
         $<TARGET_OBJECTS:RTScudoStandalone.${arch}>)
       generate_compiler_rt_tests(ScudoUnitTestsObjects ScudoUnitTests
         "${testname}-${arch}-Test" ${arch}
@@ -50,9 +50,16 @@ endmacro()
 
 set(SCUDO_UNIT_TEST_SOURCES
   atomic_test.cc
+  bytemap_test.cc
+  checksum_test.cc
+  flags_test.cc
   list_test.cc
   map_test.cc
   mutex_test.cc
+  report_test.cc
+  stats_test.cc
+  strings_test.cc
+  vector_test.cc
   scudo_unit_test_main.cc)
 
 add_scudo_unittest(ScudoUnitTest
