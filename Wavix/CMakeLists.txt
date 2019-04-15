@@ -8,6 +8,8 @@ add_executable(wavix file.cpp file.h memory.cpp process.cpp wavix.cpp errno.h pr
 target_link_libraries(wavix WAVM::WAVM)
 install(TARGETS wavix DESTINATION bin)
 
+set_target_properties(wavix PROPERTIES FOLDER Programs)
+
 # This adds the WAVM RPATH to the installed binary.
 set_target_properties(wavix PROPERTIES INSTALL_RPATH_USE_LINK_PATH true)
 
