@@ -318,6 +318,9 @@ class CheckVarsEscapingDeclContext final
         OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD))
       return;
     VD = cast<ValueDecl>(VD->getCanonicalDecl());
+    // Use user-specified allocation.
+    if (VD->hasAttrs() && VD->hasAttr<OMPAllocateDeclAttr>())
+      return;
     // Variables captured by value must be globalized.
     if (auto *CSI = CGF.CapturedStmtInfo) {
       if (const FieldDecl *FD = CSI->lookup(cast<VarDecl>(VD))) {
@@ -711,61 +714,6 @@ getDataSharingMode(CodeGenModule &CGM) {
                                           : CGOpenMPRuntimeNVPTX::Generic;
 }
 
-/// Checks if the expression is constant or does not have non-trivial function
-/// calls.
-static bool isTrivial(ASTContext &Ctx, const Expr * E) {
-  // We can skip constant expressions.
-  // We can skip expressions with trivial calls or simple expressions.
-  return (E->isEvaluatable(Ctx, Expr::SE_AllowUndefinedBehavior) ||
-          !E->hasNonTrivialCall(Ctx)) &&
-         !E->HasSideEffects(Ctx, /*IncludePossibleEffects=*/true);
-}
-
-/// Checks if the \p Body is the \a CompoundStmt and returns its child statement
-/// iff there is only one that is not evaluatable at the compile time.
-static const Stmt *getSingleCompoundChild(ASTContext &Ctx, const Stmt *Body) {
-  if (const auto *C = dyn_cast<CompoundStmt>(Body)) {
-    const Stmt *Child = nullptr;
-    for (const Stmt *S : C->body()) {
-      if (const auto *E = dyn_cast<Expr>(S)) {
-        if (isTrivial(Ctx, E))
-          continue;
-      }
-      // Some of the statements can be ignored.
-      if (isa<AsmStmt>(S) || isa<NullStmt>(S) || isa<OMPFlushDirective>(S) ||
-          isa<OMPBarrierDirective>(S) || isa<OMPTaskyieldDirective>(S))
-        continue;
-      // Analyze declarations.
-      if (const auto *DS = dyn_cast<DeclStmt>(S)) {
-        if (llvm::all_of(DS->decls(), [&Ctx](const Decl *D) {
-              if (isa<EmptyDecl>(D) || isa<DeclContext>(D) ||
-                  isa<TypeDecl>(D) || isa<PragmaCommentDecl>(D) ||
-                  isa<PragmaDetectMismatchDecl>(D) || isa<UsingDecl>(D) ||
-                  isa<UsingDirectiveDecl>(D) ||
-                  isa<OMPDeclareReductionDecl>(D) ||
-                  isa<OMPThreadPrivateDecl>(D))
-                return true;
-              const auto *VD = dyn_cast<VarDecl>(D);
-              if (!VD)
-                return false;
-              return VD->isConstexpr() ||
-                     ((VD->getType().isTrivialType(Ctx) ||
-                       VD->getType()->isReferenceType()) &&
-                      (!VD->hasInit() || isTrivial(Ctx, VD->getInit())));
-            }))
-          continue;
-      }
-      // Found multiple children - cannot get the one child only.
-      if (Child)
-        return Body;
-      Child = S;
-    }
-    if (Child)
-      return Child;
-  }
-  return Body;
-}
-
 /// Check if the parallel directive has an 'if' clause with non-constant or
 /// false condition. Also, check if the number of threads is strictly specified
 /// and run those directives in non-SPMD mode.
@@ -791,9 +739,10 @@ static bool hasNestedSPMDDirective(ASTContext &Ctx,
   const auto *CS = D.getInnermostCapturedStmt();
   const auto *Body =
       CS->getCapturedStmt()->IgnoreContainers(/*IgnoreCaptured=*/true);
-  const Stmt *ChildStmt = getSingleCompoundChild(Ctx, Body);
+  const Stmt *ChildStmt = CGOpenMPRuntime::getSingleCompoundChild(Ctx, Body);
 
-  if (const auto *NestedDir = dyn_cast<OMPExecutableDirective>(ChildStmt)) {
+  if (const auto *NestedDir =
+          dyn_cast_or_null<OMPExecutableDirective>(ChildStmt)) {
     OpenMPDirectiveKind DKind = NestedDir->getDirectiveKind();
     switch (D.getDirectiveKind()) {
     case OMPD_target:
@@ -805,8 +754,9 @@ static bool hasNestedSPMDDirective(ASTContext &Ctx,
             /*IgnoreCaptured=*/true);
         if (!Body)
           return false;
-        ChildStmt = getSingleCompoundChild(Ctx, Body);
-        if (const auto *NND = dyn_cast<OMPExecutableDirective>(ChildStmt)) {
+        ChildStmt = CGOpenMPRuntime::getSingleCompoundChild(Ctx, Body);
+        if (const auto *NND =
+                dyn_cast_or_null<OMPExecutableDirective>(ChildStmt)) {
           DKind = NND->getDirectiveKind();
           if (isOpenMPParallelDirective(DKind) &&
               !hasParallelIfNumThreadsClause(Ctx, *NND))
@@ -835,6 +785,7 @@ static bool hasNestedSPMDDirective(ASTContext &Ctx,
     case OMPD_cancellation_point:
     case OMPD_ordered:
     case OMPD_threadprivate:
+    case OMPD_allocate:
     case OMPD_task:
     case OMPD_simd:
     case OMPD_sections:
@@ -904,6 +855,7 @@ static bool supportsSPMDExecutionMode(ASTContext &Ctx,
   case OMPD_cancellation_point:
   case OMPD_ordered:
   case OMPD_threadprivate:
+  case OMPD_allocate:
   case OMPD_task:
   case OMPD_simd:
   case OMPD_sections:
@@ -966,9 +918,10 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
   const auto *CS = D.getInnermostCapturedStmt();
   const auto *Body =
       CS->getCapturedStmt()->IgnoreContainers(/*IgnoreCaptured=*/true);
-  const Stmt *ChildStmt = getSingleCompoundChild(Ctx, Body);
+  const Stmt *ChildStmt = CGOpenMPRuntime::getSingleCompoundChild(Ctx, Body);
 
-  if (const auto *NestedDir = dyn_cast<OMPExecutableDirective>(ChildStmt)) {
+  if (const auto *NestedDir =
+          dyn_cast_or_null<OMPExecutableDirective>(ChildStmt)) {
     OpenMPDirectiveKind DKind = NestedDir->getDirectiveKind();
     switch (D.getDirectiveKind()) {
     case OMPD_target:
@@ -981,8 +934,9 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
             /*IgnoreCaptured=*/true);
         if (!Body)
           return false;
-        ChildStmt = getSingleCompoundChild(Ctx, Body);
-        if (const auto *NND = dyn_cast<OMPExecutableDirective>(ChildStmt)) {
+        ChildStmt = CGOpenMPRuntime::getSingleCompoundChild(Ctx, Body);
+        if (const auto *NND =
+                dyn_cast_or_null<OMPExecutableDirective>(ChildStmt)) {
           DKind = NND->getDirectiveKind();
           if (isOpenMPWorksharingDirective(DKind) &&
               isOpenMPLoopDirective(DKind) && hasStaticScheduling(*NND))
@@ -993,8 +947,9 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
             /*IgnoreCaptured=*/true);
         if (!Body)
           return false;
-        ChildStmt = getSingleCompoundChild(Ctx, Body);
-        if (const auto *NND = dyn_cast<OMPExecutableDirective>(ChildStmt)) {
+        ChildStmt = CGOpenMPRuntime::getSingleCompoundChild(Ctx, Body);
+        if (const auto *NND =
+                dyn_cast_or_null<OMPExecutableDirective>(ChildStmt)) {
           DKind = NND->getDirectiveKind();
           if (isOpenMPParallelDirective(DKind) &&
               isOpenMPWorksharingDirective(DKind) &&
@@ -1005,8 +960,9 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
                 /*IgnoreCaptured=*/true);
             if (!Body)
               return false;
-            ChildStmt = getSingleCompoundChild(Ctx, Body);
-            if (const auto *NND = dyn_cast<OMPExecutableDirective>(ChildStmt)) {
+            ChildStmt = CGOpenMPRuntime::getSingleCompoundChild(Ctx, Body);
+            if (const auto *NND =
+                    dyn_cast_or_null<OMPExecutableDirective>(ChildStmt)) {
               DKind = NND->getDirectiveKind();
               if (isOpenMPWorksharingDirective(DKind) &&
                   isOpenMPLoopDirective(DKind) && hasStaticScheduling(*NND))
@@ -1026,8 +982,9 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
             /*IgnoreCaptured=*/true);
         if (!Body)
           return false;
-        ChildStmt = getSingleCompoundChild(Ctx, Body);
-        if (const auto *NND = dyn_cast<OMPExecutableDirective>(ChildStmt)) {
+        ChildStmt = CGOpenMPRuntime::getSingleCompoundChild(Ctx, Body);
+        if (const auto *NND =
+                dyn_cast_or_null<OMPExecutableDirective>(ChildStmt)) {
           DKind = NND->getDirectiveKind();
           if (isOpenMPWorksharingDirective(DKind) &&
               isOpenMPLoopDirective(DKind) && hasStaticScheduling(*NND))
@@ -1055,6 +1012,7 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
     case OMPD_cancellation_point:
     case OMPD_ordered:
     case OMPD_threadprivate:
+    case OMPD_allocate:
     case OMPD_task:
     case OMPD_simd:
     case OMPD_sections:
@@ -1129,6 +1087,7 @@ static bool supportsLightweightRuntime(ASTContext &Ctx,
   case OMPD_cancellation_point:
   case OMPD_ordered:
   case OMPD_threadprivate:
+  case OMPD_allocate:
   case OMPD_task:
   case OMPD_simd:
   case OMPD_sections:
@@ -2007,11 +1966,11 @@ getDistributeLastprivateVars(ASTContext &Ctx, const OMPExecutableDirective &D,
          "expected teams directive.");
   const OMPExecutableDirective *Dir = &D;
   if (!isOpenMPDistributeDirective(D.getDirectiveKind())) {
-    if (const Stmt *S = getSingleCompoundChild(
+    if (const Stmt *S = CGOpenMPRuntime::getSingleCompoundChild(
             Ctx,
             D.getInnermostCapturedStmt()->getCapturedStmt()->IgnoreContainers(
                 /*IgnoreCaptured=*/true))) {
-      Dir = dyn_cast<OMPExecutableDirective>(S);
+      Dir = dyn_cast_or_null<OMPExecutableDirective>(S);
       if (Dir && !isOpenMPDistributeDirective(Dir->getDirectiveKind()))
         Dir = nullptr;
     }
@@ -4312,8 +4271,8 @@ void CGOpenMPRuntimeNVPTX::emitReduction(
   llvm::Value *RL = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
       ReductionList.getPointer(), CGF.VoidPtrTy);
   llvm::Function *ReductionFn = emitReductionFunction(
-      CGM, Loc, CGF.ConvertTypeForMem(ReductionArrayTy)->getPointerTo(),
-      Privates, LHSExprs, RHSExprs, ReductionOps);
+      Loc, CGF.ConvertTypeForMem(ReductionArrayTy)->getPointerTo(), Privates,
+      LHSExprs, RHSExprs, ReductionOps);
   llvm::Value *ReductionArrayTySize = CGF.getTypeSize(ReductionArrayTy);
   llvm::Function *ShuffleAndReduceFn = emitShuffleAndReduceFunction(
       CGM, Privates, ReductionArrayTy, ReductionFn, Loc);
@@ -4438,6 +4397,10 @@ CGOpenMPRuntimeNVPTX::translateParameter(const FieldDecl *FD,
     if (Attr->getCaptureKind() == OMPC_map) {
       PointeeTy = CGM.getContext().getAddrSpaceQualType(PointeeTy,
                                                         LangAS::opencl_global);
+    } else if (Attr->getCaptureKind() == OMPC_firstprivate &&
+               PointeeTy.isConstant(CGM.getContext())) {
+      PointeeTy = CGM.getContext().getAddrSpaceQualType(PointeeTy,
+                                                        LangAS::opencl_generic);
     }
   }
   ArgType = CGM.getContext().getPointerType(PointeeTy);
@@ -4717,6 +4680,58 @@ void CGOpenMPRuntimeNVPTX::emitFunctionProlog(CodeGenFunction &CGF,
 
 Address CGOpenMPRuntimeNVPTX::getAddressOfLocalVariable(CodeGenFunction &CGF,
                                                         const VarDecl *VD) {
+  if (VD && VD->hasAttr<OMPAllocateDeclAttr>()) {
+    const auto *A = VD->getAttr<OMPAllocateDeclAttr>();
+    switch (A->getAllocatorType()) {
+      // Use the default allocator here as by default local vars are
+      // threadlocal.
+    case OMPAllocateDeclAttr::OMPDefaultMemAlloc:
+    case OMPAllocateDeclAttr::OMPThreadMemAlloc:
+    case OMPAllocateDeclAttr::OMPHighBWMemAlloc:
+    case OMPAllocateDeclAttr::OMPLowLatMemAlloc:
+      // Follow the user decision - use default allocation.
+      return Address::invalid();
+    case OMPAllocateDeclAttr::OMPUserDefinedMemAlloc:
+      // TODO: implement aupport for user-defined allocators.
+      return Address::invalid();
+    case OMPAllocateDeclAttr::OMPConstMemAlloc: {
+      llvm::Type *VarTy = CGF.ConvertTypeForMem(VD->getType());
+      auto *GV = new llvm::GlobalVariable(
+          CGM.getModule(), VarTy, /*isConstant=*/false,
+          llvm::GlobalValue::InternalLinkage,
+          llvm::Constant::getNullValue(VarTy), VD->getName(),
+          /*InsertBefore=*/nullptr, llvm::GlobalValue::NotThreadLocal,
+          CGM.getContext().getTargetAddressSpace(LangAS::cuda_constant));
+      CharUnits Align = CGM.getContext().getDeclAlign(VD);
+      GV->setAlignment(Align.getQuantity());
+      return Address(GV, Align);
+    }
+    case OMPAllocateDeclAttr::OMPPTeamMemAlloc: {
+      llvm::Type *VarTy = CGF.ConvertTypeForMem(VD->getType());
+      auto *GV = new llvm::GlobalVariable(
+          CGM.getModule(), VarTy, /*isConstant=*/false,
+          llvm::GlobalValue::InternalLinkage,
+          llvm::Constant::getNullValue(VarTy), VD->getName(),
+          /*InsertBefore=*/nullptr, llvm::GlobalValue::NotThreadLocal,
+          CGM.getContext().getTargetAddressSpace(LangAS::cuda_shared));
+      CharUnits Align = CGM.getContext().getDeclAlign(VD);
+      GV->setAlignment(Align.getQuantity());
+      return Address(GV, Align);
+    }
+    case OMPAllocateDeclAttr::OMPLargeCapMemAlloc:
+    case OMPAllocateDeclAttr::OMPCGroupMemAlloc: {
+      llvm::Type *VarTy = CGF.ConvertTypeForMem(VD->getType());
+      auto *GV = new llvm::GlobalVariable(
+          CGM.getModule(), VarTy, /*isConstant=*/false,
+          llvm::GlobalValue::InternalLinkage,
+          llvm::Constant::getNullValue(VarTy), VD->getName());
+      CharUnits Align = CGM.getContext().getDeclAlign(VD);
+      GV->setAlignment(Align.getQuantity());
+      return Address(GV, Align);
+    }
+    }
+  }
+
   if (getDataSharingMode(CGM) != CGOpenMPRuntimeNVPTX::Generic)
     return Address::invalid();
 
@@ -4738,6 +4753,7 @@ Address CGOpenMPRuntimeNVPTX::getAddressOfLocalVariable(CodeGenFunction &CGF,
         return VDI->second.PrivateAddr;
     }
   }
+
   return Address::invalid();
 }
 
@@ -4825,6 +4841,38 @@ void CGOpenMPRuntimeNVPTX::adjustTargetSpecificDataForLambdas(
   }
 }
 
+unsigned CGOpenMPRuntimeNVPTX::getDefaultFirstprivateAddressSpace() const {
+  return CGM.getContext().getTargetAddressSpace(LangAS::cuda_constant);
+}
+
+bool CGOpenMPRuntimeNVPTX::hasAllocateAttributeForGlobalVar(const VarDecl *VD,
+                                                            LangAS &AS) {
+  if (!VD || !VD->hasAttr<OMPAllocateDeclAttr>())
+    return false;
+  const auto *A = VD->getAttr<OMPAllocateDeclAttr>();
+  switch(A->getAllocatorType()) {
+  case OMPAllocateDeclAttr::OMPDefaultMemAlloc:
+  // Not supported, fallback to the default mem space.
+  case OMPAllocateDeclAttr::OMPThreadMemAlloc:
+  case OMPAllocateDeclAttr::OMPLargeCapMemAlloc:
+  case OMPAllocateDeclAttr::OMPCGroupMemAlloc:
+  case OMPAllocateDeclAttr::OMPHighBWMemAlloc:
+  case OMPAllocateDeclAttr::OMPLowLatMemAlloc:
+    AS = LangAS::Default;
+    return true;
+  case OMPAllocateDeclAttr::OMPConstMemAlloc:
+    AS = LangAS::cuda_constant;
+    return true;
+  case OMPAllocateDeclAttr::OMPPTeamMemAlloc:
+    AS = LangAS::cuda_shared;
+    return true;
+  case OMPAllocateDeclAttr::OMPUserDefinedMemAlloc:
+    llvm_unreachable("Expected predefined allocator for the variables with the "
+                     "static storage.");
+  }
+  return false;
+}
+
 // Get current CudaArch and ignore any unknown values
 static CudaArch getCudaArch(CodeGenModule &CGM) {
   if (!CGM.getTarget().hasFeature("ptx"))
@@ -4846,7 +4894,7 @@ static CudaArch getCudaArch(CodeGenModule &CGM) {
 /// Check to see if target architecture supports unified addressing which is
 /// a restriction for OpenMP requires clause "unified_shared_memory".
 void CGOpenMPRuntimeNVPTX::checkArchForUnifiedAddressing(
-    CodeGenModule &CGM, const OMPRequiresDecl *D) const {
+    const OMPRequiresDecl *D) const {
   for (const OMPClause *Clause : D->clauselists()) {
     if (Clause->getClauseKind() == OMPC_unified_shared_memory) {
       switch (getCudaArch(CGM)) {
@@ -4946,20 +4994,6 @@ static std::pair<unsigned, unsigned> getSMsBlocksPerSM(CodeGenModule &CGM) {
 }
 
 void CGOpenMPRuntimeNVPTX::clear() {
-  if (CGDebugInfo *DI = CGM.getModuleDebugInfo())
-    if (CGM.getCodeGenOpts().getDebugInfo() >=
-        codegenoptions::LimitedDebugInfo) {
-      ASTContext &C = CGM.getContext();
-      auto *VD = VarDecl::Create(
-          C, C.getTranslationUnitDecl(), SourceLocation(), SourceLocation(),
-          &C.Idents.get("_$_"), C.IntTy, /*TInfo=*/nullptr, SC_Static);
-      auto *Var = cast<llvm::GlobalVariable>(
-          CGM.CreateRuntimeVariable(CGM.IntTy, "_$_"));
-      Var->setInitializer(llvm::ConstantInt::getNullValue(CGM.IntTy));
-      Var->setLinkage(llvm::GlobalVariable::CommonLinkage);
-      CGM.addCompilerUsedGlobal(Var);
-      DI->EmitGlobalVariable(Var, VD);
-    }
   if (!GlobalizedRecords.empty()) {
     ASTContext &C = CGM.getContext();
     llvm::SmallVector<const GlobalPtrSizeRecsTy *, 4> GlobalRecs;
@@ -5052,9 +5086,12 @@ void CGOpenMPRuntimeNVPTX::clear() {
       QualType Arr2Ty = C.getConstantArrayType(Arr1Ty, Size2, ArrayType::Normal,
                                                /*IndexTypeQuals=*/0);
       llvm::Type *LLVMArr2Ty = CGM.getTypes().ConvertTypeForMem(Arr2Ty);
+      // FIXME: nvlink does not handle weak linkage correctly (object with the
+      // different size are reported as erroneous).
+      // Restore CommonLinkage as soon as nvlink is fixed.
       auto *GV = new llvm::GlobalVariable(
           CGM.getModule(), LLVMArr2Ty,
-          /*isConstant=*/false, llvm::GlobalValue::CommonLinkage,
+          /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
           llvm::Constant::getNullValue(LLVMArr2Ty),
           "_openmp_static_glob_rd_$_");
       auto *Replacement = llvm::ConstantExpr::getPointerBitCastOrAddrSpaceCast(
@@ -5084,9 +5121,12 @@ void CGOpenMPRuntimeNVPTX::clear() {
     QualType StaticTy = C.getRecordType(StaticRD);
     llvm::Type *LLVMReductionsBufferTy =
         CGM.getTypes().ConvertTypeForMem(StaticTy);
+    // FIXME: nvlink does not handle weak linkage correctly (object with the
+    // different size are reported as erroneous).
+    // Restore CommonLinkage as soon as nvlink is fixed.
     auto *GV = new llvm::GlobalVariable(
         CGM.getModule(), LLVMReductionsBufferTy,
-        /*isConstant=*/false, llvm::GlobalValue::CommonLinkage,
+        /*isConstant=*/false, llvm::GlobalValue::InternalLinkage,
         llvm::Constant::getNullValue(LLVMReductionsBufferTy),
         "_openmp_teams_reductions_buffer_$_");
     KernelTeamsReductionPtr->setInitializer(

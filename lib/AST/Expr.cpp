@@ -1678,7 +1678,7 @@ bool CastExpr::CastConsistency() const {
     auto Ty = getType();
     auto SETy = getSubExpr()->getType();
     assert(getValueKindForType(Ty) == Expr::getValueKindForType(SETy));
-    if (isRValue()) {
+    if (/*isRValue()*/ !Ty->getPointeeType().isNull()) {
       Ty = Ty->getPointeeType();
       SETy = SETy->getPointeeType();
     }
@@ -1718,6 +1718,8 @@ bool CastExpr::CastConsistency() const {
   case CK_ZeroToOCLOpaqueType:
   case CK_IntToOCLSampler:
   case CK_FixedPointCast:
+  case CK_FixedPointToIntegral:
+  case CK_IntegralToFixedPoint:
     assert(!getType()->isBooleanType() && "unheralded conversion to bool");
     goto CheckNoBasePath;
 

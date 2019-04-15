@@ -317,6 +317,11 @@ public:
     qs.removeObjCLifetime();
     return qs;
   }
+  Qualifiers withoutAddressSpace() const {
+    Qualifiers qs = *this;
+    qs.removeAddressSpace();
+    return qs;
+  }
 
   bool hasObjCLifetime() const { return Mask & LifetimeMask; }
   ObjCLifetime getObjCLifetime() const {
@@ -1808,7 +1813,9 @@ public:
   friend class ASTWriter;
 
   Type(const Type &) = delete;
+  Type(Type &&) = delete;
   Type &operator=(const Type &) = delete;
+  Type &operator=(Type &&) = delete;
 
   TypeClass getTypeClass() const { return static_cast<TypeClass>(TypeBits.TC); }
 

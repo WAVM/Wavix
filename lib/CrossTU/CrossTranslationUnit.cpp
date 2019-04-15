@@ -42,6 +42,7 @@ STATISTIC(NumGetCTUSuccess,
           "requested function's body");
 STATISTIC(NumTripleMismatch, "The # of triple mismatches");
 STATISTIC(NumLangMismatch, "The # of language mismatches");
+STATISTIC(NumLangDialectMismatch, "The # of language dialect mismatches");
 
 // Same as Triple's equality operator, but we check a field only if that is
 // known in both instances.
@@ -99,6 +100,8 @@ public:
       return "Triple mismatch";
     case index_error_code::lang_mismatch:
       return "Language mismatch";
+    case index_error_code::lang_dialect_mismatch:
+      return "Language dialect mismatch";
     }
     llvm_unreachable("Unrecognized index_error_code.");
   }
@@ -228,11 +231,34 @@ CrossTranslationUnitContext::getCrossTUDefinition(const FunctionDecl *FD,
 
   const auto &LangTo = Context.getLangOpts();
   const auto &LangFrom = Unit->getASTContext().getLangOpts();
+
   // FIXME: Currenty we do not support CTU across C++ and C and across
   // different dialects of C++.
   if (LangTo.CPlusPlus != LangFrom.CPlusPlus) {
     ++NumLangMismatch;
     return llvm::make_error<IndexError>(index_error_code::lang_mismatch);
+  }
+
+  // If CPP dialects are different then return with error.
+  //
+  // Consider this STL code:
+  //   template<typename _Alloc>
+  //     struct __alloc_traits
+  //   #if __cplusplus >= 201103L
+  //     : std::allocator_traits<_Alloc>
+  //   #endif
+  //     { // ...
+  //     };
+  // This class template would create ODR errors during merging the two units,
+  // since in one translation unit the class template has a base class, however
+  // in the other unit it has none.
+  if (LangTo.CPlusPlus11 != LangFrom.CPlusPlus11 ||
+      LangTo.CPlusPlus14 != LangFrom.CPlusPlus14 ||
+      LangTo.CPlusPlus17 != LangFrom.CPlusPlus17 ||
+      LangTo.CPlusPlus2a != LangFrom.CPlusPlus2a) {
+    ++NumLangDialectMismatch;
+    return llvm::make_error<IndexError>(
+        index_error_code::lang_dialect_mismatch);
   }
 
   TranslationUnitDecl *TU = Unit->getASTContext().getTranslationUnitDecl();
@@ -331,13 +357,28 @@ CrossTranslationUnitContext::importDefinition(const FunctionDecl *FD) {
   assert(FD->hasBody() && "Functions to be imported should have body.");
 
   ASTImporter &Importer = getOrCreateASTImporter(FD->getASTContext());
-  auto *ToDecl =
-      cast_or_null<FunctionDecl>(Importer.Import(const_cast<FunctionDecl *>(FD)));
-  if (!ToDecl)
+  auto ToDeclOrError = Importer.Import_New(FD);
+  if (!ToDeclOrError) {
+    handleAllErrors(ToDeclOrError.takeError(),
+                    [&](const ImportError &IE) {
+                      switch (IE.Error) {
+                      case ImportError::NameConflict:
+                        // FIXME: Add statistic.
+                         break;
+                      case ImportError::UnsupportedConstruct:
+                        // FIXME: Add statistic.
+                        break;
+                      case ImportError::Unknown:
+                        llvm_unreachable("Unknown import error happened.");
+                        break;
+                      }
+                    });
     return llvm::make_error<IndexError>(index_error_code::failed_import);
-  assert(ToDecl->hasBody());
-  assert(FD->hasBody() && "Functions already imported should have body.");
+  }
+  auto *ToDecl = cast<FunctionDecl>(*ToDeclOrError);  
+  assert(ToDecl->hasBody() && "Imported function should have body.");
   ++NumGetCTUSuccess;
+
   return ToDecl;
 }
 
