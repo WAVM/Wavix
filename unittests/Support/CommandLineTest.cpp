@@ -185,11 +185,18 @@ TEST(CommandLineTest, TokenizeGNUCommandLine) {
                            array_lengthof(Output));
 }
 
-TEST(CommandLineTest, TokenizeWindowsCommandLine) {
+TEST(CommandLineTest, TokenizeWindowsCommandLine1) {
   const char Input[] = "a\\b c\\\\d e\\\\\"f g\" h\\\"i j\\\\\\\"k \"lmn\" o pqr "
                       "\"st \\\"u\" \\v";
   const char *const Output[] = { "a\\b", "c\\\\d", "e\\f g", "h\"i", "j\\\"k",
                                  "lmn", "o", "pqr", "st \"u", "\\v" };
+  testCommandLineTokenizer(cl::TokenizeWindowsCommandLine, Input, Output,
+                           array_lengthof(Output));
+}
+
+TEST(CommandLineTest, TokenizeWindowsCommandLine2) {
+  const char Input[] = "clang -c -DFOO=\"\"\"ABC\"\"\" x.cpp";
+  const char *const Output[] = { "clang", "-c", "-DFOO=\"ABC\"", "x.cpp"};
   testCommandLineTokenizer(cl::TokenizeWindowsCommandLine, Input, Output,
                            array_lengthof(Output));
 }
@@ -611,6 +618,68 @@ TEST(CommandLineTest, GetRegisteredSubcommands) {
       EXPECT_EQ("sc2", S->getName());
     }
   }
+}
+
+TEST(CommandLineTest, DefaultOptions) {
+  cl::ResetCommandLineParser();
+
+  StackOption<std::string> Bar("bar", cl::sub(*cl::AllSubCommands),
+                               cl::DefaultOption);
+  StackOption<std::string, cl::alias> Bar_Alias(
+      "b", cl::desc("Alias for -bar"), cl::aliasopt(Bar), cl::DefaultOption);
+
+  StackOption<bool> Foo("foo", cl::init(false), cl::sub(*cl::AllSubCommands),
+                        cl::DefaultOption);
+  StackOption<bool, cl::alias> Foo_Alias("f", cl::desc("Alias for -foo"),
+                                         cl::aliasopt(Foo), cl::DefaultOption);
+
+  StackSubCommand SC1("sc1", "First Subcommand");
+  // Override "-b" and change type in sc1 SubCommand.
+  StackOption<bool> SC1_B("b", cl::sub(SC1), cl::init(false));
+  StackSubCommand SC2("sc2", "Second subcommand");
+  // Override "-foo" and change type in sc2 SubCommand.  Note that this does not
+  // affect "-f" alias, which continues to work correctly.
+  StackOption<std::string> SC2_Foo("foo", cl::sub(SC2));
+
+  const char *args0[] = {"prog", "-b", "args0 bar string", "-f"};
+  EXPECT_TRUE(cl::ParseCommandLineOptions(sizeof(args0) / sizeof(char *), args0,
+                                          StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(Bar == "args0 bar string");
+  EXPECT_TRUE(Foo);
+  EXPECT_FALSE(SC1_B);
+  EXPECT_TRUE(SC2_Foo.empty());
+
+  cl::ResetAllOptionOccurrences();
+
+  const char *args1[] = {"prog", "sc1", "-b", "-bar", "args1 bar string", "-f"};
+  EXPECT_TRUE(cl::ParseCommandLineOptions(sizeof(args1) / sizeof(char *), args1,
+                                          StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(Bar == "args1 bar string");
+  EXPECT_TRUE(Foo);
+  EXPECT_TRUE(SC1_B);
+  EXPECT_TRUE(SC2_Foo.empty());
+  for (auto *S : cl::getRegisteredSubcommands()) {
+    if (*S) {
+      EXPECT_EQ("sc1", S->getName());
+    }
+  }
+
+  cl::ResetAllOptionOccurrences();
+
+  const char *args2[] = {"prog", "sc2", "-b", "args2 bar string",
+                         "-f", "-foo", "foo string"};
+  EXPECT_TRUE(cl::ParseCommandLineOptions(sizeof(args2) / sizeof(char *), args2,
+                                          StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(Bar == "args2 bar string");
+  EXPECT_TRUE(Foo);
+  EXPECT_FALSE(SC1_B);
+  EXPECT_TRUE(SC2_Foo == "foo string");
+  for (auto *S : cl::getRegisteredSubcommands()) {
+    if (*S) {
+      EXPECT_EQ("sc2", S->getName());
+    }
+  }
+  cl::ResetCommandLineParser();
 }
 
 TEST(CommandLineTest, ArgumentLimit) {
@@ -1126,6 +1195,199 @@ TEST(CommandLineTest, PrefixOptions) {
       cl::ParseCommandLineOptions(2, args6, StringRef(), &llvm::nulls()));
   EXPECT_TRUE(MacroDefs.size() == 1);
   EXPECT_TRUE(MacroDefs.front().compare("HAVE_FOO") == 0);
+}
+
+TEST(CommandLineTest, GroupingWithValue) {
+  cl::ResetCommandLineParser();
+
+  StackOption<bool> OptF("f", cl::Grouping, cl::desc("Some flag"));
+  StackOption<bool> OptB("b", cl::Grouping, cl::desc("Another flag"));
+  StackOption<bool> OptD("d", cl::Grouping, cl::ValueDisallowed,
+                         cl::desc("ValueDisallowed option"));
+  StackOption<std::string> OptV("v", cl::Grouping,
+                                cl::desc("ValueRequired option"));
+  StackOption<std::string> OptO("o", cl::Grouping, cl::ValueOptional,
+                                cl::desc("ValueOptional option"));
+
+  // Should be possible to use an option which requires a value
+  // at the end of a group.
+  const char *args1[] = {"prog", "-fv", "val1"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(3, args1, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("val1", OptV.c_str());
+  OptV.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Should not crash if it is accidentally used elsewhere in the group.
+  const char *args2[] = {"prog", "-vf", "val2"};
+  EXPECT_FALSE(
+      cl::ParseCommandLineOptions(3, args2, StringRef(), &llvm::nulls()));
+  OptV.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Should allow the "opt=value" form at the end of the group
+  const char *args3[] = {"prog", "-fv=val3"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args3, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("val3", OptV.c_str());
+  OptV.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Should allow assigning a value for a ValueOptional option
+  // at the end of the group
+  const char *args4[] = {"prog", "-fo=val4"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args4, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("val4", OptO.c_str());
+  OptO.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Should assign an empty value if a ValueOptional option is used elsewhere
+  // in the group.
+  const char *args5[] = {"prog", "-fob"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args5, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_EQ(1, OptO.getNumOccurrences());
+  EXPECT_EQ(1, OptB.getNumOccurrences());
+  EXPECT_TRUE(OptO.empty());
+  cl::ResetAllOptionOccurrences();
+
+  // Should not allow an assignment for a ValueDisallowed option.
+  const char *args6[] = {"prog", "-fd=false"};
+  EXPECT_FALSE(
+      cl::ParseCommandLineOptions(2, args6, StringRef(), &llvm::nulls()));
+}
+
+TEST(CommandLineTest, GroupingAndPrefix) {
+  cl::ResetCommandLineParser();
+
+  StackOption<bool> OptF("f", cl::Grouping, cl::desc("Some flag"));
+  StackOption<bool> OptB("b", cl::Grouping, cl::desc("Another flag"));
+  StackOption<std::string> OptP("p", cl::Prefix, cl::Grouping,
+                                cl::desc("Prefix and Grouping"));
+  StackOption<std::string> OptA("a", cl::AlwaysPrefix, cl::Grouping,
+                                cl::desc("AlwaysPrefix and Grouping"));
+
+  // Should be possible to use a cl::Prefix option without grouping.
+  const char *args1[] = {"prog", "-pval1"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args1, StringRef(), &llvm::nulls()));
+  EXPECT_STREQ("val1", OptP.c_str());
+  OptP.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Should be possible to pass a value in a separate argument.
+  const char *args2[] = {"prog", "-p", "val2"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(3, args2, StringRef(), &llvm::nulls()));
+  EXPECT_STREQ("val2", OptP.c_str());
+  OptP.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // The "-opt=value" form should work, too.
+  const char *args3[] = {"prog", "-p=val3"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args3, StringRef(), &llvm::nulls()));
+  EXPECT_STREQ("val3", OptP.c_str());
+  OptP.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // All three previous cases should work the same way if an option with both
+  // cl::Prefix and cl::Grouping modifiers is used at the end of a group.
+  const char *args4[] = {"prog", "-fpval4"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args4, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("val4", OptP.c_str());
+  OptP.clear();
+  cl::ResetAllOptionOccurrences();
+
+  const char *args5[] = {"prog", "-fp", "val5"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(3, args5, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("val5", OptP.c_str());
+  OptP.clear();
+  cl::ResetAllOptionOccurrences();
+
+  const char *args6[] = {"prog", "-fp=val6"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args6, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("val6", OptP.c_str());
+  OptP.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Should assign a value even if the part after a cl::Prefix option is equal
+  // to the name of another option.
+  const char *args7[] = {"prog", "-fpb"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args7, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("b", OptP.c_str());
+  EXPECT_FALSE(OptB);
+  OptP.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Should be possible to use a cl::AlwaysPrefix option without grouping.
+  const char *args8[] = {"prog", "-aval8"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args8, StringRef(), &llvm::nulls()));
+  EXPECT_STREQ("val8", OptA.c_str());
+  OptA.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Should not be possible to pass a value in a separate argument.
+  const char *args9[] = {"prog", "-a", "val9"};
+  EXPECT_FALSE(
+      cl::ParseCommandLineOptions(3, args9, StringRef(), &llvm::nulls()));
+  cl::ResetAllOptionOccurrences();
+
+  // With the "-opt=value" form, the "=" symbol should be preserved.
+  const char *args10[] = {"prog", "-a=val10"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args10, StringRef(), &llvm::nulls()));
+  EXPECT_STREQ("=val10", OptA.c_str());
+  OptA.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // All three previous cases should work the same way if an option with both
+  // cl::AlwaysPrefix and cl::Grouping modifiers is used at the end of a group.
+  const char *args11[] = {"prog", "-faval11"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args11, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("val11", OptA.c_str());
+  OptA.clear();
+  cl::ResetAllOptionOccurrences();
+
+  const char *args12[] = {"prog", "-fa", "val12"};
+  EXPECT_FALSE(
+      cl::ParseCommandLineOptions(3, args12, StringRef(), &llvm::nulls()));
+  cl::ResetAllOptionOccurrences();
+
+  const char *args13[] = {"prog", "-fa=val13"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args13, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("=val13", OptA.c_str());
+  OptA.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Should assign a value even if the part after a cl::AlwaysPrefix option
+  // is equal to the name of another option.
+  const char *args14[] = {"prog", "-fab"};
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(2, args14, StringRef(), &llvm::nulls()));
+  EXPECT_TRUE(OptF);
+  EXPECT_STREQ("b", OptA.c_str());
+  EXPECT_FALSE(OptB);
+  OptA.clear();
+  cl::ResetAllOptionOccurrences();
 }
 
 }  // anonymous namespace

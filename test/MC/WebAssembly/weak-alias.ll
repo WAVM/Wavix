@@ -1,4 +1,4 @@
-; RUN: llc -filetype=obj -thread-model=single -wasm-keep-registers %s -o %t.o
+; RUN: llc -filetype=obj -wasm-keep-registers %s -o %t.o
 ; RUN: obj2yaml %t.o | FileCheck %s
 ; RUN: llvm-objdump -t %t.o | FileCheck --check-prefix=CHECK-SYMS %s
 
@@ -73,6 +73,8 @@ entry:
 ; CHECK-NEXT:           Opcode:          I32_CONST
 ; CHECK-NEXT:           Value:           1
 ; CHECK-NEXT:         Functions:       [ 0 ]
+; CHECK-NEXT:   - Type:            DATACOUNT
+; CHECK-NEXT:     Count:           3
 ; CHECK-NEXT:   - Type:            CODE
 ; CHECK-NEXT:     Relocations:
 ; CHECK-NEXT:       - Type:            R_WASM_FUNCTION_INDEX_LEB

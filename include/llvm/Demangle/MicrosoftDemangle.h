@@ -159,6 +159,7 @@ public:
 private:
   SymbolNode *demangleEncodedSymbol(StringView &MangledName,
                                     QualifiedNameNode *QN);
+  SymbolNode *demangleDeclarator(StringView &MangledName);
 
   VariableSymbolNode *demangleVariableEncoding(StringView &MangledName,
                                                StorageClass SC);
@@ -206,6 +207,8 @@ private:
   NamedIdentifierNode *demangleBackRefName(StringView &MangledName);
   IdentifierNode *demangleTemplateInstantiationName(StringView &MangledName,
                                                     NameBackrefBehavior NBB);
+  IntrinsicFunctionKind
+  translateIntrinsicFunctionCode(char CH, FunctionIdentifierCodeGroup Group);
   IdentifierNode *demangleFunctionIdentifierCode(StringView &MangledName);
   IdentifierNode *
   demangleFunctionIdentifierCode(StringView &MangledName,

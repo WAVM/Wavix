@@ -18,6 +18,7 @@ add_llvm_unittest(SupportTests
   CommandLineTest.cpp
   CompressionTest.cpp
   ConvertUTFTest.cpp
+  CRCTest.cpp
   DataExtractorTest.cpp
   DebugTest.cpp
   DebugCounterTest.cpp
@@ -27,12 +28,14 @@ add_llvm_unittest(SupportTests
   ErrnoTest.cpp
   ErrorOrTest.cpp
   ErrorTest.cpp
+  FileCheckTest.cpp
   FileOutputBufferTest.cpp
   FormatVariadicTest.cpp
   GlobPatternTest.cpp
   Host.cpp
   ItaniumManglingCanonicalizerTest.cpp
   JSONTest.cpp
+  KnownBitsTest.cpp
   LEB128Test.cpp
   LineIteratorTest.cpp
   LockFileManagerTest.cpp

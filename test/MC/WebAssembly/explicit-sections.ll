@@ -1,4 +1,4 @@
-; RUN: llc -filetype=obj -thread-model=single %s -o - | obj2yaml | FileCheck %s
+; RUN: llc -filetype=obj %s -o - | obj2yaml | FileCheck %s
 
 target triple = "wasm32-unknown-unknown"
 
@@ -10,8 +10,8 @@ target triple = "wasm32-unknown-unknown"
 @global3 = global i32 8, align 8, section ".sec2"
 
 
-; CHECK:        - Type:            DATA
-; CHECK-NEXT:     Segments:        
+; CHECK:        - Type:            DATA{{$}}
+; CHECK-NEXT:     Segments:
 ; CHECK-NEXT:       - SectionOffset:   6
 ; CHECK-NEXT:         InitFlags:       0
 ; CHECK-NEXT:         Offset:
@@ -57,7 +57,7 @@ target triple = "wasm32-unknown-unknown"
 ; CHECK-NEXT:         Flags:           [  ]
 ; CHECK-NEXT:         Segment:         2
 ; CHECK-NEXT:         Size:            4
-; CHECK-NEXT:     SegmentInfo:    
+; CHECK-NEXT:     SegmentInfo:
 ; CHECK-NEXT:       - Index:           0
 ; CHECK-NEXT:         Name:            .data.global0
 ; CHECK-NEXT:         Alignment:       3
