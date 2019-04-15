@@ -3524,13 +3524,16 @@ INTERCEPTOR(SIZE_T, wcrtomb, char *dest, wchar_t src, void *ps) {
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, wcrtomb, dest, src, ps);
   if (ps) COMMON_INTERCEPTOR_READ_RANGE(ctx, ps, mbstate_t_sz);
-  // FIXME: under ASan the call below may write to freed memory and corrupt
-  // its metadata. See
-  // https://github.com/google/sanitizers/issues/321.
-  SIZE_T res = REAL(wcrtomb)(dest, src, ps);
-  if (res != ((SIZE_T)-1) && dest) {
-    SIZE_T write_cnt = res;
-    COMMON_INTERCEPTOR_WRITE_RANGE(ctx, dest, write_cnt);
+
+  if (!dest)
+    return REAL(wcrtomb)(dest, src, ps);
+
+  char local_dest[32];
+  SIZE_T res = REAL(wcrtomb)(local_dest, src, ps);
+  if (res != ((SIZE_T)-1)) {
+    CHECK_LE(res, sizeof(local_dest));
+    COMMON_INTERCEPTOR_WRITE_RANGE(ctx, dest, res);
+    REAL(memcpy)(dest, local_dest, res);
   }
   return res;
 }
@@ -3538,6 +3541,28 @@ INTERCEPTOR(SIZE_T, wcrtomb, char *dest, wchar_t src, void *ps) {
 #define INIT_WCRTOMB COMMON_INTERCEPT_FUNCTION(wcrtomb);
 #else
 #define INIT_WCRTOMB
+#endif
+
+#if SANITIZER_INTERCEPT_WCTOMB
+INTERCEPTOR(int, wctomb, char *dest, wchar_t src) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, wctomb, dest, src);
+  if (!dest)
+    return REAL(wctomb)(dest, src);
+
+  char local_dest[32];
+  int res = REAL(wctomb)(local_dest, src);
+  if (res != -1) {
+    CHECK_LE(res, sizeof(local_dest));
+    COMMON_INTERCEPTOR_WRITE_RANGE(ctx, dest, res);
+    REAL(memcpy)(dest, local_dest, res);
+  }
+  return res;
+}
+
+#define INIT_WCTOMB COMMON_INTERCEPT_FUNCTION(wctomb);
+#else
+#define INIT_WCTOMB
 #endif
 
 #if SANITIZER_INTERCEPT_TCGETATTR
@@ -4738,6 +4763,20 @@ INTERCEPTOR(char *, tmpnam_r, char *s) {
 #define INIT_TMPNAM_R
 #endif
 
+#if SANITIZER_INTERCEPT_TTYNAME
+INTERCEPTOR(char *, ttyname, int fd) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, ttyname, fd);
+  char *res = REAL(ttyname)(fd);
+  if (res != nullptr)
+    COMMON_INTERCEPTOR_INITIALIZE_RANGE(res, REAL(strlen)(res) + 1);
+  return res;
+}
+#define INIT_TTYNAME COMMON_INTERCEPT_FUNCTION(ttyname);
+#else
+#define INIT_TTYNAME
+#endif
+
 #if SANITIZER_INTERCEPT_TTYNAME_R
 INTERCEPTOR(int, ttyname_r, int fd, char *name, SIZE_T namesize) {
   void *ctx;
@@ -5515,11 +5554,20 @@ INTERCEPTOR(void *, __bzero, void *block, uptr size) {
   void *ctx;
   COMMON_INTERCEPTOR_MEMSET_IMPL(ctx, block, 0, size);
 }
-
 #define INIT___BZERO COMMON_INTERCEPT_FUNCTION(__bzero);
 #else
 #define INIT___BZERO
 #endif  // SANITIZER_INTERCEPT___BZERO
+
+#if SANITIZER_INTERCEPT_BZERO
+INTERCEPTOR(void *, bzero, void *block, uptr size) {
+  void *ctx;
+  COMMON_INTERCEPTOR_MEMSET_IMPL(ctx, block, 0, size);
+}
+#define INIT_BZERO COMMON_INTERCEPT_FUNCTION(bzero);
+#else
+#define INIT_BZERO
+#endif  // SANITIZER_INTERCEPT_BZERO
 
 #if SANITIZER_INTERCEPT_FTIME
 INTERCEPTOR(int, ftime, __sanitizer_timeb *tp) {
@@ -9593,6 +9641,7 @@ static void InitializeCommonInterceptors() {
   INIT_WCSTOMBS;
   INIT_WCSNRTOMBS;
   INIT_WCRTOMB;
+  INIT_WCTOMB;
   INIT_TCGETATTR;
   INIT_REALPATH;
   INIT_CANONICALIZE_FILE_NAME;
@@ -9653,6 +9702,7 @@ static void InitializeCommonInterceptors() {
   INIT_PTHREAD_BARRIERATTR_GETPSHARED;
   INIT_TMPNAM;
   INIT_TMPNAM_R;
+  INIT_TTYNAME;
   INIT_TTYNAME_R;
   INIT_TEMPNAM;
   INIT_PTHREAD_SETNAME_NP;
@@ -9678,6 +9728,7 @@ static void InitializeCommonInterceptors() {
   INIT_CAPGET;
   INIT_AEABI_MEM;
   INIT___BZERO;
+  INIT_BZERO;
   INIT_FTIME;
   INIT_XDR;
   INIT_TSEARCH;

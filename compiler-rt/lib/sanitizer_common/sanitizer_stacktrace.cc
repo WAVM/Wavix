@@ -17,10 +17,9 @@
 namespace __sanitizer {
 
 uptr StackTrace::GetNextInstructionPc(uptr pc) {
-#if defined(__mips__)
+#if defined(__sparc__) || defined(__mips__)
   return pc + 8;
-#elif defined(__powerpc__) || defined(__sparc__) || defined(__arm__) || \
-    defined(__aarch64__)
+#elif defined(__powerpc__) || defined(__arm__) || defined(__aarch64__)
   return pc + 4;
 #else
   return pc + 1;
@@ -70,8 +69,7 @@ static inline uhwptr *GetCanonicFrame(uptr bp,
 
 void BufferedStackTrace::UnwindFast(uptr pc, uptr bp, uptr stack_top,
                                     uptr stack_bottom, u32 max_depth) {
-  // CHECK_NE(stack_bottom, 0);
-  // CHECK_GT(stack_top, stack_bottom);
+  // TODO(yln): add arg sanity check for stack_top/stack_bottom
   CHECK_GE(max_depth, 2);
   const uptr kPageSize = GetPageSizeCached();
   trace_buffer[0] = pc;

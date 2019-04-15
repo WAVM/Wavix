@@ -62,8 +62,7 @@ int main() {
   int_sink = memcmp(s1, s2, sizeof(s2));
   assert(seen_memcmp);
 
-#if defined(_GNU_SOURCE) || defined(__NetBSD__) || defined(__FreeBSD__) || \
-    defined(__OpenBSD__)
+#if (defined(__linux__) && !defined(__ANDROID__) && defined(_GNU_SOURCE)) || defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__)
   seen_memcmp = false;
   int_sink = bcmp(s1, s2, sizeof(s2));
   assert(seen_memcmp);
