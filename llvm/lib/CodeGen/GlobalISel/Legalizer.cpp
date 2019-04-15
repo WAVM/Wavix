@@ -27,6 +27,7 @@
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Target/TargetMachine.h"
 
 #include <iterator>
 
@@ -170,8 +171,7 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
 
   if (EnableCSE) {
     MIRBuilder = make_unique<CSEMIRBuilder>();
-    std::unique_ptr<CSEConfig> Config = make_unique<CSEConfig>();
-    CSEInfo = &Wrapper.get(std::move(Config));
+    CSEInfo = &Wrapper.get(TPC.getCSEConfig());
     MIRBuilder->setCSEInfo(CSEInfo);
   } else
     MIRBuilder = make_unique<MachineIRBuilder>();
@@ -225,7 +225,8 @@ bool Legalizer::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
       SmallVector<MachineInstr *, 4> DeadInstructions;
-      if (ArtCombiner.tryCombineInstruction(MI, DeadInstructions)) {
+      if (ArtCombiner.tryCombineInstruction(MI, DeadInstructions,
+                                            WrapperObserver)) {
         for (auto *DeadMI : DeadInstructions) {
           LLVM_DEBUG(dbgs() << *DeadMI << "Is dead\n");
           RemoveDeadInstFromLists(DeadMI);

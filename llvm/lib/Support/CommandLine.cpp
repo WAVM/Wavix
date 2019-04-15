@@ -98,6 +98,11 @@ public:
   // This collects additional help to be printed.
   std::vector<StringRef> MoreHelp;
 
+  // This collects Options added with the cl::DefaultOption flag. Since they can
+  // be overridden, they are not added to the appropriate SubCommands until
+  // ParseCommandLineOptions actually runs.
+  SmallVector<Option*, 4> DefaultOptions;
+
   // This collects the different option categories that have been registered.
   SmallPtrSet<OptionCategory *, 16> RegisteredOptionCategories;
 
@@ -146,6 +151,11 @@ public:
   void addOption(Option *O, SubCommand *SC) {
     bool HadErrors = false;
     if (O->hasArgStr()) {
+      // If it's a DefaultOption, check to make sure it isn't already there.
+      if (O->isDefaultOption() &&
+          SC->OptionsMap.find(O->ArgStr) != SC->OptionsMap.end())
+        return;
+
       // Add argument to the argument map!
       if (!SC->OptionsMap.insert(std::make_pair(O->ArgStr, O)).second) {
         errs() << ProgramName << ": CommandLine Error: Option '" << O->ArgStr
@@ -185,7 +195,12 @@ public:
     }
   }
 
-  void addOption(Option *O) {
+  void addOption(Option *O, bool ProcessDefaultOption = false) {
+    if (!ProcessDefaultOption && O->isDefaultOption()) {
+      DefaultOptions.push_back(O);
+      return;
+    }
+
     if (O->Subs.empty()) {
       addOption(O, &*TopLevelSubCommand);
     } else {
@@ -201,8 +216,12 @@ public:
       OptionNames.push_back(O->ArgStr);
 
     SubCommand &Sub = *SC;
-    for (auto Name : OptionNames)
-      Sub.OptionsMap.erase(Name);
+    auto End = Sub.OptionsMap.end();
+    for (auto Name : OptionNames) {
+      auto I = Sub.OptionsMap.find(Name);
+      if (I != End && I->getValue() == O)
+        Sub.OptionsMap.erase(I);
+      }
 
     if (O->getFormattingFlag() == cl::Positional)
       for (auto Opt = Sub.PositionalOpts.begin();
@@ -266,8 +285,13 @@ public:
     if (O->Subs.empty())
       updateArgStr(O, NewName, &*TopLevelSubCommand);
     else {
-      for (auto SC : O->Subs)
-        updateArgStr(O, NewName, SC);
+      if (O->isInAllSubCommands()) {
+        for (auto SC : RegisteredSubCommands)
+          updateArgStr(O, NewName, SC);
+      } else {
+        for (auto SC : O->Subs)
+          updateArgStr(O, NewName, SC);
+      }
     }
   }
 
@@ -331,6 +355,8 @@ public:
     AllSubCommands->reset();
     registerSubCommand(&*TopLevelSubCommand);
     registerSubCommand(&*AllSubCommands);
+
+    DefaultOptions.clear();
   }
 
 private:
@@ -366,6 +392,13 @@ void Option::setArgStr(StringRef S) {
   ArgStr = S;
 }
 
+void Option::reset() {
+  NumOccurrences = 0;
+  setDefault();
+  if (isDefaultOption())
+    removeArgument();
+}
+
 // Initialise the general option category.
 OptionCategory llvm::cl::GeneralCategory("General options");
 
@@ -373,7 +406,10 @@ void OptionCategory::registerCategory() {
   GlobalParser->registerCategory(this);
 }
 
-// A special subcommand representing no subcommand
+// A special subcommand representing no subcommand. It is particularly important
+// that this ManagedStatic uses constant initailization and not dynamic
+// initialization because it is referenced from cl::opt constructors, which run
+// dynamically in an arbitrary order.
 ManagedStatic<SubCommand> llvm::cl::TopLevelSubCommand;
 
 // A special subcommand that can be used to put an option into all subcommands.
@@ -600,7 +636,7 @@ static bool ProvidePositionalOption(Option *Handler, StringRef Arg, int i) {
 
 // Option predicates...
 static inline bool isGrouping(const Option *O) {
-  return O->getFormattingFlag() == cl::Grouping;
+  return O->getMiscFlags() & cl::Grouping;
 }
 static inline bool isPrefixedOrGrouping(const Option *O) {
   return isGrouping(O) || O->getFormattingFlag() == cl::Prefix ||
@@ -651,40 +687,46 @@ HandlePrefixedOrGroupedOption(StringRef &Arg, StringRef &Value,
   if (!PGOpt)
     return nullptr;
 
-  // If the option is a prefixed option, then the value is simply the
-  // rest of the name...  so fall through to later processing, by
-  // setting up the argument name flags and value fields.
-  if (PGOpt->getFormattingFlag() == cl::Prefix ||
-      PGOpt->getFormattingFlag() == cl::AlwaysPrefix) {
-    Value = Arg.substr(Length);
+  do {
+    StringRef MaybeValue =
+        (Length < Arg.size()) ? Arg.substr(Length) : StringRef();
     Arg = Arg.substr(0, Length);
     assert(OptionsMap.count(Arg) && OptionsMap.find(Arg)->second == PGOpt);
-    return PGOpt;
-  }
 
-  // This must be a grouped option... handle them now.  Grouping options can't
-  // have values.
-  assert(isGrouping(PGOpt) && "Broken getOptionPred!");
+    // cl::Prefix options do not preserve '=' when used separately.
+    // The behavior for them with grouped options should be the same.
+    if (MaybeValue.empty() || PGOpt->getFormattingFlag() == cl::AlwaysPrefix ||
+        (PGOpt->getFormattingFlag() == cl::Prefix && MaybeValue[0] != '=')) {
+      Value = MaybeValue;
+      return PGOpt;
+    }
 
-  do {
-    // Move current arg name out of Arg into OneArgName.
-    StringRef OneArgName = Arg.substr(0, Length);
-    Arg = Arg.substr(Length);
+    if (MaybeValue[0] == '=') {
+      Value = MaybeValue.substr(1);
+      return PGOpt;
+    }
 
-    // Because ValueRequired is an invalid flag for grouped arguments,
-    // we don't need to pass argc/argv in.
-    assert(PGOpt->getValueExpectedFlag() != cl::ValueRequired &&
-           "Option can not be cl::Grouping AND cl::ValueRequired!");
+    // This must be a grouped option.
+    assert(isGrouping(PGOpt) && "Broken getOptionPred!");
+
+    // Grouping options inside a group can't have values.
+    if (PGOpt->getValueExpectedFlag() == cl::ValueRequired) {
+      ErrorParsing |= PGOpt->error("may not occur within a group!");
+      return nullptr;
+    }
+
+    // Because the value for the option is not required, we don't need to pass
+    // argc/argv in.
     int Dummy = 0;
-    ErrorParsing |=
-        ProvideOption(PGOpt, OneArgName, StringRef(), 0, nullptr, Dummy);
+    ErrorParsing |= ProvideOption(PGOpt, Arg, StringRef(), 0, nullptr, Dummy);
 
     // Get the next grouping option.
+    Arg = MaybeValue;
     PGOpt = getOptionPred(Arg, Length, isGrouping, OptionsMap);
-  } while (PGOpt && Length != Arg.size());
+  } while (PGOpt);
 
-  // Return the last option with Arg cut down to just the last one.
-  return PGOpt;
+  // We could not find a grouping option in the remainder of Arg.
+  return nullptr;
 }
 
 static bool RequiresValue(const Option *O) {
@@ -868,6 +910,13 @@ void cl::TokenizeWindowsCommandLine(StringRef Src, StringSaver &Saver,
     // QUOTED state means that it's reading a token quoted by double quotes.
     if (State == QUOTED) {
       if (C == '"') {
+        if (I < (E - 1) && Src[I + 1] == '"') {
+          // Consecutive double-quotes inside a quoted string implies one
+          // double-quote.
+          Token.push_back('"');
+          I = I + 1;
+          continue;
+        }
         State = UNQUOTED;
         continue;
       }
@@ -1150,6 +1199,10 @@ bool CommandLineParser::ParseCommandLineOptions(int argc,
   auto &PositionalOpts = ChosenSubCommand->PositionalOpts;
   auto &SinkOpts = ChosenSubCommand->SinkOpts;
   auto &OptionsMap = ChosenSubCommand->OptionsMap;
+
+  for (auto O: DefaultOptions) {
+    addOption(O, true);
+  }
 
   if (ConsumeAfterOpt) {
     assert(PositionalOpts.size() > 0 &&
@@ -2129,6 +2182,9 @@ static cl::opt<HelpPrinterWrapper, true, parser<bool>>
     HOp("help", cl::desc("Display available options (-help-hidden for more)"),
         cl::location(WrappedNormalPrinter), cl::ValueDisallowed,
         cl::cat(GenericCategory), cl::sub(*AllSubCommands));
+
+static cl::alias HOpA("h", cl::desc("Alias for -help"), cl::aliasopt(HOp),
+                      cl::DefaultOption);
 
 static cl::opt<HelpPrinterWrapper, true, parser<bool>>
     HHOp("help-hidden", cl::desc("Display all available options"),

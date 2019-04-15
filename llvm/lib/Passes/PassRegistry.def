@@ -56,6 +56,7 @@ MODULE_PASS("globalsplit", GlobalSplitPass())
 MODULE_PASS("hotcoldsplit", HotColdSplittingPass())
 MODULE_PASS("inferattrs", InferFunctionAttrsPass())
 MODULE_PASS("insert-gcov-profiling", GCOVProfilerPass())
+MODULE_PASS("instrorderfile", InstrOrderFilePass())
 MODULE_PASS("instrprof", InstrProfiling())
 MODULE_PASS("internalize", InternalizePass())
 MODULE_PASS("invalidate<all>", InvalidateAllAnalysesPass())
@@ -217,7 +218,6 @@ FUNCTION_PASS("print<stack-safety-local>", StackSafetyPrinterPass(dbgs()))
 FUNCTION_PASS("reassociate", ReassociatePass())
 FUNCTION_PASS("scalarizer", ScalarizerPass())
 FUNCTION_PASS("sccp", SCCPPass())
-FUNCTION_PASS("simplify-cfg", SimplifyCFGPass())
 FUNCTION_PASS("sink", SinkingPass())
 FUNCTION_PASS("slp-vectorizer", SLPVectorizerPass())
 FUNCTION_PASS("speculative-execution", SpeculativeExecutionPass())
@@ -230,6 +230,7 @@ FUNCTION_PASS("verify<domtree>", DominatorTreeVerifierPass())
 FUNCTION_PASS("verify<loops>", LoopVerifierPass())
 FUNCTION_PASS("verify<memoryssa>", MemorySSAVerifierPass())
 FUNCTION_PASS("verify<regions>", RegionInfoVerifierPass())
+FUNCTION_PASS("verify<safepoint-ir>", SafepointIRVerifierPass())
 FUNCTION_PASS("view-cfg", CFGViewerPass())
 FUNCTION_PASS("view-cfg-only", CFGOnlyViewerPass())
 FUNCTION_PASS("transform-warning", WarnMissedTransformationsPass())
@@ -251,6 +252,11 @@ FUNCTION_PASS_WITH_PARAMS("msan",
                              return MemorySanitizerPass(Opts);
                            },
                            parseMSanPassOptions)
+FUNCTION_PASS_WITH_PARAMS("simplify-cfg",
+                           [](SimplifyCFGOptions Opts) {
+                             return SimplifyCFGPass(Opts);
+                           },
+                           parseSimplifyCFGOptions)
 #undef FUNCTION_PASS_WITH_PARAMS
 
 #ifndef LOOP_ANALYSIS

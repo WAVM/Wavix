@@ -1,4 +1,4 @@
-; RUN: llc -filetype=obj -thread-model=single %s -o - | obj2yaml | FileCheck %s
+; RUN: llc -filetype=obj %s -o - | obj2yaml | FileCheck %s
 
 target triple = "wasm32-unknown-unknown"
 
@@ -10,7 +10,7 @@ target triple = "wasm32-unknown-unknown"
 @foo = global i64 7, align 4
 @bar = hidden global i32* @myimport, align 4
 
-; CHECK:        - Type:            DATA
+; CHECK:        - Type:            DATA{{$}}
 ; CHECK-NEXT:     Relocations:
 ; CHECK-NEXT:       - Type:            R_WASM_MEMORY_ADDR_I32
 ; CHECK-NEXT:         Index:           2

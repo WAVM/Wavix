@@ -158,7 +158,7 @@ end:
   br label %block
 }
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %2:_(<2 x p0>), %1:_(p0) :: (store 16 into `<2 x i16*>* undef`) (in function: vector_of_pointers_insertelement)
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %2:_(<2 x p0>) = G_INSERT_VECTOR_ELT %0:_, %3:_(p0), %5:_(s32) (in function: vector_of_pointers_insertelement)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for vector_of_pointers_insertelement
 ; FALLBACK-WITH-REPORT-OUT-LABEL: vector_of_pointers_insertelement:
 define void @vector_of_pointers_insertelement() {
@@ -212,14 +212,6 @@ define void @nonpow2_store_narrowing(i96* %c) {
   %a = add i128 undef, undef
   %b = trunc i128 %a to i96
   store i96 %b, i96* %c
-  ret void
-}
-
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %0:_(s96) = G_CONSTANT i96 0 (in function: nonpow2_constant_narrowing)
-; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for nonpow2_constant_narrowing
-; FALLBACK-WITH-REPORT-OUT-LABEL: nonpow2_constant_narrowing:
-define void @nonpow2_constant_narrowing() {
-  store i96 0, i96* undef
   ret void
 }
 

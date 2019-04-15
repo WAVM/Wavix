@@ -1,4 +1,4 @@
-; RUN: llc -filetype=obj -thread-model=single %s -o - | obj2yaml | FileCheck %s
+; RUN: llc -filetype=obj %s -o - | obj2yaml | FileCheck %s
 
 target triple = "wasm32-unknown-unknown"
 
@@ -9,7 +9,7 @@ target triple = "wasm32-unknown-unknown"
 @foo = global %union.u1 zeroinitializer, align 1
 @bar = global %union.u1 zeroinitializer, align 1
 
-; CHECK:        - Type:            DATA
+; CHECK:        - Type:            DATA{{$}}
 ; CHECK-NEXT:     Segments:
 ; CHECK-NEXT:       - SectionOffset:   6
 ; CHECK-NEXT:         InitFlags:       0
@@ -61,7 +61,7 @@ target triple = "wasm32-unknown-unknown"
 ; CHECK-NEXT:         Flags:           [  ]
 ; CHECK-NEXT:         Segment:         3
 ; CHECK-NEXT:         Size:            0
-; CHECK-NEXT:     SegmentInfo:    
+; CHECK-NEXT:     SegmentInfo:
 ; CHECK-NEXT:       - Index:           0
 ; CHECK-NEXT:         Name:            .bss.g0
 ; CHECK-NEXT:         Alignment:       2

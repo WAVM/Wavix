@@ -232,8 +232,9 @@ void ScalarEnumerationTraits<ELFYAML::ELF_ELFCLASS>::enumeration(
 void ScalarEnumerationTraits<ELFYAML::ELF_ELFDATA>::enumeration(
     IO &IO, ELFYAML::ELF_ELFDATA &Value) {
 #define ECase(X) IO.enumCase(Value, #X, ELF::X)
-  // Since the semantics of ELFDATANONE is "invalid", just don't accept it
-  // here.
+  // ELFDATANONE is an invalid data encoding, but we accept it because
+  // we want to be able to produce invalid binaries for the tests.
+  ECase(ELFDATANONE);
   ECase(ELFDATA2LSB);
   ECase(ELFDATA2MSB);
 #undef ECase
@@ -559,6 +560,17 @@ void ScalarEnumerationTraits<ELFYAML::ELF_SHN>::enumeration(
   IO.enumFallback<Hex32>(Value);
 }
 
+void ScalarEnumerationTraits<ELFYAML::ELF_STB>::enumeration(
+    IO &IO, ELFYAML::ELF_STB &Value) {
+#define ECase(X) IO.enumCase(Value, #X, ELF::X)
+  ECase(STB_LOCAL);
+  ECase(STB_GLOBAL);
+  ECase(STB_WEAK);
+  ECase(STB_GNU_UNIQUE);
+#undef ECase
+  IO.enumFallback<Hex8>(Value);
+}
+
 void ScalarEnumerationTraits<ELFYAML::ELF_STT>::enumeration(
     IO &IO, ELFYAML::ELF_STT &Value) {
 #define ECase(X) IO.enumCase(Value, #X, ELF::X)
@@ -818,6 +830,9 @@ void MappingTraits<ELFYAML::ProgramHeader>::mapping(
   IO.mapOptional("VAddr", Phdr.VAddr, Hex64(0));
   IO.mapOptional("PAddr", Phdr.PAddr, Hex64(0));
   IO.mapOptional("Align", Phdr.Align);
+  IO.mapOptional("FileSize", Phdr.FileSize);
+  IO.mapOptional("MemSize", Phdr.MemSize);
+  IO.mapOptional("Offset", Phdr.Offset);
 }
 
 namespace {
@@ -841,9 +856,9 @@ void MappingTraits<ELFYAML::Symbol>::mapping(IO &IO, ELFYAML::Symbol &Symbol) {
   IO.mapOptional("Type", Symbol.Type, ELFYAML::ELF_STT(0));
   IO.mapOptional("Section", Symbol.Section, StringRef());
   IO.mapOptional("Index", Symbol.Index);
+  IO.mapOptional("Binding", Symbol.Binding, ELFYAML::ELF_STB(0));
   IO.mapOptional("Value", Symbol.Value, Hex64(0));
   IO.mapOptional("Size", Symbol.Size, Hex64(0));
-
   MappingNormalization<NormalizedOther, uint8_t> Keys(IO, Symbol.Other);
   IO.mapOptional("Visibility", Keys->Visibility, ELFYAML::ELF_STV(0));
   IO.mapOptional("Other", Keys->Other, ELFYAML::ELF_STO(0));
@@ -858,13 +873,6 @@ StringRef MappingTraits<ELFYAML::Symbol>::validate(IO &IO,
     return "Large indexes are not supported";
   }
   return StringRef();
-}
-
-void MappingTraits<ELFYAML::LocalGlobalWeakSymbols>::mapping(
-    IO &IO, ELFYAML::LocalGlobalWeakSymbols &Symbols) {
-  IO.mapOptional("Local", Symbols.Local);
-  IO.mapOptional("Global", Symbols.Global);
-  IO.mapOptional("Weak", Symbols.Weak);
 }
 
 static void commonSectionMapping(IO &IO, ELFYAML::Section &Section) {
@@ -887,6 +895,7 @@ static void sectionMapping(IO &IO, ELFYAML::RawContentSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapOptional("Content", Section.Content);
   IO.mapOptional("Size", Section.Size, Hex64(Section.Content.binary_size()));
+  IO.mapOptional("Info", Section.Info, Hex64(0));
 }
 
 static void sectionMapping(IO &IO, ELFYAML::NoBitsSection &Section) {

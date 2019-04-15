@@ -954,9 +954,12 @@ bool NVPTXAsmPrinter::doFinalization(Module &M) {
 
   delete[] gv_array;
   // Close the last emitted section
-  if (HasDebugInfo)
+  if (HasDebugInfo) {
     static_cast<NVPTXTargetStreamer *>(OutStreamer->getTargetStreamer())
         ->closeLastSection();
+    // Emit empty .debug_loc section for better support of the empty files.
+    OutStreamer->EmitRawText("\t.section\t.debug_loc\t{\t}");
+  }
 
   // Output last DWARF .file directives, if any.
   static_cast<NVPTXTargetStreamer *>(OutStreamer->getTargetStreamer())
@@ -2200,7 +2203,6 @@ void NVPTXAsmPrinter::printMCExpr(const MCExpr &Expr, raw_ostream &OS) {
 /// PrintAsmOperand - Print out an operand for an inline asm expression.
 ///
 bool NVPTXAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                                      unsigned AsmVariant,
                                       const char *ExtraCode, raw_ostream &O) {
   if (ExtraCode && ExtraCode[0]) {
     if (ExtraCode[1] != 0)
@@ -2209,7 +2211,7 @@ bool NVPTXAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
     switch (ExtraCode[0]) {
     default:
       // See if this is a generic print operand
-      return AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, O);
+      return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
     case 'r':
       break;
     }
@@ -2220,9 +2222,10 @@ bool NVPTXAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
   return false;
 }
 
-bool NVPTXAsmPrinter::PrintAsmMemoryOperand(
-    const MachineInstr *MI, unsigned OpNo, unsigned AsmVariant,
-    const char *ExtraCode, raw_ostream &O) {
+bool NVPTXAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
+                                            unsigned OpNo,
+                                            const char *ExtraCode,
+                                            raw_ostream &O) {
   if (ExtraCode && ExtraCode[0])
     return true; // Unknown modifier
 

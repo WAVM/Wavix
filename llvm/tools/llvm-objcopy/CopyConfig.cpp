@@ -7,9 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CopyConfig.h"
-#include "llvm-objcopy.h"
 
-#include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -92,43 +90,26 @@ public:
   StripOptTable() : OptTable(StripInfoTable) {}
 };
 
-enum SectionFlag {
-  SecNone = 0,
-  SecAlloc = 1 << 0,
-  SecLoad = 1 << 1,
-  SecNoload = 1 << 2,
-  SecReadonly = 1 << 3,
-  SecDebug = 1 << 4,
-  SecCode = 1 << 5,
-  SecData = 1 << 6,
-  SecRom = 1 << 7,
-  SecMerge = 1 << 8,
-  SecStrings = 1 << 9,
-  SecContents = 1 << 10,
-  SecShare = 1 << 11,
-  LLVM_MARK_AS_BITMASK_ENUM(/* LargestValue = */ SecShare)
-};
-
 } // namespace
 
 static SectionFlag parseSectionRenameFlag(StringRef SectionName) {
   return llvm::StringSwitch<SectionFlag>(SectionName)
-      .Case("alloc", SectionFlag::SecAlloc)
-      .Case("load", SectionFlag::SecLoad)
-      .Case("noload", SectionFlag::SecNoload)
-      .Case("readonly", SectionFlag::SecReadonly)
-      .Case("debug", SectionFlag::SecDebug)
-      .Case("code", SectionFlag::SecCode)
-      .Case("data", SectionFlag::SecData)
-      .Case("rom", SectionFlag::SecRom)
-      .Case("merge", SectionFlag::SecMerge)
-      .Case("strings", SectionFlag::SecStrings)
-      .Case("contents", SectionFlag::SecContents)
-      .Case("share", SectionFlag::SecShare)
+      .CaseLower("alloc", SectionFlag::SecAlloc)
+      .CaseLower("load", SectionFlag::SecLoad)
+      .CaseLower("noload", SectionFlag::SecNoload)
+      .CaseLower("readonly", SectionFlag::SecReadonly)
+      .CaseLower("debug", SectionFlag::SecDebug)
+      .CaseLower("code", SectionFlag::SecCode)
+      .CaseLower("data", SectionFlag::SecData)
+      .CaseLower("rom", SectionFlag::SecRom)
+      .CaseLower("merge", SectionFlag::SecMerge)
+      .CaseLower("strings", SectionFlag::SecStrings)
+      .CaseLower("contents", SectionFlag::SecContents)
+      .CaseLower("share", SectionFlag::SecShare)
       .Default(SectionFlag::SecNone);
 }
 
-static Expected<uint64_t>
+static Expected<SectionFlag>
 parseSectionFlagSet(ArrayRef<StringRef> SectionFlags) {
   SectionFlag ParsedFlags = SectionFlag::SecNone;
   for (StringRef Flag : SectionFlags) {
@@ -143,18 +124,7 @@ parseSectionFlagSet(ArrayRef<StringRef> SectionFlags) {
     ParsedFlags |= ParsedFlag;
   }
 
-  uint64_t NewFlags = 0;
-  if (ParsedFlags & SectionFlag::SecAlloc)
-    NewFlags |= ELF::SHF_ALLOC;
-  if (!(ParsedFlags & SectionFlag::SecReadonly))
-    NewFlags |= ELF::SHF_WRITE;
-  if (ParsedFlags & SectionFlag::SecCode)
-    NewFlags |= ELF::SHF_EXECINSTR;
-  if (ParsedFlags & SectionFlag::SecMerge)
-    NewFlags |= ELF::SHF_MERGE;
-  if (ParsedFlags & SectionFlag::SecStrings)
-    NewFlags |= ELF::SHF_STRINGS;
-  return NewFlags;
+  return ParsedFlags;
 }
 
 static Expected<SectionRename> parseRenameSectionValue(StringRef FlagValue) {
@@ -173,7 +143,7 @@ static Expected<SectionRename> parseRenameSectionValue(StringRef FlagValue) {
   SR.NewName = NameAndFlags[0];
 
   if (NameAndFlags.size() > 1) {
-    Expected<uint64_t> ParsedFlagSet =
+    Expected<SectionFlag> ParsedFlagSet =
         parseSectionFlagSet(makeArrayRef(NameAndFlags).drop_front());
     if (!ParsedFlagSet)
       return ParsedFlagSet.takeError();
@@ -197,7 +167,7 @@ parseSetSectionFlagValue(StringRef FlagValue) {
   // Flags split: "f1" "f2" ...
   SmallVector<StringRef, 6> SectionFlags;
   Section2Flags.second.split(SectionFlags, ',');
-  Expected<uint64_t> ParsedFlagSet = parseSectionFlagSet(SectionFlags);
+  Expected<SectionFlag> ParsedFlagSet = parseSectionFlagSet(SectionFlags);
   if (!ParsedFlagSet)
     return ParsedFlagSet.takeError();
   SFU.NewFlags = *ParsedFlagSet;
@@ -205,7 +175,7 @@ parseSetSectionFlagValue(StringRef FlagValue) {
   return SFU;
 }
 
-static NewSymbolInfo parseNewSymbolInfo(StringRef FlagValue) {
+static Expected<NewSymbolInfo> parseNewSymbolInfo(StringRef FlagValue) {
   // Parse value given with --add-symbol option and create the
   // new symbol if possible. The value format for --add-symbol is:
   //
@@ -231,24 +201,28 @@ static NewSymbolInfo parseNewSymbolInfo(StringRef FlagValue) {
   StringRef Value;
   std::tie(SI.SymbolName, Value) = FlagValue.split('=');
   if (Value.empty())
-    error("bad format for --add-symbol, missing '=' after '" + SI.SymbolName +
-          "'");
+    return createStringError(
+        errc::invalid_argument,
+        "bad format for --add-symbol, missing '=' after '%s'",
+        SI.SymbolName.str().c_str());
 
   if (Value.contains(':')) {
     std::tie(SI.SectionName, Value) = Value.split(':');
     if (SI.SectionName.empty() || Value.empty())
-      error(
+      return createStringError(
+          errc::invalid_argument,
           "bad format for --add-symbol, missing section name or symbol value");
   }
 
   SmallVector<StringRef, 6> Flags;
   Value.split(Flags, ',');
   if (Flags[0].getAsInteger(0, SI.Value))
-    error("bad symbol value: '" + Flags[0] + "'");
+    return createStringError(errc::invalid_argument, "bad symbol value: '%s'",
+                             Flags[0].str().c_str());
 
-  typedef std::function<void(void)> Functor;
-  size_t NumFlags = Flags.size();
-  for (size_t I = 1; I < NumFlags; ++I)
+  using Functor = std::function<void(void)>;
+  SmallVector<StringRef, 6> UnsupportedFlags;
+  for (size_t I = 1, NumFlags = Flags.size(); I < NumFlags; ++I)
     static_cast<Functor>(
         StringSwitch<Functor>(Flags[I])
             .CaseLower("global", [&SI] { SI.Bind = ELF::STB_GLOBAL; })
@@ -269,21 +243,24 @@ static NewSymbolInfo parseNewSymbolInfo(StringRef FlagValue) {
             .CaseLower("synthetic", [] {})
             .CaseLower("unique-object", [] {})
             .StartsWithLower("before", [] {})
-            .Default([&] {
-              error("unsupported flag '" + Flags[I] + "' for --add-symbol");
-            }))();
+            .Default([&] { UnsupportedFlags.push_back(Flags[I]); }))();
+  if (!UnsupportedFlags.empty())
+    return createStringError(errc::invalid_argument,
+                             "unsupported flag%s for --add-symbol: '%s'",
+                             UnsupportedFlags.size() > 1 ? "s" : "",
+                             join(UnsupportedFlags, "', '").c_str());
   return SI;
 }
 
 static const StringMap<MachineInfo> ArchMap{
-    // Name, {EMachine, 64bit, LittleEndian}
-    {"aarch64", {ELF::EM_AARCH64, true, true}},
-    {"arm", {ELF::EM_ARM, false, true}},
-    {"i386", {ELF::EM_386, false, true}},
-    {"i386:x86-64", {ELF::EM_X86_64, true, true}},
-    {"powerpc:common64", {ELF::EM_PPC64, true, true}},
-    {"sparc", {ELF::EM_SPARC, false, true}},
-    {"x86-64", {ELF::EM_X86_64, true, true}},
+    // Name, {EMachine, OS/ABI, 64bit, LittleEndian}
+    {"aarch64", {ELF::EM_AARCH64, ELF::ELFOSABI_NONE, true, true}},
+    {"arm", {ELF::EM_ARM, ELF::ELFOSABI_NONE, false, true}},
+    {"i386", {ELF::EM_386, ELF::ELFOSABI_NONE, false, true}},
+    {"i386:x86-64", {ELF::EM_X86_64, ELF::ELFOSABI_NONE, true, true}},
+    {"powerpc:common64", {ELF::EM_PPC64, ELF::ELFOSABI_NONE, true, true}},
+    {"sparc", {ELF::EM_SPARC, ELF::ELFOSABI_NONE, false, true}},
+    {"x86-64", {ELF::EM_X86_64, ELF::ELFOSABI_NONE, true, true}},
 };
 
 static Expected<const MachineInfo &> getMachineInfo(StringRef Arch) {
@@ -295,12 +272,15 @@ static Expected<const MachineInfo &> getMachineInfo(StringRef Arch) {
 }
 
 static const StringMap<MachineInfo> OutputFormatMap{
-    // Name, {EMachine, 64bit, LittleEndian}
-    {"elf32-i386", {ELF::EM_386, false, true}},
-    {"elf32-powerpcle", {ELF::EM_PPC, false, true}},
-    {"elf32-x86-64", {ELF::EM_X86_64, false, true}},
-    {"elf64-powerpcle", {ELF::EM_PPC64, true, true}},
-    {"elf64-x86-64", {ELF::EM_X86_64, true, true}},
+    // Name, {EMachine, OSABI, 64bit, LittleEndian}
+    {"elf32-i386", {ELF::EM_386, ELF::ELFOSABI_NONE, false, true}},
+    {"elf32-i386-freebsd", {ELF::EM_386, ELF::ELFOSABI_FREEBSD, false, true}},
+    {"elf32-powerpcle", {ELF::EM_PPC, ELF::ELFOSABI_NONE, false, true}},
+    {"elf32-x86-64", {ELF::EM_X86_64, ELF::ELFOSABI_NONE, false, true}},
+    {"elf64-powerpcle", {ELF::EM_PPC64, ELF::ELFOSABI_NONE, true, true}},
+    {"elf64-x86-64", {ELF::EM_X86_64, ELF::ELFOSABI_NONE, true, true}},
+    {"elf64-x86-64-freebsd",
+     {ELF::EM_X86_64, ELF::ELFOSABI_FREEBSD, true, true}},
 };
 
 static Expected<const MachineInfo &>
@@ -476,11 +456,11 @@ Expected<DriverConfig> parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
             InputArgs.getLastArgValue(OBJCOPY_compress_debug_sections_eq)
                 .str()
                 .c_str());
-      if (!zlib::isAvailable())
-        return createStringError(
-            errc::invalid_argument,
-            "LLVM was not compiled with LLVM_ENABLE_ZLIB: can not compress");
     }
+    if (!zlib::isAvailable())
+      return createStringError(
+          errc::invalid_argument,
+          "LLVM was not compiled with LLVM_ENABLE_ZLIB: can not compress");
   }
 
   Config.AddGnuDebugLink = InputArgs.getLastArgValue(OBJCOPY_add_gnu_debuglink);
@@ -616,8 +596,16 @@ Expected<DriverConfig> parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
       return std::move(E);
   for (auto Arg : InputArgs.filtered(OBJCOPY_keep_symbol))
     Config.SymbolsToKeep.emplace_back(Arg->getValue(), UseRegex);
-  for (auto Arg : InputArgs.filtered(OBJCOPY_add_symbol))
-    Config.SymbolsToAdd.push_back(parseNewSymbolInfo(Arg->getValue()));
+  for (auto Arg : InputArgs.filtered(OBJCOPY_keep_symbols))
+    if (Error E = addSymbolsFromFile(Config.SymbolsToKeep, DC.Alloc,
+                                     Arg->getValue(), UseRegex))
+      return std::move(E);
+  for (auto Arg : InputArgs.filtered(OBJCOPY_add_symbol)) {
+    Expected<NewSymbolInfo> NSI = parseNewSymbolInfo(Arg->getValue());
+    if (!NSI)
+      return NSI.takeError();
+    Config.SymbolsToAdd.push_back(*NSI);
+  }
 
   Config.DeterministicArchives = InputArgs.hasFlag(
       OBJCOPY_enable_deterministic_archives,
@@ -715,6 +703,7 @@ Expected<DriverConfig> parseStripOptions(ArrayRef<const char *> ArgsArr) {
   Config.StripUnneeded = InputArgs.hasArg(STRIP_strip_unneeded);
   Config.StripAll = InputArgs.hasArg(STRIP_strip_all);
   Config.StripAllGNU = InputArgs.hasArg(STRIP_strip_all_gnu);
+  Config.OnlyKeepDebug = InputArgs.hasArg(STRIP_only_keep_debug);
   Config.KeepFileSymbols = InputArgs.hasArg(STRIP_keep_file_symbols);
 
   for (auto Arg : InputArgs.filtered(STRIP_keep_section))

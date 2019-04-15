@@ -1862,16 +1862,15 @@ void COFFDumper::printStackMap() const {
 
   StringRef StackMapContents;
   StackMapSection.getContents(StackMapContents);
-  ArrayRef<uint8_t> StackMapContentsArray(
-      reinterpret_cast<const uint8_t*>(StackMapContents.data()),
-      StackMapContents.size());
+  ArrayRef<uint8_t> StackMapContentsArray =
+      arrayRefFromStringRef(StackMapContents);
 
   if (Obj->isLittleEndian())
     prettyPrintStackMap(
-        W, StackMapV2Parser<support::little>(StackMapContentsArray));
+        W, StackMapParser<support::little>(StackMapContentsArray));
   else
-    prettyPrintStackMap(W,
-                        StackMapV2Parser<support::big>(StackMapContentsArray));
+    prettyPrintStackMap(
+        W, StackMapParser<support::big>(StackMapContentsArray));
 }
 
 void COFFDumper::printAddrsig() {
@@ -1890,13 +1889,12 @@ void COFFDumper::printAddrsig() {
 
   StringRef AddrsigContents;
   AddrsigSection.getContents(AddrsigContents);
-  ArrayRef<uint8_t> AddrsigContentsArray(
-      reinterpret_cast<const uint8_t*>(AddrsigContents.data()),
-      AddrsigContents.size());
+  ArrayRef<uint8_t> AddrsigContentsArray(AddrsigContents.bytes_begin(),
+                                         AddrsigContents.size());
 
   ListScope L(W, "Addrsig");
-  auto *Cur = reinterpret_cast<const uint8_t *>(AddrsigContents.begin());
-  auto *End = reinterpret_cast<const uint8_t *>(AddrsigContents.end());
+  const uint8_t *Cur = AddrsigContents.bytes_begin();
+  const uint8_t *End = AddrsigContents.bytes_end();
   while (Cur != End) {
     unsigned Size;
     const char *Err;
