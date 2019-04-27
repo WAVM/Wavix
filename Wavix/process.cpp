@@ -93,9 +93,11 @@ static I64 mainThreadEntry(void* threadVoid)
 			I64 result;
 			try
 			{
-				wavmAssert(getFunctionType(getCurrentThread()->startFunction) == FunctionType());
-				invokeFunctionUnchecked(
-					getCurrentThread()->context, getCurrentThread()->startFunction, nullptr);
+				if(getCurrentThread()->startFunction)
+				{
+					invokeFunctionUnchecked(
+						getCurrentThread()->context, getCurrentThread()->startFunction, nullptr);
+				}
 
 				result = invokeFunctionUnchecked(
 							 getCurrentThread()->context, getCurrentThread()->mainFunction, nullptr)

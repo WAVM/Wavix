@@ -34,6 +34,9 @@ endfunction(check_cxx_atomics)
 # Perform the check for 64bit atomics without libatomic. It may have been
 # added to the required libraries during in the configuration of LLVM, which
 # would cause the check for CXX atomics without libatomic to incorrectly pass.
+if(NOT DEFINED ${CMAKE_REQUIRED_LIBRARIES})
+  set(${CMAKE_REQUIRED_LIBRARIES} "")
+endif()
 set(OLD_CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
 list(REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES "atomic")
 check_cxx_atomics(LIBCXX_HAVE_CXX_ATOMICS_WITHOUT_LIB)

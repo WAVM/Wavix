@@ -32,9 +32,6 @@ struct-ret-1.c.o.wasm
 pr39228.c.o.wasm
 pr47237.c.o.wasm
 
-# Clang optimizing loop into infinite loop for -O2
-930529-1.c.o.wasm O2
-
 # mmap
 loop-2f.c.o.wasm
 loop-2g.c.o.wasm
@@ -95,4 +92,3 @@ printf-chk-1.c.o.wasm O2
 vfprintf-chk-1.c.o.wasm O2
 vprintf-chk-1.c.o.wasm O2
 pr23135.c.o.wasm O0
-990208-1.c.o.wasm

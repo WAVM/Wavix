@@ -904,7 +904,7 @@ void Writer::layoutMemory() {
   if (Config->MaxMemory != 0 || Config->SharedMemory) {
     if (Config->MaxMemory != alignTo(Config->MaxMemory, WasmPageSize))
       error("maximum memory must be " + Twine(WasmPageSize) + "-byte aligned");
-    if (MemoryPtr > Config->MaxMemory)
+    if (MemoryPtr > Config->MaxMemory && !Config->SharedMemory)
       error("maximum memory too small, " + Twine(MemoryPtr) + " bytes needed");
     MaxMemoryPages = Config->MaxMemory / WasmPageSize;
     log("mem: max pages   = " + Twine(MaxMemoryPages));
@@ -1004,9 +1004,12 @@ void Writer::calculateTargetFeatures() {
   if (!Config->CheckFeatures)
     return;
 
+  // Wavix: allow modules compiled without atomics feature to use shared memory.
+#if 0
   if (Disallowed.count("atomics") && Config->SharedMemory)
     error(
         "'atomics' feature is disallowed, so --shared-memory must not be used");
+#endif
 
   // Validate that used features are allowed in output
   if (!InferFeatures) {

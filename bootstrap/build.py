@@ -235,6 +235,7 @@ def WAVM():
              WindowsFSEscape(os.path.join(HOST_DIR, 'wavix_toolchain.cmake')),
              '-DWAVM_ENABLE_RUNTIME=OFF',
              '-DWAVM_ENABLE_STATIC_LINKING=ON',
+             '-DWAVM_ENABLE_STATIC_LIBRARY_PIC=OFF',
              '-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON' ]
 
   proc.check_call(command, cwd=WAVM_OUT_DIR)
@@ -321,6 +322,7 @@ def LibCXXABI():
              '-DLIBCXXABI_ENABLE_THREADS=ON',
              '-DLIBCXXABI_SYSROOT=' + SYSROOT_DIR,
              '-DLIBCXXABI_USE_COMPILER_RT=ON',
+             '-DLIBCXXABI_ENABLE_PIC=OFF',
              '-DCMAKE_INSTALL_PREFIX=' + WindowsFSEscape(SYSROOT_DIR)]
 
   proc.check_call(command, cwd=LIBCXXABI_OUT_DIR)
@@ -348,6 +350,8 @@ def LibCXX():
              # because no C++ programs can be linked until libc++abi is
              # installed, so chicken and egg.
              '-DCXX_SUPPORTS_CXX11=ON',
+             '-DCXX_SUPPORTS_CXX14=ON',
+             '-DLIBCXX_ENABLE_EXPERIMENTAL_LIBRARY=OFF',
              # HandleLLVMOptions.cmake include CheckCompilerVersion.cmake.
              # This checks for working <atomic> header, which in turn errors
              # out on systems with threads disabled
