@@ -122,12 +122,14 @@ DECLARE_REAL(char*, strstr, const char *s1, const char *s2)
 #if !SANITIZER_MAC
 #define ASAN_INTERCEPT_FUNC(name)                                        \
   do {                                                                   \
-    if ((!INTERCEPT_FUNCTION(name) || !REAL(name)))                      \
+    INTERCEPT_FUNCTION(name);                                            \
+    if (&(name) != &WRAP(name) || !REAL(name))                           \
       VReport(1, "AddressSanitizer: failed to intercept '" #name "'\n"); \
   } while (0)
 #define ASAN_INTERCEPT_FUNC_VER(name, ver)                                     \
   do {                                                                         \
-    if ((!INTERCEPT_FUNCTION_VER(name, ver) || !REAL(name)))                   \
+    INTERCEPT_FUNCTION_VER(name, ver);                                         \
+    if (&(name) != &WRAP(name) || !REAL(name))                                 \
       VReport(                                                                 \
           1, "AddressSanitizer: failed to intercept '" #name "@@" #ver "'\n"); \
   } while (0)
