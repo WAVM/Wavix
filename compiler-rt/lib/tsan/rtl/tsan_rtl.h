@@ -55,19 +55,14 @@ namespace __tsan {
 #if !SANITIZER_GO
 struct MapUnmapCallback;
 #if defined(__mips64) || defined(__aarch64__) || defined(__powerpc__)
-static const uptr kAllocatorRegionSizeLog = 20;
-static const uptr kAllocatorNumRegions =
-    SANITIZER_MMAP_RANGE_SIZE >> kAllocatorRegionSizeLog;
-using ByteMap = TwoLevelByteMap<(kAllocatorNumRegions >> 12), 1 << 12,
-                                LocalAddressSpaceView, MapUnmapCallback>;
+
 struct AP32 {
   static const uptr kSpaceBeg = 0;
   static const u64 kSpaceSize = SANITIZER_MMAP_RANGE_SIZE;
   static const uptr kMetadataSize = 0;
   typedef __sanitizer::CompactSizeClassMap SizeClassMap;
-  static const uptr kRegionSizeLog = kAllocatorRegionSizeLog;
+  static const uptr kRegionSizeLog = 20;
   using AddressSpaceView = LocalAddressSpaceView;
-  using ByteMap = __tsan::ByteMap;
   typedef __tsan::MapUnmapCallback MapUnmapCallback;
   static const uptr kFlags = 0;
 };
@@ -464,6 +459,7 @@ struct ThreadState {
 #if !SANITIZER_GO
 #if SANITIZER_MAC || SANITIZER_ANDROID
 ThreadState *cur_thread();
+void set_cur_thread(ThreadState *thr);
 void cur_thread_finalize();
 INLINE void cur_thread_init() { }
 #else
