@@ -5697,9 +5697,11 @@ void Sema::checkClassLevelDLLAttribute(CXXRecordDecl *Class) {
 
   TemplateSpecializationKind TSK = Class->getTemplateSpecializationKind();
 
-  // Ignore explicit dllexport on explicit class template instantiation declarations.
+  // Ignore explicit dllexport on explicit class template instantiation
+  // declarations, except in MinGW mode.
   if (ClassExported && !ClassAttr->isInherited() &&
-      TSK == TSK_ExplicitInstantiationDeclaration) {
+      TSK == TSK_ExplicitInstantiationDeclaration &&
+      !Context.getTargetInfo().getTriple().isWindowsGNUEnvironment()) {
     Class->dropAttr<DLLExportAttr>();
     return;
   }
@@ -5724,9 +5726,12 @@ void Sema::checkClassLevelDLLAttribute(CXXRecordDecl *Class) {
         continue;
 
       if (MD->isInlined()) {
-        // MinGW does not import or export inline methods.
+        // MinGW does not import or export inline methods. But do it for
+        // template instantiations.
         if (!Context.getTargetInfo().getCXXABI().isMicrosoft() &&
-            !Context.getTargetInfo().getTriple().isWindowsItaniumEnvironment())
+            !Context.getTargetInfo().getTriple().isWindowsItaniumEnvironment() &&
+            TSK != TSK_ExplicitInstantiationDeclaration &&
+            TSK != TSK_ExplicitInstantiationDefinition)
           continue;
 
         // MSVC versions before 2015 don't export the move assignment operators
@@ -9037,6 +9042,9 @@ void Sema::ActOnFinishNamespaceDef(Decl *Dcl, SourceLocation RBrace) {
   PopDeclContext();
   if (Namespc->hasAttr<VisibilityAttr>())
     PopPragmaVisibility(true, RBrace);
+  // If this namespace contains an export-declaration, export it now.
+  if (DeferredExportedNamespaces.erase(Namespc))
+    Dcl->setModuleOwnershipKind(Decl::ModuleOwnershipKind::VisibleWhenImported);
 }
 
 CXXRecordDecl *Sema::getStdBadAlloc() const {
