@@ -221,16 +221,13 @@ static const ValueDecl *getPrivateItem(const Expr *RefExpr) {
   return cast<ValueDecl>(ME->getMemberDecl()->getCanonicalDecl());
 }
 
-typedef std::pair<CharUnits /*Align*/, const ValueDecl *> VarsDataTy;
-static bool stable_sort_comparator(const VarsDataTy P1, const VarsDataTy P2) {
-  return P1.first > P2.first;
-}
 
 static RecordDecl *buildRecordForGlobalizedVars(
     ASTContext &C, ArrayRef<const ValueDecl *> EscapedDecls,
     ArrayRef<const ValueDecl *> EscapedDeclsForTeams,
     llvm::SmallDenseMap<const ValueDecl *, const FieldDecl *>
         &MappedDeclsFields, int BufSize) {
+  using VarsDataTy = std::pair<CharUnits /*Align*/, const ValueDecl *>;
   if (EscapedDecls.empty() && EscapedDeclsForTeams.empty())
     return nullptr;
   SmallVector<VarsDataTy, 4> GlobalizedVars;
@@ -242,8 +239,10 @@ static RecordDecl *buildRecordForGlobalizedVars(
         D);
   for (const ValueDecl *D : EscapedDeclsForTeams)
     GlobalizedVars.emplace_back(C.getDeclAlign(D), D);
-  std::stable_sort(GlobalizedVars.begin(), GlobalizedVars.end(),
-                   stable_sort_comparator);
+  llvm::stable_sort(GlobalizedVars, [](VarsDataTy L, VarsDataTy R) {
+    return L.first > R.first;
+  });
+
   // Build struct _globalized_locals_ty {
   //         /*  globalized vars  */[WarSize] align (max(decl_align,
   //         GlobalMemoryAlignment))
@@ -714,25 +713,6 @@ getDataSharingMode(CodeGenModule &CGM) {
                                           : CGOpenMPRuntimeNVPTX::Generic;
 }
 
-/// Check if the parallel directive has an 'if' clause with non-constant or
-/// false condition. Also, check if the number of threads is strictly specified
-/// and run those directives in non-SPMD mode.
-static bool hasParallelIfNumThreadsClause(ASTContext &Ctx,
-                                          const OMPExecutableDirective &D) {
-  if (D.hasClausesOfKind<OMPNumThreadsClause>())
-    return true;
-  for (const auto *C : D.getClausesOfKind<OMPIfClause>()) {
-    OpenMPDirectiveKind NameModifier = C->getNameModifier();
-    if (NameModifier != OMPD_parallel && NameModifier != OMPD_unknown)
-      continue;
-    const Expr *Cond = C->getCondition();
-    bool Result;
-    if (!Cond->EvaluateAsBooleanCondition(Result, Ctx) || !Result)
-      return true;
-  }
-  return false;
-}
-
 /// Check for inner (nested) SPMD construct, if any
 static bool hasNestedSPMDDirective(ASTContext &Ctx,
                                    const OMPExecutableDirective &D) {
@@ -746,8 +726,7 @@ static bool hasNestedSPMDDirective(ASTContext &Ctx,
     OpenMPDirectiveKind DKind = NestedDir->getDirectiveKind();
     switch (D.getDirectiveKind()) {
     case OMPD_target:
-      if (isOpenMPParallelDirective(DKind) &&
-          !hasParallelIfNumThreadsClause(Ctx, *NestedDir))
+      if (isOpenMPParallelDirective(DKind))
         return true;
       if (DKind == OMPD_teams) {
         Body = NestedDir->getInnermostCapturedStmt()->IgnoreContainers(
@@ -758,15 +737,13 @@ static bool hasNestedSPMDDirective(ASTContext &Ctx,
         if (const auto *NND =
                 dyn_cast_or_null<OMPExecutableDirective>(ChildStmt)) {
           DKind = NND->getDirectiveKind();
-          if (isOpenMPParallelDirective(DKind) &&
-              !hasParallelIfNumThreadsClause(Ctx, *NND))
+          if (isOpenMPParallelDirective(DKind))
             return true;
         }
       }
       return false;
     case OMPD_target_teams:
-      return isOpenMPParallelDirective(DKind) &&
-             !hasParallelIfNumThreadsClause(Ctx, *NestedDir);
+      return isOpenMPParallelDirective(DKind);
     case OMPD_target_simd:
     case OMPD_target_parallel:
     case OMPD_target_parallel_for:
@@ -840,10 +817,10 @@ static bool supportsSPMDExecutionMode(ASTContext &Ctx,
   case OMPD_target_parallel_for_simd:
   case OMPD_target_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for_simd:
-    return !hasParallelIfNumThreadsClause(Ctx, D);
   case OMPD_target_simd:
-  case OMPD_target_teams_distribute:
   case OMPD_target_teams_distribute_simd:
+    return true;
+  case OMPD_target_teams_distribute:
     return false;
   case OMPD_parallel:
   case OMPD_for:
@@ -929,6 +906,8 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
           isOpenMPWorksharingDirective(DKind) && isOpenMPLoopDirective(DKind) &&
           hasStaticScheduling(*NestedDir))
         return true;
+      if (DKind == OMPD_teams_distribute_simd || DKind == OMPD_simd)
+        return true;
       if (DKind == OMPD_parallel) {
         Body = NestedDir->getInnermostCapturedStmt()->IgnoreContainers(
             /*IgnoreCaptured=*/true);
@@ -977,6 +956,8 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
           isOpenMPWorksharingDirective(DKind) && isOpenMPLoopDirective(DKind) &&
           hasStaticScheduling(*NestedDir))
         return true;
+      if (DKind == OMPD_distribute_simd || DKind == OMPD_simd)
+        return true;
       if (DKind == OMPD_parallel) {
         Body = NestedDir->getInnermostCapturedStmt()->IgnoreContainers(
             /*IgnoreCaptured=*/true);
@@ -993,6 +974,8 @@ static bool hasNestedLightweightDirective(ASTContext &Ctx,
       }
       return false;
     case OMPD_target_parallel:
+      if (DKind == OMPD_simd)
+        return true;
       return isOpenMPWorksharingDirective(DKind) &&
              isOpenMPLoopDirective(DKind) && hasStaticScheduling(*NestedDir);
     case OMPD_target_teams_distribute:
@@ -1074,8 +1057,9 @@ static bool supportsLightweightRuntime(ASTContext &Ctx,
     // (Last|First)-privates must be shared in parallel region.
     return hasStaticScheduling(D);
   case OMPD_target_simd:
-  case OMPD_target_teams_distribute:
   case OMPD_target_teams_distribute_simd:
+    return true;
+  case OMPD_target_teams_distribute:
     return false;
   case OMPD_parallel:
   case OMPD_for:

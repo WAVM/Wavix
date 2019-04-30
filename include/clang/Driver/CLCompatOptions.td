@@ -166,7 +166,7 @@ def _SLASH_source_charset : CLCompileJoined<"source-charset:">,
 def _SLASH_execution_charset : CLCompileJoined<"execution-charset:">,
   HelpText<"Runtime encoding, supports only UTF-8">, Alias<fexec_charset_EQ>;
 def _SLASH_std : CLCompileJoined<"std:">,
-  HelpText<"Language standard to compile for">;
+  HelpText<"Language standard to compile for (c++14,c++17,c++latest)">;
 def _SLASH_U : CLJoinedOrSeparate<"U">, HelpText<"Undefine macro">,
   MetaVarName<"<macro>">, Alias<U>;
 def _SLASH_validate_charset : CLFlag<"validate-charset">,
@@ -428,6 +428,7 @@ def _SLASH_kernel : CLFlag<"kernel">;
 def _SLASH_LN : CLFlag<"LN">;
 def _SLASH_MP : CLJoined<"MP">;
 def _SLASH_openmp : CLFlag<"openmp">;
+def _SLASH_openmp_experimental : CLFlag<"openmp:experimental">;
 def _SLASH_Qfast_transcendentals : CLFlag<"Qfast_transcendentals">;
 def _SLASH_QIfist : CLFlag<"QIfist">;
 def _SLASH_Qimprecise_fwaits : CLFlag<"Qimprecise_fwaits">;

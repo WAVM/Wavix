@@ -38,6 +38,7 @@
 #include "ToolChains/NetBSD.h"
 #include "ToolChains/OpenBSD.h"
 #include "ToolChains/PS4CPU.h"
+#include "ToolChains/PPCLinux.h"
 #include "ToolChains/RISCVToolchain.h"
 #include "ToolChains/Solaris.h"
 #include "ToolChains/TCE.h"
@@ -1694,7 +1695,7 @@ bool Driver::HandleImmediateArgs(const Compilation &C) {
     bool separator = false;
     for (const std::string &Path : TC.getProgramPaths()) {
       if (separator)
-        llvm::outs() << ':';
+        llvm::outs() << llvm::sys::EnvPathSeparator;
       llvm::outs() << Path;
       separator = true;
     }
@@ -1705,7 +1706,7 @@ bool Driver::HandleImmediateArgs(const Compilation &C) {
 
     for (const std::string &Path : TC.getFilePaths()) {
       // Always print a separator. ResourceDir was the first item shown.
-      llvm::outs() << ':';
+      llvm::outs() << llvm::sys::EnvPathSeparator;
       // Interpretation of leading '=' is needed only for NetBSD.
       if (Path[0] == '=')
         llvm::outs() << sysroot << Path.substr(1);
@@ -4575,6 +4576,11 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       else if ((Target.getVendor() == llvm::Triple::MipsTechnologies) &&
                !Target.hasEnvironment())
         TC = llvm::make_unique<toolchains::MipsLLVMToolChain>(*this, Target,
+                                                              Args);
+      else if (Target.getArch() == llvm::Triple::ppc ||
+               Target.getArch() == llvm::Triple::ppc64 ||
+               Target.getArch() == llvm::Triple::ppc64le)
+        TC = llvm::make_unique<toolchains::PPCLinuxToolChain>(*this, Target,
                                                               Args);
       else
         TC = llvm::make_unique<toolchains::Linux>(*this, Target, Args);
