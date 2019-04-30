@@ -2300,6 +2300,52 @@ bool SelectionDAG::isSplatValue(SDValue V, bool AllowUndefs) {
          (AllowUndefs || !UndefElts);
 }
 
+SDValue SelectionDAG::getSplatSourceVector(SDValue V, int &SplatIdx) {
+  V = peekThroughExtractSubvectors(V);
+
+  EVT VT = V.getValueType();
+  unsigned Opcode = V.getOpcode();
+  switch (Opcode) {
+  default: {
+    APInt UndefElts;
+    APInt DemandedElts = APInt::getAllOnesValue(VT.getVectorNumElements());
+    if (isSplatValue(V, DemandedElts, UndefElts)) {
+      // Handle case where all demanded elements are UNDEF.
+      if (DemandedElts.isSubsetOf(UndefElts)) {
+        SplatIdx = 0;
+        return getUNDEF(VT);
+      }
+      SplatIdx = (UndefElts & DemandedElts).countTrailingOnes();
+      return V;
+    }
+    break;
+  }
+  case ISD::VECTOR_SHUFFLE: {
+    // Check if this is a shuffle node doing a splat.
+    // TODO - remove this and rely purely on SelectionDAG::isSplatValue,
+    // getTargetVShiftNode currently struggles without the splat source.
+    auto *SVN = cast<ShuffleVectorSDNode>(V);
+    if (!SVN->isSplat())
+      break;
+    int Idx = SVN->getSplatIndex();
+    int NumElts = V.getValueType().getVectorNumElements();
+    SplatIdx = Idx % NumElts;
+    return V.getOperand(Idx / NumElts);
+  }
+  }
+
+  return SDValue();
+}
+
+SDValue SelectionDAG::getSplatValue(SDValue V) {
+  int SplatIdx;
+  if (SDValue SrcVector = getSplatSourceVector(V, SplatIdx))
+    return getNode(ISD::EXTRACT_VECTOR_ELT, SDLoc(V),
+                   SrcVector.getValueType().getScalarType(), SrcVector,
+                   getIntPtrConstant(SplatIdx, SDLoc(V)));
+  return SDValue();
+}
+
 /// If a SHL/SRA/SRL node has a constant or splat constant shift amount that
 /// is less than the element bit-width of the shift node, return it.
 static const APInt *getValidShiftAmountConstant(SDValue V) {
@@ -5517,110 +5563,6 @@ static bool isMemSrcFromConstant(SDValue Src, ConstantDataArraySlice &Slice) {
                                   SrcDelta + G->getOffset());
 }
 
-/// Determines the optimal series of memory ops to replace the memset / memcpy.
-/// Return true if the number of memory ops is below the threshold (Limit).
-/// It returns the types of the sequence of memory ops to perform
-/// memset / memcpy by reference.
-static bool FindOptimalMemOpLowering(std::vector<EVT> &MemOps,
-                                     unsigned Limit, uint64_t Size,
-                                     unsigned DstAlign, unsigned SrcAlign,
-                                     bool IsMemset,
-                                     bool ZeroMemset,
-                                     bool MemcpyStrSrc,
-                                     bool AllowOverlap,
-                                     unsigned DstAS, unsigned SrcAS,
-                                     SelectionDAG &DAG,
-                                     const TargetLowering &TLI) {
-  assert((SrcAlign == 0 || SrcAlign >= DstAlign) &&
-         "Expecting memcpy / memset source to meet alignment requirement!");
-  // If 'SrcAlign' is zero, that means the memory operation does not need to
-  // load the value, i.e. memset or memcpy from constant string. Otherwise,
-  // it's the inferred alignment of the source. 'DstAlign', on the other hand,
-  // is the specified alignment of the memory operation. If it is zero, that
-  // means it's possible to change the alignment of the destination.
-  // 'MemcpyStrSrc' indicates whether the memcpy source is constant so it does
-  // not need to be loaded.
-  EVT VT = TLI.getOptimalMemOpType(Size, DstAlign, SrcAlign,
-                                   IsMemset, ZeroMemset, MemcpyStrSrc,
-                                   DAG.getMachineFunction());
-
-  if (VT == MVT::Other) {
-    // Use the largest integer type whose alignment constraints are satisfied.
-    // We only need to check DstAlign here as SrcAlign is always greater or
-    // equal to DstAlign (or zero).
-    VT = MVT::i64;
-    while (DstAlign && DstAlign < VT.getSizeInBits() / 8 &&
-           !TLI.allowsMisalignedMemoryAccesses(VT, DstAS, DstAlign))
-      VT = (MVT::SimpleValueType)(VT.getSimpleVT().SimpleTy - 1);
-    assert(VT.isInteger());
-
-    // Find the largest legal integer type.
-    MVT LVT = MVT::i64;
-    while (!TLI.isTypeLegal(LVT))
-      LVT = (MVT::SimpleValueType)(LVT.SimpleTy - 1);
-    assert(LVT.isInteger());
-
-    // If the type we've chosen is larger than the largest legal integer type
-    // then use that instead.
-    if (VT.bitsGT(LVT))
-      VT = LVT;
-  }
-
-  unsigned NumMemOps = 0;
-  while (Size != 0) {
-    unsigned VTSize = VT.getSizeInBits() / 8;
-    while (VTSize > Size) {
-      // For now, only use non-vector load / store's for the left-over pieces.
-      EVT NewVT = VT;
-      unsigned NewVTSize;
-
-      bool Found = false;
-      if (VT.isVector() || VT.isFloatingPoint()) {
-        NewVT = (VT.getSizeInBits() > 64) ? MVT::i64 : MVT::i32;
-        if (TLI.isOperationLegalOrCustom(ISD::STORE, NewVT) &&
-            TLI.isSafeMemOpType(NewVT.getSimpleVT()))
-          Found = true;
-        else if (NewVT == MVT::i64 &&
-                 TLI.isOperationLegalOrCustom(ISD::STORE, MVT::f64) &&
-                 TLI.isSafeMemOpType(MVT::f64)) {
-          // i64 is usually not legal on 32-bit targets, but f64 may be.
-          NewVT = MVT::f64;
-          Found = true;
-        }
-      }
-
-      if (!Found) {
-        do {
-          NewVT = (MVT::SimpleValueType)(NewVT.getSimpleVT().SimpleTy - 1);
-          if (NewVT == MVT::i8)
-            break;
-        } while (!TLI.isSafeMemOpType(NewVT.getSimpleVT()));
-      }
-      NewVTSize = NewVT.getSizeInBits() / 8;
-
-      // If the new VT cannot cover all of the remaining bits, then consider
-      // issuing a (or a pair of) unaligned and overlapping load / store.
-      bool Fast;
-      if (NumMemOps && AllowOverlap && NewVTSize < Size &&
-          TLI.allowsMisalignedMemoryAccesses(VT, DstAS, DstAlign, &Fast) &&
-          Fast)
-        VTSize = Size;
-      else {
-        VT = NewVT;
-        VTSize = NewVTSize;
-      }
-    }
-
-    if (++NumMemOps > Limit)
-      return false;
-
-    MemOps.push_back(VT);
-    Size -= VTSize;
-  }
-
-  return true;
-}
-
 static bool shouldLowerMemFuncForSize(const MachineFunction &MF) {
   // On Darwin, -Os means optimize for size without hurting performance, so
   // only really optimize for size when -Oz (MinSize) is used.
@@ -5687,13 +5629,13 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
   bool isZeroConstant = CopyFromConstant && Slice.Array == nullptr;
   unsigned Limit = AlwaysInline ? ~0U : TLI.getMaxStoresPerMemcpy(OptSize);
 
-  if (!FindOptimalMemOpLowering(MemOps, Limit, Size,
-                                (DstAlignCanChange ? 0 : Align),
-                                (isZeroConstant ? 0 : SrcAlign),
-                                false, false, CopyFromConstant, true,
-                                DstPtrInfo.getAddrSpace(),
-                                SrcPtrInfo.getAddrSpace(),
-                                DAG, TLI))
+  if (!TLI.findOptimalMemOpLowering(MemOps, Limit, Size,
+                                    (DstAlignCanChange ? 0 : Align),
+                                    (isZeroConstant ? 0 : SrcAlign),
+                                    false, false, CopyFromConstant, true,
+                                    DstPtrInfo.getAddrSpace(),
+                                    SrcPtrInfo.getAddrSpace(),
+                                    MF.getFunction().getAttributes()))
     return SDValue();
 
   if (DstAlignCanChange) {
@@ -5868,12 +5810,12 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
     SrcAlign = Align;
   unsigned Limit = AlwaysInline ? ~0U : TLI.getMaxStoresPerMemmove(OptSize);
 
-  if (!FindOptimalMemOpLowering(MemOps, Limit, Size,
-                                (DstAlignCanChange ? 0 : Align), SrcAlign,
-                                false, false, false, false,
-                                DstPtrInfo.getAddrSpace(),
-                                SrcPtrInfo.getAddrSpace(),
-                                DAG, TLI))
+  if (!TLI.findOptimalMemOpLowering(MemOps, Limit, Size,
+                                    (DstAlignCanChange ? 0 : Align), SrcAlign,
+                                    false, false, false, false,
+                                    DstPtrInfo.getAddrSpace(),
+                                    SrcPtrInfo.getAddrSpace(),
+                                    MF.getFunction().getAttributes()))
     return SDValue();
 
   if (DstAlignCanChange) {
@@ -5968,11 +5910,11 @@ static SDValue getMemsetStores(SelectionDAG &DAG, const SDLoc &dl,
     DstAlignCanChange = true;
   bool IsZeroVal =
     isa<ConstantSDNode>(Src) && cast<ConstantSDNode>(Src)->isNullValue();
-  if (!FindOptimalMemOpLowering(MemOps, TLI.getMaxStoresPerMemset(OptSize),
-                                Size, (DstAlignCanChange ? 0 : Align), 0,
-                                true, IsZeroVal, false, true,
-                                DstPtrInfo.getAddrSpace(), ~0u,
-                                DAG, TLI))
+  if (!TLI.findOptimalMemOpLowering(MemOps, TLI.getMaxStoresPerMemset(OptSize),
+                                    Size, (DstAlignCanChange ? 0 : Align), 0,
+                                    true, IsZeroVal, false, true,
+                                    DstPtrInfo.getAddrSpace(), ~0u,
+                                    MF.getFunction().getAttributes()))
     return SDValue();
 
   if (DstAlignCanChange) {
@@ -8585,6 +8527,12 @@ SDValue llvm::peekThroughOneUseBitcasts(SDValue V) {
   return V;
 }
 
+SDValue llvm::peekThroughExtractSubvectors(SDValue V) {
+  while (V.getOpcode() == ISD::EXTRACT_SUBVECTOR)
+    V = V.getOperand(0);
+  return V;
+}
+
 bool llvm::isBitwiseNot(SDValue V) {
   if (V.getOpcode() != ISD::XOR)
     return false;
@@ -9350,7 +9298,10 @@ bool ShuffleVectorSDNode::isSplatMask(const int *Mask, EVT VT) {
   for (i = 0, e = VT.getVectorNumElements(); i != e && Mask[i] < 0; ++i)
     /* search */;
 
-  assert(i != e && "VECTOR_SHUFFLE node with all undef indices!");
+  // If all elements are undefined, this shuffle can be considered a splat
+  // (although it should eventually get simplified away completely).
+  if (i == e)
+    return true;
 
   // Make sure all remaining elements are either undef or the same as the first
   // non-undef value.

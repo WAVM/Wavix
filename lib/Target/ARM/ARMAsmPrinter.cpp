@@ -183,10 +183,21 @@ bool ARMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   return false;
 }
 
+void ARMAsmPrinter::PrintSymbolOperand(const MachineOperand &MO,
+                                       raw_ostream &O) {
+  assert(MO.isGlobal() && "caller should check MO.isGlobal");
+  unsigned TF = MO.getTargetFlags();
+  if (TF & ARMII::MO_LO16)
+    O << ":lower16:";
+  else if (TF & ARMII::MO_HI16)
+    O << ":upper16:";
+  GetARMGVSymbol(MO.getGlobal(), TF)->print(O, MAI);
+  printOffset(MO.getOffset(), O);
+}
+
 void ARMAsmPrinter::printOperand(const MachineInstr *MI, int OpNum,
                                  raw_ostream &O) {
   const MachineOperand &MO = MI->getOperand(OpNum);
-  unsigned TF = MO.getTargetFlags();
 
   switch (MO.getType()) {
   default: llvm_unreachable("<unknown operand type>");
@@ -203,27 +214,20 @@ void ARMAsmPrinter::printOperand(const MachineInstr *MI, int OpNum,
     break;
   }
   case MachineOperand::MO_Immediate: {
-    int64_t Imm = MO.getImm();
     O << '#';
+    unsigned TF = MO.getTargetFlags();
     if (TF == ARMII::MO_LO16)
       O << ":lower16:";
     else if (TF == ARMII::MO_HI16)
       O << ":upper16:";
-    O << Imm;
+    O << MO.getImm();
     break;
   }
   case MachineOperand::MO_MachineBasicBlock:
     MO.getMBB()->getSymbol()->print(O, MAI);
     return;
   case MachineOperand::MO_GlobalAddress: {
-    const GlobalValue *GV = MO.getGlobal();
-    if (TF & ARMII::MO_LO16)
-      O << ":lower16:";
-    else if (TF & ARMII::MO_HI16)
-      O << ":upper16:";
-    GetARMGVSymbol(GV, TF)->print(O, MAI);
-
-    printOffset(MO.getOffset(), O);
+    PrintSymbolOperand(MO, O);
     break;
   }
   case MachineOperand::MO_ConstantPoolIndex:
@@ -264,19 +268,6 @@ bool ARMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNum,
     default:
       // See if this is a generic print operand
       return AsmPrinter::PrintAsmOperand(MI, OpNum, ExtraCode, O);
-    case 'a': // Print as a memory address.
-      if (MI->getOperand(OpNum).isReg()) {
-        O << "["
-          << ARMInstPrinter::getRegisterName(MI->getOperand(OpNum).getReg())
-          << "]";
-        return false;
-      }
-      LLVM_FALLTHROUGH;
-    case 'c': // Don't print "#" before an immediate operand.
-      if (!MI->getOperand(OpNum).isImm())
-        return true;
-      O << MI->getOperand(OpNum).getImm();
-      return false;
     case 'P': // Print a VFP double precision register.
     case 'q': // Print a NEON quad precision register.
       printOperand(MI, OpNum, O);

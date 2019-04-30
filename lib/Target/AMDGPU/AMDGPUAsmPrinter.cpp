@@ -622,6 +622,7 @@ AMDGPUAsmPrinter::SIFunctionResourceInfo AMDGPUAsmPrinter::analyzeResourceUsage(
         case AMDGPU::SRC_SHARED_LIMIT:
         case AMDGPU::SRC_PRIVATE_BASE:
         case AMDGPU::SRC_PRIVATE_LIMIT:
+        case AMDGPU::SGPR_NULL:
           continue;
 
         case AMDGPU::SRC_POPS_EXITING_WAVE_ID:
@@ -705,6 +706,9 @@ AMDGPUAsmPrinter::SIFunctionResourceInfo AMDGPUAsmPrinter::analyzeResourceUsage(
         } else if (AMDGPU::VReg_512RegClass.contains(Reg)) {
           IsSGPR = false;
           Width = 16;
+        } else if (AMDGPU::SReg_96RegClass.contains(Reg)) {
+          IsSGPR = true;
+          Width = 3;
         } else {
           llvm_unreachable("Unknown register class");
         }

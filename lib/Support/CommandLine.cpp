@@ -54,6 +54,7 @@ template class basic_parser<bool>;
 template class basic_parser<boolOrDefault>;
 template class basic_parser<int>;
 template class basic_parser<unsigned>;
+template class basic_parser<unsigned long>;
 template class basic_parser<unsigned long long>;
 template class basic_parser<double>;
 template class basic_parser<float>;
@@ -78,6 +79,7 @@ void parser<bool>::anchor() {}
 void parser<boolOrDefault>::anchor() {}
 void parser<int>::anchor() {}
 void parser<unsigned>::anchor() {}
+void parser<unsigned long>::anchor() {}
 void parser<unsigned long long>::anchor() {}
 void parser<double>::anchor() {}
 void parser<float>::anchor() {}
@@ -410,6 +412,7 @@ void OptionCategory::registerCategory() {
 // that this ManagedStatic uses constant initailization and not dynamic
 // initialization because it is referenced from cl::opt constructors, which run
 // dynamically in an arbitrary order.
+LLVM_REQUIRE_CONSTANT_INITIALIZATION
 ManagedStatic<SubCommand> llvm::cl::TopLevelSubCommand;
 
 // A special subcommand that can be used to put an option into all subcommands.
@@ -1040,7 +1043,7 @@ static bool ExpandResponseFile(StringRef FName, StringSaver &Saver,
 bool cl::ExpandResponseFiles(StringSaver &Saver, TokenizerCallback Tokenizer,
                              SmallVectorImpl<const char *> &Argv,
                              bool MarkEOLs, bool RelativeNames) {
-  unsigned RspFiles = 0;
+  unsigned ExpandedRspFiles = 0;
   bool AllExpanded = true;
 
   // Don't cache Argv.size() because it can change.
@@ -1058,14 +1061,16 @@ bool cl::ExpandResponseFiles(StringSaver &Saver, TokenizerCallback Tokenizer,
 
     // If we have too many response files, leave some unexpanded.  This avoids
     // crashing on self-referential response files.
-    if (RspFiles++ > 20)
+    if (ExpandedRspFiles > 20)
       return false;
 
     // Replace this response file argument with the tokenization of its
     // contents.  Nested response files are expanded in subsequent iterations.
     SmallVector<const char *, 0> ExpandedArgv;
-    if (!ExpandResponseFile(Arg + 1, Saver, Tokenizer, ExpandedArgv,
-                            MarkEOLs, RelativeNames)) {
+    if (ExpandResponseFile(Arg + 1, Saver, Tokenizer, ExpandedArgv, MarkEOLs,
+                           RelativeNames)) {
+      ++ExpandedRspFiles;
+    } else {
       // We couldn't read this file, so we leave it in the argument stream and
       // move on.
       AllExpanded = false;
@@ -1301,8 +1306,8 @@ bool CommandLineParser::ParseCommandLineOptions(int argc,
       // option is another positional argument.  If so, treat it as an argument,
       // otherwise feed it to the eating positional.
       ArgName = StringRef(argv[i] + 1);
-      // Eat leading dashes.
-      while (!ArgName.empty() && ArgName[0] == '-')
+      // Eat second dash.
+      if (!ArgName.empty() && ArgName[0] == '-')
         ArgName = ArgName.substr(1);
 
       Handler = LookupOption(*ChosenSubCommand, ArgName, Value);
@@ -1313,8 +1318,8 @@ bool CommandLineParser::ParseCommandLineOptions(int argc,
 
     } else { // We start with a '-', must be an argument.
       ArgName = StringRef(argv[i] + 1);
-      // Eat leading dashes.
-      while (!ArgName.empty() && ArgName[0] == '-')
+      // Eat second dash.
+      if (!ArgName.empty() && ArgName[0] == '-')
         ArgName = ArgName.substr(1);
 
       Handler = LookupOption(*ChosenSubCommand, ArgName, Value);
@@ -1661,6 +1666,16 @@ bool parser<unsigned>::parse(Option &O, StringRef ArgName, StringRef Arg,
   return false;
 }
 
+// parser<unsigned long> implementation
+//
+bool parser<unsigned long>::parse(Option &O, StringRef ArgName, StringRef Arg,
+                                  unsigned long &Value) {
+
+  if (Arg.getAsInteger(0, Value))
+    return O.error("'" + Arg + "' value invalid for ulong argument!");
+  return false;
+}
+
 // parser<unsigned long long> implementation
 //
 bool parser<unsigned long long>::parse(Option &O, StringRef ArgName,
@@ -1668,7 +1683,7 @@ bool parser<unsigned long long>::parse(Option &O, StringRef ArgName,
                                        unsigned long long &Value) {
 
   if (Arg.getAsInteger(0, Value))
-    return O.error("'" + Arg + "' value invalid for uint argument!");
+    return O.error("'" + Arg + "' value invalid for ullong argument!");
   return false;
 }
 
@@ -1849,6 +1864,7 @@ PRINT_OPT_DIFF(bool)
 PRINT_OPT_DIFF(boolOrDefault)
 PRINT_OPT_DIFF(int)
 PRINT_OPT_DIFF(unsigned)
+PRINT_OPT_DIFF(unsigned long)
 PRINT_OPT_DIFF(unsigned long long)
 PRINT_OPT_DIFF(double)
 PRINT_OPT_DIFF(float)

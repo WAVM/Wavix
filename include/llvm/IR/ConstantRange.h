@@ -79,6 +79,14 @@ public:
     return ConstantRange(BitWidth, true);
   }
 
+  /// Create non-empty constant range with the given bounds. If Lower and
+  /// Upper are the same, a full range is returned.
+  static ConstantRange getNonEmpty(APInt Lower, APInt Upper) {
+    if (Lower == Upper)
+      return getFull(Lower.getBitWidth());
+    return ConstantRange(std::move(Lower), std::move(Upper));
+  }
+
   /// Initialize a range based on a known bits constraint. The IsSigned flag
   /// indicates whether the constant range should not wrap in the signed or
   /// unsigned domain.
@@ -116,8 +124,10 @@ public:
   static ConstantRange makeExactICmpRegion(CmpInst::Predicate Pred,
                                            const APInt &Other);
 
-  /// Return the exact range containing all X such that "X BinOpC Y" is
-  /// guaranteed not to wrap (overflow) for all Y in Other.
+  /// Produce the largest range containing all X such that "X BinOp Y" is
+  /// guaranteed not to wrap (overflow) for *all* Y in Other. However, there may
+  /// be *some* Y in Other for which additional X not contained in the result
+  /// also do not overflow.
   ///
   /// NoWrapKind must be one of OBO::NoUnsignedWrap or OBO::NoSignedWrap.
   ///
@@ -133,6 +143,12 @@ public:
   static ConstantRange makeGuaranteedNoWrapRegion(Instruction::BinaryOps BinOp,
                                                   const ConstantRange &Other,
                                                   unsigned NoWrapKind);
+
+  /// Produce the range that contains X if and only if "X BinOp Other" does
+  /// not wrap.
+  static ConstantRange makeExactNoWrapRegion(Instruction::BinaryOps BinOp,
+                                             const APInt &Other,
+                                             unsigned NoWrapKind);
 
   /// Set up \p Pred and \p RHS such that
   /// ConstantRange::makeExactICmpRegion(Pred, RHS) == *this.  Return true if
@@ -349,6 +365,11 @@ public:
   ConstantRange udiv(const ConstantRange &Other) const;
 
   /// Return a new range representing the possible values resulting
+  /// from an unsigned remainder operation of a value in this range and a
+  /// value in \p Other.
+  ConstantRange urem(const ConstantRange &Other) const;
+
+  /// Return a new range representing the possible values resulting
   /// from a binary-and of a value in this range by a value in \p Other.
   ConstantRange binaryAnd(const ConstantRange &Other) const;
 
@@ -369,8 +390,24 @@ public:
   /// arithmetic right shift of a value in this range and a value in \p Other.
   ConstantRange ashr(const ConstantRange &Other) const;
 
+  /// Perform an unsigned saturating addition of two constant ranges.
+  ConstantRange uadd_sat(const ConstantRange &Other) const;
+
+  /// Perform a signed saturating addition of two constant ranges.
+  ConstantRange sadd_sat(const ConstantRange &Other) const;
+
+  /// Perform an unsigned saturating subtraction of two constant ranges.
+  ConstantRange usub_sat(const ConstantRange &Other) const;
+
+  /// Perform a signed saturating subtraction of two constant ranges.
+  ConstantRange ssub_sat(const ConstantRange &Other) const;
+
   /// Return a new range that is the logical not of the current set.
   ConstantRange inverse() const;
+
+  /// Calculate absolute value range. If the original range contains signed
+  /// min, then the resulting range will also contain signed min.
+  ConstantRange abs() const;
 
   /// Represents whether an operation on the given constant range is known to
   /// always or never overflow.

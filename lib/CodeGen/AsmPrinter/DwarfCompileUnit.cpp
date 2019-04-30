@@ -1036,7 +1036,9 @@ bool DwarfCompileUnit::hasDwarfPubSections() const {
     return true;
   case DICompileUnit::DebugNameTableKind::Default:
     return DD->tuneForGDB() && !includeMinimalInlineScopes() &&
-           !CUNode->isDebugDirectivesOnly();
+           !CUNode->isDebugDirectivesOnly() &&
+           DD->getAccelTableKind() != AccelTableKind::Apple &&
+           DD->getDwarfVersion() < 5;
   }
   llvm_unreachable("Unhandled DICompileUnit::DebugNameTableKind enum");
 }
@@ -1197,6 +1199,10 @@ void DwarfCompileUnit::applySubprogramAttributesToDefinition(
 
 bool DwarfCompileUnit::isDwoUnit() const {
   return DD->useSplitDwarf() && Skeleton;
+}
+
+void DwarfCompileUnit::finishNonUnitTypeDIE(DIE& D, const DICompositeType *CTy) {
+  constructTypeDIE(D, CTy);
 }
 
 bool DwarfCompileUnit::includeMinimalInlineScopes() const {

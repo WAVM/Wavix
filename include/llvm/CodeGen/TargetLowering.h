@@ -527,9 +527,9 @@ public:
   /// There are two ways to clear extreme bits (either low or high):
   /// Mask:    x &  (-1 << y)  (the instcombine canonical form)
   /// Shifts:  x >> y << y
-  /// Return true if the variant with 2 shifts is preferred.
+  /// Return true if the variant with 2 variable shifts is preferred.
   /// Return false if there is no preference.
-  virtual bool preferShiftsToClearExtremeBits(SDValue X) const {
+  virtual bool shouldFoldMaskToVariableShiftPair(SDValue X) const {
     // By default, let's assume that no one prefers shifts.
     return false;
   }
@@ -538,8 +538,8 @@ public:
   /// This is usually true on most targets. But some targets, like Thumb1,
   /// have immediate shift instructions, but no immediate "and" instruction;
   /// this makes the fold unprofitable.
-  virtual bool shouldFoldShiftPairToMask(const SDNode *N,
-                                         CombineLevel Level) const {
+  virtual bool shouldFoldConstantShiftPairToMask(const SDNode *N,
+                                                 CombineLevel Level) const {
     return true;
   }
 
@@ -1406,12 +1406,11 @@ public:
   /// zero. 'MemcpyStrSrc' indicates whether the memcpy source is constant so it
   /// does not need to be loaded.  It returns EVT::Other if the type should be
   /// determined using generic target-independent logic.
-  virtual EVT getOptimalMemOpType(uint64_t /*Size*/,
-                                  unsigned /*DstAlign*/, unsigned /*SrcAlign*/,
-                                  bool /*IsMemset*/,
-                                  bool /*ZeroMemset*/,
-                                  bool /*MemcpyStrSrc*/,
-                                  MachineFunction &/*MF*/) const {
+  virtual EVT
+  getOptimalMemOpType(uint64_t /*Size*/, unsigned /*DstAlign*/,
+                      unsigned /*SrcAlign*/, bool /*IsMemset*/,
+                      bool /*ZeroMemset*/, bool /*MemcpyStrSrc*/,
+                      const AttributeList & /*FuncAttributes*/) const {
     return MVT::Other;
   }
 
@@ -2934,6 +2933,20 @@ public:
       return true;
     }
   };
+
+  /// Determines the optimal series of memory ops to replace the memset / memcpy.
+  /// Return true if the number of memory ops is below the threshold (Limit).
+  /// It returns the types of the sequence of memory ops to perform
+  /// memset / memcpy by reference.
+  bool findOptimalMemOpLowering(std::vector<EVT> &MemOps,
+                                unsigned Limit, uint64_t Size,
+                                unsigned DstAlign, unsigned SrcAlign,
+                                bool IsMemset,
+                                bool ZeroMemset,
+                                bool MemcpyStrSrc,
+                                bool AllowOverlap,
+                                unsigned DstAS, unsigned SrcAS,
+                                const AttributeList &FuncAttributes) const;
 
   /// Check to see if the specified operand of the specified instruction is a
   /// constant integer.  If so, check to see if there are any bits set in the

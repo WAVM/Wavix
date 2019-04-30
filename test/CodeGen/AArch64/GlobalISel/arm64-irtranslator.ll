@@ -2333,6 +2333,14 @@ define float @test_floor_f32(float %x) {
   ret float %y
 }
 
+declare float @llvm.nearbyint.f32(float)
+define float @test_nearbyint_f32(float %x) {
+  ; CHECK-LABEL: name:            test_nearbyint_f32
+  ; CHECK: %{{[0-9]+}}:_(s32) = G_FNEARBYINT %{{[0-9]+}}
+  %y = call float @llvm.nearbyint.f32(float %x)
+  ret float %y
+}
+
 ; CHECK-LABEL: name: test_llvm.aarch64.neon.ld3.v4i32.p0i32
 ; CHECK: %1:_(<4 x s32>), %2:_(<4 x s32>), %3:_(<4 x s32>) = G_INTRINSIC_W_SIDE_EFFECTS intrinsic(@llvm.aarch64.neon.ld3), %0(p0) :: (load 48 from %ir.ptr, align 64)
 define void @test_llvm.aarch64.neon.ld3.v4i32.p0i32(i32* %ptr) {
@@ -2361,4 +2369,12 @@ define void @test_stacksaverestore() {
   %sp = call i8* @llvm.stacksave()
   call void @llvm.stackrestore(i8* %sp)
   ret void
+}
+
+declare float @llvm.rint.f32(float)
+define float @test_rint_f32(float %x) {
+  ; CHECK-LABEL: name:            test_rint_f32
+  ; CHECK: %{{[0-9]+}}:_(s32) = G_FRINT %{{[0-9]+}}
+  %y = call float @llvm.rint.f32(float %x)
+  ret float %y
 }

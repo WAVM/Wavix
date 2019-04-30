@@ -101,8 +101,10 @@ private:
                                 MachineRegisterInfo &MRI) const;
   bool selectIntrinsicWithSideEffects(MachineInstr &I,
                                       MachineRegisterInfo &MRI) const;
+  bool selectIntrinsic(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectVectorICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
-
+  bool selectIntrinsicTrunc(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectIntrinsicRound(MachineInstr &I, MachineRegisterInfo &MRI) const;
   unsigned emitConstantPoolEntry(Constant *CPVal, MachineFunction &MF) const;
   MachineInstr *emitLoadFromConstantPool(Constant *CPVal,
                                          MachineIRBuilder &MIRBuilder) const;
@@ -1086,6 +1088,43 @@ bool AArch64InstructionSelector::select(MachineInstr &I,
     return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
   }
 
+  case TargetOpcode::G_BSWAP: {
+    // Handle vector types for G_BSWAP directly.
+    unsigned DstReg = I.getOperand(0).getReg();
+    LLT DstTy = MRI.getType(DstReg);
+
+    // We should only get vector types here; everything else is handled by the
+    // importer right now.
+    if (!DstTy.isVector() || DstTy.getSizeInBits() > 128) {
+      LLVM_DEBUG(dbgs() << "Dst type for G_BSWAP currently unsupported.\n");
+      return false;
+    }
+
+    // Only handle 4 and 2 element vectors for now.
+    // TODO: 16-bit elements.
+    unsigned NumElts = DstTy.getNumElements();
+    if (NumElts != 4 && NumElts != 2) {
+      LLVM_DEBUG(dbgs() << "Unsupported number of elements for G_BSWAP.\n");
+      return false;
+    }
+
+    // Choose the correct opcode for the supported types. Right now, that's
+    // v2s32, v4s32, and v2s64.
+    unsigned Opc = 0;
+    unsigned EltSize = DstTy.getElementType().getSizeInBits();
+    if (EltSize == 32)
+      Opc = (DstTy.getNumElements() == 2) ? AArch64::REV32v8i8
+                                          : AArch64::REV32v16i8;
+    else if (EltSize == 64)
+      Opc = AArch64::REV64v16i8;
+
+    // We should always get something by the time we get here...
+    assert(Opc != 0 && "Didn't get an opcode for G_BSWAP?");
+
+    I.setDesc(TII.get(Opc));
+    return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
+  }
+
   case TargetOpcode::G_FCONSTANT:
   case TargetOpcode::G_CONSTANT: {
     const bool isFP = Opcode == TargetOpcode::G_FCONSTANT;
@@ -1817,6 +1856,8 @@ bool AArch64InstructionSelector::select(MachineInstr &I,
   case TargetOpcode::G_VASTART:
     return STI.isTargetDarwin() ? selectVaStartDarwin(I, MF, MRI)
                                 : selectVaStartAAPCS(I, MF, MRI);
+  case TargetOpcode::G_INTRINSIC:
+    return selectIntrinsic(I, MRI);
   case TargetOpcode::G_INTRINSIC_W_SIDE_EFFECTS:
     return selectIntrinsicWithSideEffects(I, MRI);
   case TargetOpcode::G_IMPLICIT_DEF: {
@@ -1847,6 +1888,10 @@ bool AArch64InstructionSelector::select(MachineInstr &I,
       return constrainSelectedInstRegOperands(*MovMI, TII, TRI, RBI);
     }
   }
+  case TargetOpcode::G_INTRINSIC_TRUNC:
+    return selectIntrinsicTrunc(I, MRI);
+  case TargetOpcode::G_INTRINSIC_ROUND:
+    return selectIntrinsicRound(I, MRI);
   case TargetOpcode::G_BUILD_VECTOR:
     return selectBuildVector(I, MRI);
   case TargetOpcode::G_MERGE_VALUES:
@@ -1864,6 +1909,116 @@ bool AArch64InstructionSelector::select(MachineInstr &I,
   }
 
   return false;
+}
+
+bool AArch64InstructionSelector::selectIntrinsicTrunc(
+    MachineInstr &I, MachineRegisterInfo &MRI) const {
+  const LLT SrcTy = MRI.getType(I.getOperand(0).getReg());
+
+  // Select the correct opcode.
+  unsigned Opc = 0;
+  if (!SrcTy.isVector()) {
+    switch (SrcTy.getSizeInBits()) {
+    default:
+    case 16:
+      Opc = AArch64::FRINTZHr;
+      break;
+    case 32:
+      Opc = AArch64::FRINTZSr;
+      break;
+    case 64:
+      Opc = AArch64::FRINTZDr;
+      break;
+    }
+  } else {
+    unsigned NumElts = SrcTy.getNumElements();
+    switch (SrcTy.getElementType().getSizeInBits()) {
+    default:
+      break;
+    case 16:
+      if (NumElts == 4)
+        Opc = AArch64::FRINTZv4f16;
+      else if (NumElts == 8)
+        Opc = AArch64::FRINTZv8f16;
+      break;
+    case 32:
+      if (NumElts == 2)
+        Opc = AArch64::FRINTZv2f32;
+      else if (NumElts == 4)
+        Opc = AArch64::FRINTZv4f32;
+      break;
+    case 64:
+      if (NumElts == 2)
+        Opc = AArch64::FRINTZv2f64;
+      break;
+    }
+  }
+
+  if (!Opc) {
+    // Didn't get an opcode above, bail.
+    LLVM_DEBUG(dbgs() << "Unsupported type for G_INTRINSIC_TRUNC!\n");
+    return false;
+  }
+
+  // Legalization would have set us up perfectly for this; we just need to
+  // set the opcode and move on.
+  I.setDesc(TII.get(Opc));
+  return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
+}
+
+bool AArch64InstructionSelector::selectIntrinsicRound(
+    MachineInstr &I, MachineRegisterInfo &MRI) const {
+  const LLT SrcTy = MRI.getType(I.getOperand(0).getReg());
+
+  // Select the correct opcode.
+  unsigned Opc = 0;
+  if (!SrcTy.isVector()) {
+    switch (SrcTy.getSizeInBits()) {
+    default:
+    case 16:
+      Opc = AArch64::FRINTAHr;
+      break;
+    case 32:
+      Opc = AArch64::FRINTASr;
+      break;
+    case 64:
+      Opc = AArch64::FRINTADr;
+      break;
+    }
+  } else {
+    unsigned NumElts = SrcTy.getNumElements();
+    switch (SrcTy.getElementType().getSizeInBits()) {
+    default:
+      break;
+    case 16:
+      if (NumElts == 4)
+        Opc = AArch64::FRINTAv4f16;
+      else if (NumElts == 8)
+        Opc = AArch64::FRINTAv8f16;
+      break;
+    case 32:
+      if (NumElts == 2)
+        Opc = AArch64::FRINTAv2f32;
+      else if (NumElts == 4)
+        Opc = AArch64::FRINTAv4f32;
+      break;
+    case 64:
+      if (NumElts == 2)
+        Opc = AArch64::FRINTAv2f64;
+      break;
+    }
+  }
+
+  if (!Opc) {
+    // Didn't get an opcode above, bail.
+    LLVM_DEBUG(dbgs() << "Unsupported type for G_INTRINSIC_ROUND!\n");
+    return false;
+  }
+
+  // Legalization would have set us up perfectly for this; we just need to
+  // set the opcode and move on.
+  I.setDesc(TII.get(Opc));
+  return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
 }
 
 bool AArch64InstructionSelector::selectVectorICmp(
@@ -2136,40 +2291,6 @@ static bool getLaneCopyOpcode(unsigned &CopyOpc, unsigned &ExtractSubReg,
   return true;
 }
 
-/// Given a register \p Reg, find the value of a constant defining \p Reg.
-/// Return true if one could be found, and store it in \p Val. Return false
-/// otherwise.
-static bool getConstantValueForReg(unsigned Reg, MachineRegisterInfo &MRI,
-                                   unsigned &Val) {
-  // Look at the def of the register.
-  MachineInstr *Def = MRI.getVRegDef(Reg);
-  if (!Def)
-    return false;
-
-  // Find the first definition which isn't a copy.
-  if (Def->isCopy()) {
-    Reg = Def->getOperand(1).getReg();
-    auto It = find_if_not(MRI.reg_nodbg_instructions(Reg),
-                          [](const MachineInstr &MI) { return MI.isCopy(); });
-    if (It == MRI.reg_instr_nodbg_end()) {
-      LLVM_DEBUG(dbgs() << "Couldn't find non-copy def for register\n");
-      return false;
-    }
-    Def = &*It;
-  }
-
-  // TODO: Handle opcodes other than G_CONSTANT.
-  if (Def->getOpcode() != TargetOpcode::G_CONSTANT) {
-    LLVM_DEBUG(dbgs() << "VRegs defined by anything other than G_CONSTANT "
-                         "currently unsupported.\n");
-    return false;
-  }
-
-  // Return the constant value associated with the operand.
-  Val = Def->getOperand(1).getCImm()->getLimitedValue();
-  return true;
-}
-
 MachineInstr *AArch64InstructionSelector::emitExtractVectorElt(
     Optional<unsigned> DstReg, const RegisterBank &DstRB, LLT ScalarTy,
     unsigned VecReg, unsigned LaneIdx, MachineIRBuilder &MIRBuilder) const {
@@ -2253,9 +2374,10 @@ bool AArch64InstructionSelector::selectExtractElt(
   }
 
   // Find the index to extract from.
-  unsigned LaneIdx = 0;
-  if (!getConstantValueForReg(LaneIdxOp.getReg(), MRI, LaneIdx))
+  auto VRegAndVal = getConstantVRegValWithLookThrough(LaneIdxOp.getReg(), MRI);
+  if (!VRegAndVal)
     return false;
+  unsigned LaneIdx = VRegAndVal->Value;
 
   MachineIRBuilder MIRBuilder(I);
 
@@ -2457,7 +2579,7 @@ void AArch64InstructionSelector::collectShuffleMaskIndices(
 unsigned
 AArch64InstructionSelector::emitConstantPoolEntry(Constant *CPVal,
                                                   MachineFunction &MF) const {
-  Type *CPTy = CPVal->getType()->getPointerTo();
+  Type *CPTy = CPVal->getType();
   unsigned Align = MF.getDataLayout().getPrefTypeAlignment(CPTy);
   if (Align == 0)
     Align = MF.getDataLayout().getTypeAllocSize(CPTy);
@@ -2831,9 +2953,10 @@ bool AArch64InstructionSelector::selectInsertElt(
   // Find the definition of the index. Bail out if it's not defined by a
   // G_CONSTANT.
   unsigned IdxReg = I.getOperand(3).getReg();
-  unsigned LaneIdx = 0;
-  if (!getConstantValueForReg(IdxReg, MRI, LaneIdx))
+  auto VRegAndVal = getConstantVRegValWithLookThrough(IdxReg, MRI);
+  if (!VRegAndVal)
     return false;
+  unsigned LaneIdx = VRegAndVal->Value;
 
   // Perform the lane insert.
   unsigned SrcReg = I.getOperand(1).getReg();
@@ -2963,6 +3086,17 @@ bool AArch64InstructionSelector::selectBuildVector(
   return true;
 }
 
+/// Helper function to find an intrinsic ID on an a MachineInstr. Returns the
+/// ID if it exists, and 0 otherwise.
+static unsigned findIntrinsicID(MachineInstr &I) {
+  auto IntrinOp = find_if(I.operands(), [&](const MachineOperand &Op) {
+    return Op.isIntrinsicID();
+  });
+  if (IntrinOp == I.operands_end())
+    return 0;
+  return IntrinOp->getIntrinsicID();
+}
+
 /// Helper function to emit the correct opcode for a llvm.aarch64.stlxr
 /// intrinsic.
 static unsigned getStlxrOpcode(unsigned NumBytesToStore) {
@@ -2981,12 +3115,9 @@ static unsigned getStlxrOpcode(unsigned NumBytesToStore) {
 bool AArch64InstructionSelector::selectIntrinsicWithSideEffects(
     MachineInstr &I, MachineRegisterInfo &MRI) const {
   // Find the intrinsic ID.
-  auto IntrinOp = find_if(I.operands(), [&](const MachineOperand &Op) {
-    return Op.isIntrinsicID();
-  });
-  if (IntrinOp == I.operands_end())
+  unsigned IntrinID = findIntrinsicID(I);
+  if (!IntrinID)
     return false;
-  unsigned IntrinID = IntrinOp->getIntrinsicID();
   MachineIRBuilder MIRBuilder(I);
 
   // Select the instruction.
@@ -3026,6 +3157,58 @@ bool AArch64InstructionSelector::selectIntrinsicWithSideEffects(
 
   I.eraseFromParent();
   return true;
+}
+
+bool AArch64InstructionSelector::selectIntrinsic(
+    MachineInstr &I, MachineRegisterInfo &MRI) const {
+  unsigned IntrinID = findIntrinsicID(I);
+  if (!IntrinID)
+    return false;
+  MachineIRBuilder MIRBuilder(I);
+
+  switch (IntrinID) {
+  default:
+    break;
+  case Intrinsic::aarch64_crypto_sha1h:
+    unsigned DstReg = I.getOperand(0).getReg();
+    unsigned SrcReg = I.getOperand(2).getReg();
+
+    // FIXME: Should this be an assert?
+    if (MRI.getType(DstReg).getSizeInBits() != 32 ||
+        MRI.getType(SrcReg).getSizeInBits() != 32)
+      return false;
+
+    // The operation has to happen on FPRs. Set up some new FPR registers for
+    // the source and destination if they are on GPRs.
+    if (RBI.getRegBank(SrcReg, MRI, TRI)->getID() != AArch64::FPRRegBankID) {
+      SrcReg = MRI.createVirtualRegister(&AArch64::FPR32RegClass);
+      MIRBuilder.buildCopy({SrcReg}, {I.getOperand(2)});
+
+      // Make sure the copy ends up getting constrained properly.
+      RBI.constrainGenericRegister(I.getOperand(2).getReg(),
+                                   AArch64::GPR32RegClass, MRI);
+    }
+
+    if (RBI.getRegBank(DstReg, MRI, TRI)->getID() != AArch64::FPRRegBankID)
+      DstReg = MRI.createVirtualRegister(&AArch64::FPR32RegClass);
+
+    // Actually insert the instruction.
+    auto SHA1Inst = MIRBuilder.buildInstr(AArch64::SHA1Hrr, {DstReg}, {SrcReg});
+    constrainSelectedInstRegOperands(*SHA1Inst, TII, TRI, RBI);
+
+    // Did we create a new register for the destination?
+    if (DstReg != I.getOperand(0).getReg()) {
+      // Yep. Copy the result of the instruction back into the original
+      // destination.
+      MIRBuilder.buildCopy({I.getOperand(0)}, {DstReg});
+      RBI.constrainGenericRegister(I.getOperand(0).getReg(),
+                                   AArch64::GPR32RegClass, MRI);
+    }
+
+    I.eraseFromParent();
+    return true;
+  }
+  return false;
 }
 
 /// SelectArithImmed - Select an immediate value that can be represented as
