@@ -608,7 +608,7 @@ bool IRTranslator::translateCast(unsigned Opcode, const User &U,
                                  MachineIRBuilder &MIRBuilder) {
   unsigned Op = getOrCreateVReg(*U.getOperand(0));
   unsigned Res = getOrCreateVReg(U);
-  MIRBuilder.buildInstr(Opcode).addDef(Res).addUse(Op);
+  MIRBuilder.buildInstr(Opcode, {Res}, {Op});
   return true;
 }
 
@@ -788,8 +788,12 @@ unsigned IRTranslator::getSimpleIntrinsicOpcode(Intrinsic::ID ID) {
       return TargetOpcode::G_FLOG2;
     case Intrinsic::log10:
       return TargetOpcode::G_FLOG10;
+    case Intrinsic::nearbyint:
+      return TargetOpcode::G_FNEARBYINT;
     case Intrinsic::pow:
       return TargetOpcode::G_FPOW;
+    case Intrinsic::rint:
+      return TargetOpcode::G_FRINT;
     case Intrinsic::round:
       return TargetOpcode::G_INTRINSIC_ROUND;
     case Intrinsic::sin:
@@ -844,13 +848,13 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
 
     // Get the underlying objects for the location passed on the lifetime
     // marker.
-    SmallVector<Value *, 4> Allocas;
+    SmallVector<const Value *, 4> Allocas;
     GetUnderlyingObjects(CI.getArgOperand(1), Allocas, *DL);
 
     // Iterate over each underlying object, creating lifetime markers for each
     // static alloca. Quit if we find a non-static alloca.
-    for (Value *V : Allocas) {
-      AllocaInst *AI = dyn_cast<AllocaInst>(V);
+    for (const Value *V : Allocas) {
+      const AllocaInst *AI = dyn_cast<AllocaInst>(V);
       if (!AI)
         continue;
 
@@ -1166,6 +1170,8 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
 
   MachineInstrBuilder MIB =
       MIRBuilder.buildIntrinsic(ID, ResultRegs, !CI.doesNotAccessMemory());
+  if (isa<FPMathOperator>(CI))
+    MIB->copyIRFlags(CI);
 
   for (auto &Arg : CI.arg_operands()) {
     // Some intrinsics take metadata parameters. Reject them.

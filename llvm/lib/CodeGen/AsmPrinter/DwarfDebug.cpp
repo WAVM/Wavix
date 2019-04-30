@@ -179,6 +179,10 @@ void DebugLocDwarfExpression::emitUnsigned(uint64_t Value) {
   BS.EmitULEB128(Value, Twine(Value));
 }
 
+void DebugLocDwarfExpression::emitData1(uint8_t Value) {
+  BS.EmitInt8(Value, Twine(Value));
+}
+
 void DebugLocDwarfExpression::emitBaseTypeRef(uint64_t Idx) {
   assert(Idx < (1ULL << (ULEB128PadSize * 7)) && "Idx wont fit");
   BS.EmitULEB128(Idx, Twine(Idx), ULEB128PadSize);
@@ -2233,19 +2237,18 @@ void DwarfDebug::emitDebugARanges() {
     }
 
     // Sort the symbols by offset within the section.
-    std::stable_sort(
-        List.begin(), List.end(), [&](const SymbolCU &A, const SymbolCU &B) {
-          unsigned IA = A.Sym ? Asm->OutStreamer->GetSymbolOrder(A.Sym) : 0;
-          unsigned IB = B.Sym ? Asm->OutStreamer->GetSymbolOrder(B.Sym) : 0;
+    llvm::stable_sort(List, [&](const SymbolCU &A, const SymbolCU &B) {
+      unsigned IA = A.Sym ? Asm->OutStreamer->GetSymbolOrder(A.Sym) : 0;
+      unsigned IB = B.Sym ? Asm->OutStreamer->GetSymbolOrder(B.Sym) : 0;
 
-          // Symbols with no order assigned should be placed at the end.
-          // (e.g. section end labels)
-          if (IA == 0)
-            return false;
-          if (IB == 0)
-            return true;
-          return IA < IB;
-        });
+      // Symbols with no order assigned should be placed at the end.
+      // (e.g. section end labels)
+      if (IA == 0)
+        return false;
+      if (IB == 0)
+        return true;
+      return IA < IB;
+    });
 
     // Insert a final terminator.
     List.push_back(SymbolCU(nullptr, Asm->OutStreamer->endSection(Section)));
@@ -2750,6 +2753,22 @@ void DwarfDebug::addDwarfTypeUnitType(DwarfCompileUnit &CU,
   CU.addDIETypeSignature(RefDie, Signature);
 }
 
+DwarfDebug::NonTypeUnitContext::NonTypeUnitContext(DwarfDebug *DD)
+    : DD(DD),
+      TypeUnitsUnderConstruction(std::move(DD->TypeUnitsUnderConstruction)) {
+  DD->TypeUnitsUnderConstruction.clear();
+  assert(TypeUnitsUnderConstruction.empty() || !DD->AddrPool.hasBeenUsed());
+}
+
+DwarfDebug::NonTypeUnitContext::~NonTypeUnitContext() {
+  DD->TypeUnitsUnderConstruction = std::move(TypeUnitsUnderConstruction);
+  DD->AddrPool.resetUsedFlag();
+}
+
+DwarfDebug::NonTypeUnitContext DwarfDebug::enterNonTypeUnitContext() {
+  return NonTypeUnitContext(this);
+}
+
 // Add the Name along with its companion DIE to the appropriate accelerator
 // table (for AccelTableKind::Dwarf it's always AccelDebugNames, for
 // AccelTableKind::Apple, we use the table we got as an argument). If
@@ -2762,7 +2781,7 @@ void DwarfDebug::addAccelNameImpl(const DICompileUnit &CU,
     return;
 
   if (getAccelTableKind() != AccelTableKind::Apple &&
-      CU.getNameTableKind() == DICompileUnit::DebugNameTableKind::None)
+      CU.getNameTableKind() != DICompileUnit::DebugNameTableKind::Default)
     return;
 
   DwarfFile &Holder = useSplitDwarf() ? SkeletonHolder : InfoHolder;

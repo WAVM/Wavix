@@ -3771,26 +3771,27 @@ Value *llvm::GetUnderlyingObject(Value *V, const DataLayout &DL,
   return V;
 }
 
-void llvm::GetUnderlyingObjects(Value *V, SmallVectorImpl<Value *> &Objects,
+void llvm::GetUnderlyingObjects(const Value *V,
+                                SmallVectorImpl<const Value *> &Objects,
                                 const DataLayout &DL, LoopInfo *LI,
                                 unsigned MaxLookup) {
-  SmallPtrSet<Value *, 4> Visited;
-  SmallVector<Value *, 4> Worklist;
+  SmallPtrSet<const Value *, 4> Visited;
+  SmallVector<const Value *, 4> Worklist;
   Worklist.push_back(V);
   do {
-    Value *P = Worklist.pop_back_val();
+    const Value *P = Worklist.pop_back_val();
     P = GetUnderlyingObject(P, DL, MaxLookup);
 
     if (!Visited.insert(P).second)
       continue;
 
-    if (SelectInst *SI = dyn_cast<SelectInst>(P)) {
+    if (auto *SI = dyn_cast<SelectInst>(P)) {
       Worklist.push_back(SI->getTrueValue());
       Worklist.push_back(SI->getFalseValue());
       continue;
     }
 
-    if (PHINode *PN = dyn_cast<PHINode>(P)) {
+    if (auto *PN = dyn_cast<PHINode>(P)) {
       // If this PHI changes the underlying object in every iteration of the
       // loop, don't look through it.  Consider:
       //   int **A;
@@ -3851,10 +3852,10 @@ bool llvm::getUnderlyingObjectsForCodeGen(const Value *V,
   do {
     V = Working.pop_back_val();
 
-    SmallVector<Value *, 4> Objs;
-    GetUnderlyingObjects(const_cast<Value *>(V), Objs, DL);
+    SmallVector<const Value *, 4> Objs;
+    GetUnderlyingObjects(V, Objs, DL);
 
-    for (Value *V : Objs) {
+    for (const Value *V : Objs) {
       if (!Visited.insert(V).second)
         continue;
       if (Operator::getOpcode(V) == Instruction::IntToPtr) {
@@ -4206,23 +4207,12 @@ OverflowResult llvm::computeOverflowForSignedSub(const Value *LHS,
   return mapOverflowResult(LHSRange.signedSubMayOverflow(RHSRange));
 }
 
-bool llvm::isOverflowIntrinsicNoWrap(const IntrinsicInst *II,
+bool llvm::isOverflowIntrinsicNoWrap(const WithOverflowInst *WO,
                                      const DominatorTree &DT) {
-#ifndef NDEBUG
-  auto IID = II->getIntrinsicID();
-  assert((IID == Intrinsic::sadd_with_overflow ||
-          IID == Intrinsic::uadd_with_overflow ||
-          IID == Intrinsic::ssub_with_overflow ||
-          IID == Intrinsic::usub_with_overflow ||
-          IID == Intrinsic::smul_with_overflow ||
-          IID == Intrinsic::umul_with_overflow) &&
-         "Not an overflow intrinsic!");
-#endif
-
   SmallVector<const BranchInst *, 2> GuardingBranches;
   SmallVector<const ExtractValueInst *, 2> Results;
 
-  for (const User *U : II->users()) {
+  for (const User *U : WO->users()) {
     if (const auto *EVI = dyn_cast<ExtractValueInst>(U)) {
       assert(EVI->getNumIndices() == 1 && "Obvious from CI's type");
 
@@ -5737,8 +5727,7 @@ ConstantRange llvm::computeConstantRange(const Value *V, bool UseInstrInfo) {
   else if (auto *SI = dyn_cast<SelectInst>(V))
     setLimitsForSelectPattern(*SI, Lower, Upper);
 
-  ConstantRange CR = Lower != Upper ? ConstantRange(Lower, Upper)
-                                    : ConstantRange::getFull(BitWidth);
+  ConstantRange CR = ConstantRange::getNonEmpty(Lower, Upper);
 
   if (auto *I = dyn_cast<Instruction>(V))
     if (auto *Range = IIQ.getMetadata(I, LLVMContext::MD_range))

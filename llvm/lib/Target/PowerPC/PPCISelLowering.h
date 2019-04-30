@@ -264,11 +264,11 @@ namespace llvm {
       CR6UNSET,
 
       /// GPRC = address of _GLOBAL_OFFSET_TABLE_. Used by initial-exec TLS
-      /// on PPC32.
+      /// for non-position independent code on PPC32.
       PPC32_GOT,
 
       /// GPRC = address of _GLOBAL_OFFSET_TABLE_. Used by general dynamic and
-      /// local dynamic TLS on PPC32.
+      /// local dynamic TLS and position indendepent code on PPC32.
       PPC32_PICGOT,
 
       /// G8RC = ADDIS_GOT_TPREL_HA %x2, Symbol - Used by the initial-exec
@@ -832,7 +832,7 @@ namespace llvm {
     EVT
     getOptimalMemOpType(uint64_t Size, unsigned DstAlign, unsigned SrcAlign,
                         bool IsMemset, bool ZeroMemset, bool MemcpyStrSrc,
-                        MachineFunction &MF) const override;
+                        const AttributeList &FuncAttributes) const override;
 
     /// Is unaligned memory access allowed for the given type, and is it fast
     /// relative to software emulation.
