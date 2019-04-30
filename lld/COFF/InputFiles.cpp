@@ -208,9 +208,9 @@ SectionChunk *ObjFile::readSection(uint32_t SectionNumber,
   // linked in the regular manner.
   if (C->isCodeView())
     DebugChunks.push_back(C);
-  else if (Config->GuardCF != GuardCFLevel::Off && Name == ".gfids$y")
+  else if (Name == ".gfids$y")
     GuardFidChunks.push_back(C);
-  else if (Config->GuardCF != GuardCFLevel::Off && Name == ".gljmp$y")
+  else if (Name == ".gljmp$y")
     GuardLJmpChunks.push_back(C);
   else if (Name == ".sxdata")
     SXDataChunks.push_back(C);
@@ -769,9 +769,26 @@ void ImportFile::parse() {
         Name, cast_or_null<DefinedImportData>(ImpSym), Hdr->Machine);
 }
 
+BitcodeFile::BitcodeFile(MemoryBufferRef MB, StringRef ArchiveName,
+                         uint64_t OffsetInArchive)
+    : InputFile(BitcodeKind, MB) {
+  std::string Path = MB.getBufferIdentifier().str();
+
+  // ThinLTO assumes that all MemoryBufferRefs given to it have a unique
+  // name. If two archives define two members with the same name, this
+  // causes a collision which result in only one of the objects being taken
+  // into consideration at LTO time (which very likely causes undefined
+  // symbols later in the link stage). So we append file offset to make
+  // filename unique.
+  MemoryBufferRef MBRef(
+      MB.getBuffer(),
+      Saver.save(ArchiveName + Path +
+                 (ArchiveName.empty() ? "" : utostr(OffsetInArchive))));
+
+  Obj = check(lto::InputFile::create(MBRef));
+}
+
 void BitcodeFile::parse() {
-  Obj = check(lto::InputFile::create(MemoryBufferRef(
-      MB.getBuffer(), Saver.save(ParentName + MB.getBufferIdentifier()))));
   std::vector<std::pair<Symbol *, bool>> Comdat(Obj->getComdatTable().size());
   for (size_t I = 0; I != Obj->getComdatTable().size(); ++I)
     // FIXME: lto::InputFile doesn't keep enough data to do correct comdat
