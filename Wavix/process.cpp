@@ -13,6 +13,7 @@
 #include "WAVM/Inline/Errors.h"
 #include "WAVM/Inline/Hash.h"
 #include "WAVM/Inline/HashMap.h"
+#include "WAVM/Inline/I128.h"
 #include "WAVM/Inline/IndexMap.h"
 #include "WAVM/Inline/Lock.h"
 #include "WAVM/Inline/Serialization.h"
@@ -576,7 +577,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 			child->waiters.push_back(currentThread);
 		}
 
-		while(!currentThread->wakeEvent.wait(UINT64_MAX)) {};
+		while(!currentThread->wakeEvent.wait(INT128_MAX)) {};
 
 		for(Process* child : waiteeProcesses)
 		{
