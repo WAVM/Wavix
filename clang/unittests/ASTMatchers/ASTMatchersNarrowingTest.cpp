@@ -566,6 +566,74 @@ TEST(Matcher, BindMatchedNodes) {
                                        llvm::make_unique<VerifyIdIsBoundTo<CXXMemberCallExpr>>("x")));
 }
 
+TEST(Matcher, IgnoresElidableConstructors) {
+  EXPECT_TRUE(
+      matches("struct H {};"
+              "template<typename T> H B(T A);"
+              "void f() {"
+              "  H D1;"
+              "  D1 = B(B(1));"
+              "}",
+              cxxOperatorCallExpr(hasArgument(
+                  1, callExpr(hasArgument(
+                         0, ignoringElidableConstructorCall(callExpr()))))),
+              LanguageMode::Cxx11OrLater));
+  EXPECT_TRUE(
+      matches("struct H {};"
+              "template<typename T> H B(T A);"
+              "void f() {"
+              "  H D1;"
+              "  D1 = B(1);"
+              "}",
+              cxxOperatorCallExpr(hasArgument(
+                  1, callExpr(hasArgument(0, ignoringElidableConstructorCall(
+                                                 integerLiteral()))))),
+              LanguageMode::Cxx11OrLater));
+  EXPECT_TRUE(matches(
+      "struct H {};"
+      "H G();"
+      "void f() {"
+      "  H D = G();"
+      "}",
+      varDecl(hasInitializer(anyOf(
+          ignoringElidableConstructorCall(callExpr()),
+          exprWithCleanups(has(ignoringElidableConstructorCall(callExpr())))))),
+      LanguageMode::Cxx11OrLater));
+}
+
+TEST(Matcher, IgnoresElidableInReturn) {
+  auto matcher = expr(ignoringElidableConstructorCall(declRefExpr()));
+  EXPECT_TRUE(matches("struct H {};"
+                      "H f() {"
+                      "  H g;"
+                      "  return g;"
+                      "}",
+                      matcher, LanguageMode::Cxx11OrLater));
+  EXPECT_TRUE(notMatches("struct H {};"
+                         "H f() {"
+                         "  return H();"
+                         "}",
+                         matcher, LanguageMode::Cxx11OrLater));
+}
+
+TEST(Matcher, IgnoreElidableConstructorDoesNotMatchConstructors) {
+  EXPECT_TRUE(matches("struct H {};"
+                      "void f() {"
+                      "  H D;"
+                      "}",
+                      varDecl(hasInitializer(
+                          ignoringElidableConstructorCall(cxxConstructExpr()))),
+                      LanguageMode::Cxx11OrLater));
+}
+
+TEST(Matcher, IgnoresElidableDoesNotPreventMatches) {
+  EXPECT_TRUE(matches("void f() {"
+                      "  int D = 10;"
+                      "}",
+                      expr(ignoringElidableConstructorCall(integerLiteral())),
+                      LanguageMode::Cxx11OrLater));
+}
+
 TEST(Matcher, BindTheSameNameInAlternatives) {
   StatementMatcher matcher = anyOf(
     binaryOperator(hasOperatorName("+"),
@@ -914,10 +982,10 @@ TEST(isConstexpr, MatchesConstexprDeclarations) {
                       varDecl(hasName("foo"), isConstexpr())));
   EXPECT_TRUE(matches("constexpr int bar();",
                       functionDecl(hasName("bar"), isConstexpr())));
-  EXPECT_TRUE(matchesConditionally("void baz() { if constexpr(1 > 0) {} }",
-                                   ifStmt(isConstexpr()), true, "-std=c++17"));
-  EXPECT_TRUE(matchesConditionally("void baz() { if (1 > 0) {} }",
-                                   ifStmt(isConstexpr()), false, "-std=c++17"));
+  EXPECT_TRUE(matches("void baz() { if constexpr(1 > 0) {} }",
+                      ifStmt(isConstexpr()), LanguageMode::Cxx17OrLater));
+  EXPECT_TRUE(notMatches("void baz() { if (1 > 0) {} }", ifStmt(isConstexpr()),
+                         LanguageMode::Cxx17OrLater));
 }
 
 TEST(TemplateArgumentCountIs, Matches) {
@@ -2029,6 +2097,57 @@ TEST(TypeMatching, MatchesComplexTypes) {
 TEST(NS, Anonymous) {
   EXPECT_TRUE(notMatches("namespace N {}", namespaceDecl(isAnonymous())));
   EXPECT_TRUE(matches("namespace {}", namespaceDecl(isAnonymous())));
+}
+
+TEST(DeclarationMatcher, InStdNamespace) {
+  EXPECT_TRUE(notMatches("class vector {};"
+                         "namespace foo {"
+                         "  class vector {};"
+                         "}"
+                         "namespace foo {"
+                         "  namespace std {"
+                         "    class vector {};"
+                         "  }"
+                         "}",
+                         cxxRecordDecl(hasName("vector"), isInStdNamespace())));
+
+  EXPECT_TRUE(matches("namespace std {"
+                      "  class vector {};"
+                      "}",
+                      cxxRecordDecl(hasName("vector"), isInStdNamespace())));
+  EXPECT_TRUE(matches("namespace std {"
+                      "  inline namespace __1 {"
+                      "    class vector {};"
+                      "  }"
+                      "}",
+                      cxxRecordDecl(hasName("vector"), isInStdNamespace())));
+  EXPECT_TRUE(notMatches("namespace std {"
+                         "  inline namespace __1 {"
+                         "    inline namespace __fs {"
+                         "      namespace filesystem {"
+                         "        inline namespace v1 {"
+                         "          class path {};"
+                         "        }"
+                         "      }"
+                         "    }"
+                         "  }"
+                         "}",
+                         cxxRecordDecl(hasName("path"), isInStdNamespace())));
+  EXPECT_TRUE(
+      matches("namespace std {"
+              "  inline namespace __1 {"
+              "    inline namespace __fs {"
+              "      namespace filesystem {"
+              "        inline namespace v1 {"
+              "          class path {};"
+              "        }"
+              "      }"
+              "    }"
+              "  }"
+              "}",
+              cxxRecordDecl(hasName("path"),
+                            hasAncestor(namespaceDecl(hasName("filesystem"),
+                                                      isInStdNamespace())))));
 }
 
 TEST(EqualsBoundNodeMatcher, QualType) {

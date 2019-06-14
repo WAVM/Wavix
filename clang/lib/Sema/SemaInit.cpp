@@ -1707,6 +1707,30 @@ void InitListChecker::CheckVectorType(const InitializedEntity &Entity,
   }
 }
 
+/// Check if the type of a class element has an accessible destructor, and marks
+/// it referenced. Returns true if we shouldn't form a reference to the
+/// destructor.
+///
+/// Aggregate initialization requires a class element's destructor be
+/// accessible per 11.6.1 [dcl.init.aggr]:
+///
+/// The destructor for each element of class type is potentially invoked
+/// (15.4 [class.dtor]) from the context where the aggregate initialization
+/// occurs.
+static bool checkDestructorReference(QualType ElementType, SourceLocation Loc,
+                                     Sema &SemaRef) {
+  auto *CXXRD = ElementType->getAsCXXRecordDecl();
+  if (!CXXRD)
+    return false;
+
+  CXXDestructorDecl *Destructor = SemaRef.LookupDestructor(CXXRD);
+  SemaRef.CheckDestructorAccess(Loc, Destructor,
+                                SemaRef.PDiag(diag::err_access_dtor_temp)
+                                << ElementType);
+  SemaRef.MarkFunctionReferenced(Loc, Destructor);
+  return SemaRef.DiagnoseUseOfDecl(Destructor, Loc);
+}
+
 void InitListChecker::CheckArrayType(const InitializedEntity &Entity,
                                      InitListExpr *IList, QualType &DeclType,
                                      llvm::APSInt elementIndex,
@@ -1715,6 +1739,14 @@ void InitListChecker::CheckArrayType(const InitializedEntity &Entity,
                                      InitListExpr *StructuredList,
                                      unsigned &StructuredIndex) {
   const ArrayType *arrayType = SemaRef.Context.getAsArrayType(DeclType);
+
+  if (!VerifyOnly) {
+    if (checkDestructorReference(arrayType->getElementType(),
+                                 IList->getEndLoc(), SemaRef)) {
+      hadError = true;
+      return;
+    }
+  }
 
   // Check for the special-case of initializing an array with a string.
   if (Index < IList->getNumInits()) {
@@ -1877,30 +1909,6 @@ bool InitListChecker::CheckFlexibleArrayInit(const InitializedEntity &Entity,
   return FlexArrayDiag != diag::ext_flexible_array_init;
 }
 
-/// Check if the type of a class element has an accessible destructor.
-///
-/// Aggregate initialization requires a class element's destructor be
-/// accessible per 11.6.1 [dcl.init.aggr]:
-///
-/// The destructor for each element of class type is potentially invoked
-/// (15.4 [class.dtor]) from the context where the aggregate initialization
-/// occurs.
-static bool hasAccessibleDestructor(QualType ElementType, SourceLocation Loc,
-                                    Sema &SemaRef) {
-  auto *CXXRD = ElementType->getAsCXXRecordDecl();
-  if (!CXXRD)
-    return false;
-
-  CXXDestructorDecl *Destructor = SemaRef.LookupDestructor(CXXRD);
-  SemaRef.CheckDestructorAccess(Loc, Destructor,
-                                SemaRef.PDiag(diag::err_access_dtor_temp)
-                                    << ElementType);
-  SemaRef.MarkFunctionReferenced(Loc, Destructor);
-  if (SemaRef.DiagnoseUseOfDecl(Destructor, Loc))
-    return true;
-  return false;
-}
-
 void InitListChecker::CheckStructUnionTypes(
     const InitializedEntity &Entity, InitListExpr *IList, QualType DeclType,
     CXXRecordDecl::base_class_range Bases, RecordDecl::field_iterator Field,
@@ -1924,7 +1932,7 @@ void InitListChecker::CheckStructUnionTypes(
     if (!VerifyOnly)
       for (FieldDecl *FD : RD->fields()) {
         QualType ET = SemaRef.Context.getBaseElementType(FD->getType());
-        if (hasAccessibleDestructor(ET, IList->getEndLoc(), SemaRef)) {
+        if (checkDestructorReference(ET, IList->getEndLoc(), SemaRef)) {
           hadError = true;
           return;
         }
@@ -1984,7 +1992,7 @@ void InitListChecker::CheckStructUnionTypes(
     }
 
     if (!VerifyOnly)
-      if (hasAccessibleDestructor(Base.getType(), InitLoc, SemaRef)) {
+      if (checkDestructorReference(Base.getType(), InitLoc, SemaRef)) {
         hadError = true;
         return;
       }
@@ -2026,7 +2034,7 @@ void InitListChecker::CheckStructUnionTypes(
         while (std::next(F) != Field)
           ++F;
         QualType ET = SemaRef.Context.getBaseElementType(F->getType());
-        if (hasAccessibleDestructor(ET, InitLoc, SemaRef)) {
+        if (checkDestructorReference(ET, InitLoc, SemaRef)) {
           hadError = true;
           return;
         }
@@ -2075,7 +2083,7 @@ void InitListChecker::CheckStructUnionTypes(
 
     if (!VerifyOnly) {
       QualType ET = SemaRef.Context.getBaseElementType(Field->getType());
-      if (hasAccessibleDestructor(ET, InitLoc, SemaRef)) {
+      if (checkDestructorReference(ET, InitLoc, SemaRef)) {
         hadError = true;
         return;
       }
@@ -2131,7 +2139,7 @@ void InitListChecker::CheckStructUnionTypes(
                                                      : Field;
     for (RecordDecl::field_iterator E = RD->field_end(); I != E; ++I) {
       QualType ET = SemaRef.Context.getBaseElementType(I->getType());
-      if (hasAccessibleDestructor(ET, IList->getEndLoc(), SemaRef)) {
+      if (checkDestructorReference(ET, IList->getEndLoc(), SemaRef)) {
         hadError = true;
         return;
       }
@@ -3274,7 +3282,6 @@ void InitializationSequence::Step::Destroy() {
   case SK_QualificationConversionXValue:
   case SK_QualificationConversionLValue:
   case SK_AtomicConversion:
-  case SK_LValueToRValue:
   case SK_ListInitialization:
   case SK_UnwrapInitList:
   case SK_RewrapInitList:
@@ -3336,6 +3343,7 @@ bool InitializationSequence::isAmbiguous() const {
   case FK_NonConstLValueReferenceBindingToVectorElement:
   case FK_NonConstLValueReferenceBindingToUnrelated:
   case FK_RValueReferenceBindingToLValue:
+  case FK_ReferenceAddrspaceMismatchTemporary:
   case FK_ReferenceInitDropsQualifiers:
   case FK_ReferenceInitFailed:
   case FK_ConversionFailed:
@@ -3453,15 +3461,6 @@ void InitializationSequence::AddQualificationConversionStep(QualType Ty,
 void InitializationSequence::AddAtomicConversionStep(QualType Ty) {
   Step S;
   S.Kind = SK_AtomicConversion;
-  S.Type = Ty;
-  Steps.push_back(S);
-}
-
-void InitializationSequence::AddLValueToRValueStep(QualType Ty) {
-  assert(!Ty.hasQualifiers() && "rvalues may not have qualifiers");
-
-  Step S;
-  S.Kind = SK_LValueToRValue;
   S.Type = Ty;
   Steps.push_back(S);
 }
@@ -3763,9 +3762,10 @@ ResolveConstructorOverload(Sema &S, SourceLocation DeclLoc,
          hasCopyOrMoveCtorParam(S.Context, Info));
 
     if (Info.ConstructorTmpl)
-      S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
-                                     /*ExplicitArgs*/ nullptr, Args,
-                                     CandidateSet, SuppressUserConversions);
+      S.AddTemplateOverloadCandidate(
+          Info.ConstructorTmpl, Info.FoundDecl,
+          /*ExplicitArgs*/ nullptr, Args, CandidateSet, SuppressUserConversions,
+          /*PartialOverloading=*/false, AllowExplicit);
     else {
       // C++ [over.match.copy]p1:
       //   - When initializing a temporary to be bound to the first parameter
@@ -3779,8 +3779,8 @@ ResolveConstructorOverload(Sema &S, SourceLocation DeclLoc,
                                hasCopyOrMoveCtorParam(S.Context, Info);
       S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl, Args,
                              CandidateSet, SuppressUserConversions,
-                             /*PartialOverloading=*/false,
-                             /*AllowExplicit=*/AllowExplicitConv);
+                             /*PartialOverloading=*/false, AllowExplicit,
+                             AllowExplicitConv);
     }
   }
 
@@ -3813,16 +3813,17 @@ ResolveConstructorOverload(Sema &S, SourceLocation DeclLoc,
         else
           Conv = cast<CXXConversionDecl>(D);
 
-        if ((AllowExplicit && !CopyInitializing) || !Conv->isExplicit()) {
+        if (AllowExplicit || !Conv->isExplicit()) {
           if (ConvTemplate)
-            S.AddTemplateConversionCandidate(ConvTemplate, I.getPair(),
-                                             ActingDC, Initializer, DestType,
-                                             CandidateSet, AllowExplicit,
-                                             /*AllowResultConversion*/false);
+            S.AddTemplateConversionCandidate(
+                ConvTemplate, I.getPair(), ActingDC, Initializer, DestType,
+                CandidateSet, AllowExplicit, AllowExplicit,
+                /*AllowResultConversion*/ false);
           else
             S.AddConversionCandidate(Conv, I.getPair(), ActingDC, Initializer,
                                      DestType, CandidateSet, AllowExplicit,
-                                     /*AllowResultConversion*/false);
+                                     AllowExplicit,
+                                     /*AllowResultConversion*/ false);
         }
       }
     }
@@ -4368,14 +4369,16 @@ static OverloadingResult TryRefInitWithConversionFunction(
       if (!Info.Constructor->isInvalidDecl() &&
           Info.Constructor->isConvertingConstructor(AllowExplicitCtors)) {
         if (Info.ConstructorTmpl)
-          S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
-                                         /*ExplicitArgs*/ nullptr,
-                                         Initializer, CandidateSet,
-                                         /*SuppressUserConversions=*/true);
+          S.AddTemplateOverloadCandidate(
+              Info.ConstructorTmpl, Info.FoundDecl,
+              /*ExplicitArgs*/ nullptr, Initializer, CandidateSet,
+              /*SuppressUserConversions=*/true,
+              /*PartialOverloading*/ false, AllowExplicitCtors);
         else
-          S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
-                                 Initializer, CandidateSet,
-                                 /*SuppressUserConversions=*/true);
+          S.AddOverloadCandidate(
+              Info.Constructor, Info.FoundDecl, Initializer, CandidateSet,
+              /*SuppressUserConversions=*/true,
+              /*PartialOverloading*/ false, AllowExplicitCtors);
       }
     }
   }
@@ -4410,17 +4413,17 @@ static OverloadingResult TryRefInitWithConversionFunction(
       // candidates with reference-compatible results? That might be needed to
       // break recursion.
       if ((AllowExplicitConvs || !Conv->isExplicit()) &&
-          (AllowRValues || Conv->getConversionType()->isLValueReferenceType())){
+          (AllowRValues ||
+           Conv->getConversionType()->isLValueReferenceType())) {
         if (ConvTemplate)
-          S.AddTemplateConversionCandidate(ConvTemplate, I.getPair(),
-                                           ActingDC, Initializer,
-                                           DestType, CandidateSet,
-                                           /*AllowObjCConversionOnExplicit=*/
-                                             false);
+          S.AddTemplateConversionCandidate(
+              ConvTemplate, I.getPair(), ActingDC, Initializer, DestType,
+              CandidateSet,
+              /*AllowObjCConversionOnExplicit=*/false, AllowExplicitConvs);
         else
-          S.AddConversionCandidate(Conv, I.getPair(), ActingDC,
-                                   Initializer, DestType, CandidateSet,
-                                   /*AllowObjCConversionOnExplicit=*/false);
+          S.AddConversionCandidate(
+              Conv, I.getPair(), ActingDC, Initializer, DestType, CandidateSet,
+              /*AllowObjCConversionOnExplicit=*/false, AllowExplicitConvs);
       }
     }
   }
@@ -4825,9 +4828,16 @@ static void TryReferenceInitializationCore(Sema &S,
 
   Sequence.AddReferenceBindingStep(cv1T1IgnoreAS, /*bindingTemporary=*/true);
 
-  if (T1Quals.hasAddressSpace())
+  if (T1Quals.hasAddressSpace()) {
+    if (!Qualifiers::isAddressSpaceSupersetOf(T1Quals.getAddressSpace(),
+                                              LangAS::Default)) {
+      Sequence.SetFailed(
+          InitializationSequence::FK_ReferenceAddrspaceMismatchTemporary);
+      return;
+    }
     Sequence.AddQualificationConversionStep(cv1T1, isLValueRef ? VK_LValue
                                                                : VK_XValue);
+  }
 }
 
 /// Attempt character array initialization from a string literal
@@ -4996,14 +5006,16 @@ static void TryUserDefinedConversion(Sema &S,
         if (!Info.Constructor->isInvalidDecl() &&
             Info.Constructor->isConvertingConstructor(AllowExplicit)) {
           if (Info.ConstructorTmpl)
-            S.AddTemplateOverloadCandidate(Info.ConstructorTmpl, Info.FoundDecl,
-                                           /*ExplicitArgs*/ nullptr,
-                                           Initializer, CandidateSet,
-                                           /*SuppressUserConversions=*/true);
+            S.AddTemplateOverloadCandidate(
+                Info.ConstructorTmpl, Info.FoundDecl,
+                /*ExplicitArgs*/ nullptr, Initializer, CandidateSet,
+                /*SuppressUserConversions=*/true,
+                /*PartialOverloading*/ false, AllowExplicit);
           else
             S.AddOverloadCandidate(Info.Constructor, Info.FoundDecl,
                                    Initializer, CandidateSet,
-                                   /*SuppressUserConversions=*/true);
+                                   /*SuppressUserConversions=*/true,
+                                   /*PartialOverloading*/ false, AllowExplicit);
         }
       }
     }
@@ -5038,12 +5050,12 @@ static void TryUserDefinedConversion(Sema &S,
 
         if (AllowExplicit || !Conv->isExplicit()) {
           if (ConvTemplate)
-            S.AddTemplateConversionCandidate(ConvTemplate, I.getPair(),
-                                             ActingDC, Initializer, DestType,
-                                             CandidateSet, AllowExplicit);
+            S.AddTemplateConversionCandidate(
+                ConvTemplate, I.getPair(), ActingDC, Initializer, DestType,
+                CandidateSet, AllowExplicit, AllowExplicit);
           else
-            S.AddConversionCandidate(Conv, I.getPair(), ActingDC,
-                                     Initializer, DestType, CandidateSet,
+            S.AddConversionCandidate(Conv, I.getPair(), ActingDC, Initializer,
+                                     DestType, CandidateSet, AllowExplicit,
                                      AllowExplicit);
         }
       }
@@ -5971,21 +5983,25 @@ static ExprResult CopyObject(Sema &S,
     break;
 
   case OR_No_Viable_Function:
-    S.Diag(Loc, IsExtraneousCopy && !S.isSFINAEContext()
-           ? diag::ext_rvalue_to_reference_temp_copy_no_viable
-           : diag::err_temp_copy_no_viable)
-      << (int)Entity.getKind() << CurInitExpr->getType()
-      << CurInitExpr->getSourceRange();
-    CandidateSet.NoteCandidates(S, OCD_AllCandidates, CurInitExpr);
+    CandidateSet.NoteCandidates(
+        PartialDiagnosticAt(
+            Loc, S.PDiag(IsExtraneousCopy && !S.isSFINAEContext()
+                             ? diag::ext_rvalue_to_reference_temp_copy_no_viable
+                             : diag::err_temp_copy_no_viable)
+                     << (int)Entity.getKind() << CurInitExpr->getType()
+                     << CurInitExpr->getSourceRange()),
+        S, OCD_AllCandidates, CurInitExpr);
     if (!IsExtraneousCopy || S.isSFINAEContext())
       return ExprError();
     return CurInit;
 
   case OR_Ambiguous:
-    S.Diag(Loc, diag::err_temp_copy_ambiguous)
-      << (int)Entity.getKind() << CurInitExpr->getType()
-      << CurInitExpr->getSourceRange();
-    CandidateSet.NoteCandidates(S, OCD_ViableCandidates, CurInitExpr);
+    CandidateSet.NoteCandidates(
+        PartialDiagnosticAt(Loc, S.PDiag(diag::err_temp_copy_ambiguous)
+                                     << (int)Entity.getKind()
+                                     << CurInitExpr->getType()
+                                     << CurInitExpr->getSourceRange()),
+        S, OCD_ViableCandidates, CurInitExpr);
     return ExprError();
 
   case OR_Deleted:
@@ -6120,13 +6136,13 @@ static void CheckCXX98CompatAccessibleCopy(Sema &S,
     break;
 
   case OR_No_Viable_Function:
-    S.Diag(Loc, Diag);
-    CandidateSet.NoteCandidates(S, OCD_AllCandidates, CurInitExpr);
+    CandidateSet.NoteCandidates(PartialDiagnosticAt(Loc, Diag), S,
+                                OCD_AllCandidates, CurInitExpr);
     break;
 
   case OR_Ambiguous:
-    S.Diag(Loc, Diag);
-    CandidateSet.NoteCandidates(S, OCD_ViableCandidates, CurInitExpr);
+    CandidateSet.NoteCandidates(PartialDiagnosticAt(Loc, Diag), S,
+                                OCD_ViableCandidates, CurInitExpr);
     break;
 
   case OR_Deleted:
@@ -6314,6 +6330,10 @@ PerformConstructorInitialization(Sema &S,
   S.CheckConstructorAccess(Loc, Constructor, Step.Function.FoundDecl, Entity);
   if (S.DiagnoseUseOfDecl(Step.Function.FoundDecl, Loc))
     return ExprError();
+
+  if (const ArrayType *AT = S.Context.getAsArrayType(Entity.getType()))
+    if (checkDestructorReference(S.Context.getBaseElementType(AT), Loc, S))
+      return ExprError();
 
   if (shouldBindAsTemporary(Entity))
     CurInit = S.MaybeBindToTemporary(CurInit.get());
@@ -6830,6 +6850,9 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
                                               RK_ReferenceBinding, Visit);
       else {
         unsigned Index = 0;
+        for (; Index < RD->getNumBases() && Index < ILE->getNumInits(); ++Index)
+          visitLocalsRetainedByInitializer(Path, ILE->getInit(Index), Visit,
+                                           RevisitSubinits);
         for (const auto *I : RD->fields()) {
           if (Index >= ILE->getNumInits())
             break;
@@ -7472,7 +7495,6 @@ ExprResult InitializationSequence::Perform(Sema &S,
   case SK_QualificationConversionXValue:
   case SK_QualificationConversionRValue:
   case SK_AtomicConversion:
-  case SK_LValueToRValue:
   case SK_ConversionSequence:
   case SK_ConversionSequenceNoNarrowing:
   case SK_ListInitialization:
@@ -7741,14 +7763,6 @@ ExprResult InitializationSequence::Perform(Sema &S,
       assert(CurInit.get()->isRValue() && "cannot convert glvalue to atomic");
       CurInit = S.ImpCastExprToType(CurInit.get(), Step->Type,
                                     CK_NonAtomicToAtomic, VK_RValue);
-      break;
-    }
-
-    case SK_LValueToRValue: {
-      assert(CurInit.get()->isGLValue() && "cannot load from a prvalue");
-      CurInit = ImplicitCastExpr::Create(S.Context, Step->Type,
-                                         CK_LValueToRValue, CurInit.get(),
-                                         /*BasePath=*/nullptr, VK_RValue);
       break;
     }
 
@@ -8399,19 +8413,22 @@ bool InitializationSequence::Diagnose(Sema &S,
   case FK_UserConversionOverloadFailed:
     switch (FailedOverloadResult) {
     case OR_Ambiguous:
-      if (Failure == FK_UserConversionOverloadFailed)
-        S.Diag(Kind.getLocation(), diag::err_typecheck_ambiguous_condition)
-          << OnlyArg->getType() << DestType
-          << Args[0]->getSourceRange();
-      else
-        S.Diag(Kind.getLocation(), diag::err_ref_init_ambiguous)
-          << DestType << OnlyArg->getType()
-          << Args[0]->getSourceRange();
 
-      FailedCandidateSet.NoteCandidates(S, OCD_ViableCandidates, Args);
+      FailedCandidateSet.NoteCandidates(
+          PartialDiagnosticAt(
+              Kind.getLocation(),
+              Failure == FK_UserConversionOverloadFailed
+                  ? (S.PDiag(diag::err_typecheck_ambiguous_condition)
+                     << OnlyArg->getType() << DestType
+                     << Args[0]->getSourceRange())
+                  : (S.PDiag(diag::err_ref_init_ambiguous)
+                     << DestType << OnlyArg->getType()
+                     << Args[0]->getSourceRange())),
+          S, OCD_ViableCandidates, Args);
       break;
 
-    case OR_No_Viable_Function:
+    case OR_No_Viable_Function: {
+      auto Cands = FailedCandidateSet.CompleteCandidates(S, OCD_AllCandidates, Args);
       if (!S.RequireCompleteType(Kind.getLocation(),
                                  DestType.getNonReferenceType(),
                           diag::err_typecheck_nonviable_condition_incomplete,
@@ -8421,9 +8438,9 @@ bool InitializationSequence::Diagnose(Sema &S,
           << OnlyArg->getType() << Args[0]->getSourceRange()
           << DestType.getNonReferenceType();
 
-      FailedCandidateSet.NoteCandidates(S, OCD_AllCandidates, Args);
+      FailedCandidateSet.NoteCandidates(S, Args, Cands);
       break;
-
+    }
     case OR_Deleted: {
       S.Diag(Kind.getLocation(), diag::err_typecheck_deleted_function)
         << OnlyArg->getType() << DestType.getNonReferenceType()
@@ -8489,6 +8506,11 @@ bool InitializationSequence::Diagnose(Sema &S,
     S.Diag(Kind.getLocation(), diag::err_lvalue_to_rvalue_ref)
       << DestType.getNonReferenceType() << OnlyArg->getType()
       << Args[0]->getSourceRange();
+    break;
+
+  case FK_ReferenceAddrspaceMismatchTemporary:
+    S.Diag(Kind.getLocation(), diag::err_reference_bind_temporary_addrspace)
+        << DestType << Args[0]->getSourceRange();
     break;
 
   case FK_ReferenceInitDropsQualifiers: {
@@ -8587,9 +8609,11 @@ bool InitializationSequence::Diagnose(Sema &S,
     // bad.
     switch (FailedOverloadResult) {
       case OR_Ambiguous:
-        S.Diag(Kind.getLocation(), diag::err_ovl_ambiguous_init)
-          << DestType << ArgsRange;
-        FailedCandidateSet.NoteCandidates(S, OCD_ViableCandidates, Args);
+        FailedCandidateSet.NoteCandidates(
+            PartialDiagnosticAt(Kind.getLocation(),
+                                S.PDiag(diag::err_ovl_ambiguous_init)
+                                    << DestType << ArgsRange),
+            S, OCD_ViableCandidates, Args);
         break;
 
       case OR_No_Viable_Function:
@@ -8638,9 +8662,12 @@ bool InitializationSequence::Diagnose(Sema &S,
           break;
         }
 
-        S.Diag(Kind.getLocation(), diag::err_ovl_no_viable_function_in_init)
-          << DestType << ArgsRange;
-        FailedCandidateSet.NoteCandidates(S, OCD_AllCandidates, Args);
+        FailedCandidateSet.NoteCandidates(
+            PartialDiagnosticAt(
+                Kind.getLocation(),
+                S.PDiag(diag::err_ovl_no_viable_function_in_init)
+                    << DestType << ArgsRange),
+            S, OCD_AllCandidates, Args);
         break;
 
       case OR_Deleted: {
@@ -8821,6 +8848,10 @@ void InitializationSequence::dump(raw_ostream &OS) const {
       OS << "reference initialization drops qualifiers";
       break;
 
+    case FK_ReferenceAddrspaceMismatchTemporary:
+      OS << "reference with mismatching address space bound to temporary";
+      break;
+
     case FK_ReferenceInitFailed:
       OS << "reference initialization failed";
       break;
@@ -8954,10 +8985,6 @@ void InitializationSequence::dump(raw_ostream &OS) const {
 
     case SK_AtomicConversion:
       OS << "non-atomic-to-atomic conversion";
-      break;
-
-    case SK_LValueToRValue:
-      OS << "load (lvalue to rvalue)";
       break;
 
     case SK_ConversionSequence:
@@ -9324,6 +9351,7 @@ QualType Sema::DeduceTemplateSpecializationFromInitializer(
   OverloadCandidateSet::iterator Best;
 
   bool HasAnyDeductionGuide = false;
+  bool AllowExplicit = !Kind.isCopyInit() || ListInit;
 
   auto tryToResolveOverload =
       [&](bool OnlyListConstructors) -> OverloadingResult {
@@ -9349,7 +9377,7 @@ QualType Sema::DeduceTemplateSpecializationFromInitializer(
       //   converting constructors (12.3.1) of that class.
       // C++ [over.match.copy]p1: (non-list copy-initialization from class)
       //   The converting constructors of T are candidate functions.
-      if (Kind.isCopyInit() && !ListInit) {
+      if (!AllowExplicit) {
         // Only consider converting constructors.
         if (GD->isExplicit())
           continue;
@@ -9384,11 +9412,13 @@ QualType Sema::DeduceTemplateSpecializationFromInitializer(
 
       if (TD)
         AddTemplateOverloadCandidate(TD, I.getPair(), /*ExplicitArgs*/ nullptr,
-                                     Inits, Candidates,
-                                     SuppressUserConversions);
+                                     Inits, Candidates, SuppressUserConversions,
+                                     /*PartialOverloading*/ false,
+                                     AllowExplicit);
       else
         AddOverloadCandidate(GD, I.getPair(), Inits, Candidates,
-                             SuppressUserConversions);
+                             SuppressUserConversions,
+                             /*PartialOverloading*/ false, AllowExplicit);
     }
     return Candidates.BestViableFunction(*this, Kind.getLocation(), Best);
   };
@@ -9438,12 +9468,15 @@ QualType Sema::DeduceTemplateSpecializationFromInitializer(
 
   switch (Result) {
   case OR_Ambiguous:
-    Diag(Kind.getLocation(), diag::err_deduced_class_template_ctor_ambiguous)
-      << TemplateName;
     // FIXME: For list-initialization candidates, it'd usually be better to
     // list why they were not viable when given the initializer list itself as
     // an argument.
-    Candidates.NoteCandidates(*this, OCD_ViableCandidates, Inits);
+    Candidates.NoteCandidates(
+        PartialDiagnosticAt(
+            Kind.getLocation(),
+            PDiag(diag::err_deduced_class_template_ctor_ambiguous)
+                << TemplateName),
+        *this, OCD_ViableCandidates, Inits);
     return QualType();
 
   case OR_No_Viable_Function: {
@@ -9451,11 +9484,13 @@ QualType Sema::DeduceTemplateSpecializationFromInitializer(
         cast<ClassTemplateDecl>(Template)->getTemplatedDecl();
     bool Complete =
         isCompleteType(Kind.getLocation(), Context.getTypeDeclType(Primary));
-    Diag(Kind.getLocation(),
-         Complete ? diag::err_deduced_class_template_ctor_no_viable
-                  : diag::err_deduced_class_template_incomplete)
-      << TemplateName << !Guides.empty();
-    Candidates.NoteCandidates(*this, OCD_AllCandidates, Inits);
+    Candidates.NoteCandidates(
+        PartialDiagnosticAt(
+            Kind.getLocation(),
+            PDiag(Complete ? diag::err_deduced_class_template_ctor_no_viable
+                           : diag::err_deduced_class_template_incomplete)
+                << TemplateName << !Guides.empty()),
+        *this, OCD_AllCandidates, Inits);
     return QualType();
   }
 

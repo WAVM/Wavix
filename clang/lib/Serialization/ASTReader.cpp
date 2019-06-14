@@ -6141,8 +6141,13 @@ QualType ASTReader::readTypeRecord(unsigned Index) {
   case TYPE_AUTO: {
     QualType Deduced = readType(*Loc.F, Record, Idx);
     AutoTypeKeyword Keyword = (AutoTypeKeyword)Record[Idx++];
-    bool IsDependent = Deduced.isNull() ? Record[Idx++] : false;
-    return Context.getAutoType(Deduced, Keyword, IsDependent);
+    bool IsDependent = false, IsPack = false;
+    if (Deduced.isNull()) {
+      IsDependent = Record[Idx] > 0;
+      IsPack = Record[Idx] > 1;
+      ++Idx;
+    }
+    return Context.getAutoType(Deduced, Keyword, IsDependent, IsPack);
   }
 
   case TYPE_DEDUCED_TEMPLATE_SPECIALIZATION: {
@@ -6198,6 +6203,16 @@ QualType ASTReader::readTypeRecord(unsigned Index) {
     }
     QualType InnerType = readType(*Loc.F, Record, Idx);
     return Context.getParenType(InnerType);
+  }
+
+  case TYPE_MACRO_QUALIFIED: {
+    if (Record.size() != 2) {
+      Error("incorrect encoding of macro defined type");
+      return QualType();
+    }
+    QualType UnderlyingTy = readType(*Loc.F, Record, Idx);
+    IdentifierInfo *MacroII = GetIdentifierInfo(*Loc.F, Record, Idx);
+    return Context.getMacroQualifiedType(UnderlyingTy, MacroII);
   }
 
   case TYPE_PACK_EXPANSION: {
@@ -6519,6 +6534,10 @@ void TypeLocReader::VisitDecayedTypeLoc(DecayedTypeLoc TL) {
 
 void TypeLocReader::VisitAdjustedTypeLoc(AdjustedTypeLoc TL) {
   // nothing to do
+}
+
+void TypeLocReader::VisitMacroQualifiedTypeLoc(MacroQualifiedTypeLoc TL) {
+  TL.setExpansionLoc(ReadSourceLocation());
 }
 
 void TypeLocReader::VisitBlockPointerTypeLoc(BlockPointerTypeLoc TL) {
@@ -8729,6 +8748,11 @@ ASTReader::ReadTemplateName(ModuleFile &F, const RecordData &Record,
       Decls.addDecl(ReadDeclAs<NamedDecl>(F, Record, Idx));
 
     return Context.getOverloadedTemplateName(Decls.begin(), Decls.end());
+  }
+
+  case TemplateName::AssumedTemplate: {
+    DeclarationName Name = ReadDeclarationName(F, Record, Idx);
+    return Context.getAssumedTemplateName(Name);
   }
 
   case TemplateName::QualifiedTemplate: {

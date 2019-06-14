@@ -255,9 +255,12 @@ void TextNodeDumper::Visit(const Decl *D) {
 
   if (D->isInvalidDecl())
     OS << " invalid";
-  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D))
-    if (FD->isConstexpr())
+  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+    if (FD->isConstexprSpecified())
       OS << " constexpr";
+    if (FD->isConsteval())
+      OS << " consteval";
+  }
 
   if (!isa<FunctionDecl>(*D)) {
     const auto *MD = dyn_cast<ObjCMethodDecl>(D);
@@ -715,6 +718,12 @@ void TextNodeDumper::VisitDeclRefExpr(const DeclRefExpr *Node) {
     dumpBareDeclRef(Node->getFoundDecl());
     OS << ")";
   }
+  switch (Node->isNonOdrUse()) {
+  case NOUR_None: break;
+  case NOUR_Unevaluated: OS << " non_odr_use_unevaluated"; break;
+  case NOUR_Constant: OS << " non_odr_use_constant"; break;
+  case NOUR_Discarded: OS << " non_odr_use_discarded"; break;
+  }
 }
 
 void TextNodeDumper::VisitUnresolvedLookupExpr(
@@ -819,6 +828,12 @@ void TextNodeDumper::VisitUnaryExprOrTypeTraitExpr(
 void TextNodeDumper::VisitMemberExpr(const MemberExpr *Node) {
   OS << " " << (Node->isArrow() ? "->" : ".") << *Node->getMemberDecl();
   dumpPointer(Node->getMemberDecl());
+  switch (Node->isNonOdrUse()) {
+  case NOUR_None: break;
+  case NOUR_Unevaluated: OS << " non_odr_use_unevaluated"; break;
+  case NOUR_Constant: OS << " non_odr_use_constant"; break;
+  case NOUR_Discarded: OS << " non_odr_use_discarded"; break;
+  }
 }
 
 void TextNodeDumper::VisitExtVectorElementExpr(
@@ -1366,6 +1381,8 @@ void TextNodeDumper::VisitVarDecl(const VarDecl *D) {
       break;
     }
   }
+  if (D->isParameterPack())
+    OS << " pack";
 }
 
 void TextNodeDumper::VisitBindingDecl(const BindingDecl *D) {

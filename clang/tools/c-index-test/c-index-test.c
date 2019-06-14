@@ -88,6 +88,8 @@ static unsigned getDefaultParsingOptions() {
     options |= CXTranslationUnit_IncludeAttributedTypes;
   if (getenv("CINDEXTEST_VISIT_IMPLICIT_ATTRIBUTES"))
     options |= CXTranslationUnit_VisitImplicitAttributes;
+  if (getenv("CINDEXTEST_IGNORE_NONERRORS_FROM_INCLUDED_FILES"))
+    options |= CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles;
 
   return options;
 }
@@ -1669,6 +1671,13 @@ static enum CXChildVisitResult PrintType(CXCursor cursor, CXCursor p,
     {
       unsigned isAnonRecDecl = clang_Cursor_isAnonymousRecordDecl(cursor);
       printf(" [isAnonRecDecl=%d]", isAnonRecDecl);
+    }
+
+    /* Print if it is an inline namespace decl */
+    {
+      unsigned isInlineNamespace = clang_Cursor_isInlineNamespace(cursor);
+      if (isInlineNamespace != 0)
+        printf(" [isInlineNamespace=%d]", isInlineNamespace);
     }
 
     printf("\n");

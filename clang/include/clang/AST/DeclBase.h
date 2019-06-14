@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_AST_DECLBASE_H
 #define LLVM_CLANG_AST_DECLBASE_H
 
+#include "clang/AST/ASTDumperUtils.h"
 #include "clang/AST/AttrIterator.h"
 #include "clang/AST/DeclarationName.h"
 #include "clang/Basic/IdentifierTable.h"
@@ -366,6 +367,13 @@ private:
     }
     return ModuleOwnershipKind::Unowned;
   }
+
+public:
+  Decl() = delete;
+  Decl(const Decl&) = delete;
+  Decl(Decl &&) = delete;
+  Decl &operator=(const Decl&) = delete;
+  Decl &operator=(Decl&&) = delete;
 
 protected:
   Decl(Kind DK, DeclContext *DC, SourceLocation L)
@@ -1134,7 +1142,8 @@ public:
   // Same as dump(), but forces color printing.
   void dumpColor() const;
 
-  void dump(raw_ostream &Out, bool Deserialize = false) const;
+  void dump(raw_ostream &Out, bool Deserialize = false,
+            ASTDumpOutputFormat OutputFormat = ADOF_Default) const;
 
   /// \return Unique reproducible object identifier
   int64_t getID() const;
@@ -1472,10 +1481,6 @@ class DeclContext {
     uint64_t IsInline : 1;
     uint64_t IsInlineSpecified : 1;
 
-    /// This is shared by CXXConstructorDecl,
-    /// CXXConversionDecl, and CXXDeductionGuideDecl.
-    uint64_t IsExplicitSpecified : 1;
-
     uint64_t IsVirtualAsWritten : 1;
     uint64_t IsPure : 1;
     uint64_t HasInheritedPrototype : 1;
@@ -1495,7 +1500,9 @@ class DeclContext {
     uint64_t IsExplicitlyDefaulted : 1;
     uint64_t HasImplicitReturnZero : 1;
     uint64_t IsLateTemplateParsed : 1;
-    uint64_t IsConstexpr : 1;
+
+    /// Kind of contexpr specifier as defined by ConstexprSpecKind.
+    uint64_t ConstexprKind : 2;
     uint64_t InstantiationIsPending : 1;
 
     /// Indicates if the function uses __try.
@@ -1535,17 +1542,25 @@ class DeclContext {
     /// For the bits in FunctionDeclBitfields.
     uint64_t : NumFunctionDeclBits;
 
-    /// 25 bits to fit in the remaining availible space.
+    /// 24 bits to fit in the remaining available space.
     /// Note that this makes CXXConstructorDeclBitfields take
     /// exactly 64 bits and thus the width of NumCtorInitializers
     /// will need to be shrunk if some bit is added to NumDeclContextBitfields,
     /// NumFunctionDeclBitfields or CXXConstructorDeclBitfields.
-    uint64_t NumCtorInitializers : 25;
+    uint64_t NumCtorInitializers : 23;
     uint64_t IsInheritingConstructor : 1;
+
+    /// Whether this constructor has a trail-allocated explicit specifier.
+    uint64_t HasTrailingExplicitSpecifier : 1;
+    /// If this constructor does't have a trail-allocated explicit specifier.
+    /// Whether this constructor is explicit specified.
+    uint64_t IsSimpleExplicit : 1;
   };
 
   /// Number of non-inherited bits in CXXConstructorDeclBitfields.
-  enum { NumCXXConstructorDeclBits = 26 };
+  enum {
+    NumCXXConstructorDeclBits = 64 - NumDeclContextBits - NumFunctionDeclBits
+  };
 
   /// Stores the bits used by ObjCMethodDecl.
   /// If modified NumObjCMethodDeclBits and the accessor
