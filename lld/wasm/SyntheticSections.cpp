@@ -475,22 +475,11 @@ void LinkingSection::addToSymtab(Symbol *Sym) {
   SymtabEntries.emplace_back(Sym);
 }
 
-unsigned NameSection::numFunctionNames() const {
-  unsigned NumNames = Out.ImportSec->numImportedFunctions();
-  for (const InputFunction *F : Out.FunctionSec->InputFunctions)
-    if (!F->getName().empty() || !F->getDebugName().empty())
-      ++NumNames;
-
-  return NumNames;
-}
-
 // Create the custom "name" section containing debug symbol names.
 void NameSection::writeBody() {
-  SyntheticSection *Section = createSyntheticSection(WASM_SEC_CUSTOM, "name");
-
   // Write the function names subsection.
   unsigned NumFunctionNames = Out.ImportSec->numImportedFunctions();
-  for (const InputFunction *F : InputFunctions)
+  for (const InputFunction *F : Out.FunctionSec->InputFunctions)
     if (!F->getName().empty() || !F->getDebugName().empty())
       ++NumFunctionNames;
 
@@ -518,7 +507,7 @@ void NameSection::writeBody() {
       }
     }
 
-    FunctionSubsection.writeTo(Section->getStream());
+    FunctionSubsection.writeTo(BodyOutputStream);
   }
 
   // Write the table names subsection.
@@ -529,7 +518,7 @@ void NameSection::writeBody() {
     writeUleb128(TableSubsection.OS, 0, "table index");
     writeStr(TableSubsection.OS, FunctionTableName, "symbol name");
 
-    TableSubsection.writeTo(Section->getStream());
+    TableSubsection.writeTo(BodyOutputStream);
   }
 
   // Write the memory names subsection.
@@ -540,12 +529,12 @@ void NameSection::writeBody() {
     writeUleb128(MemorySubsection.OS, 0, "memory index");
     writeStr(MemorySubsection.OS, "memory", "symbol name");
 
-    MemorySubsection.writeTo(Section->getStream());
+    MemorySubsection.writeTo(BodyOutputStream);
   }
 
   // Write the global names subsection.
   unsigned NumGlobalNames = Out.ImportSec->numImportedGlobals();
-  for (const InputGlobal *G : InputGlobals)
+  for (const InputGlobal *G : Out.GlobalSec->InputGlobals)
     if (!G->getName().empty())
       ++NumGlobalNames;
 
@@ -553,19 +542,19 @@ void NameSection::writeBody() {
     SubSection GlobalSubsection(WASM_NAMES_GLOBAL);
     writeUleb128(GlobalSubsection.OS, NumGlobalNames, "name count");
 
-    for (const Symbol *S : ImportedSymbols) {
+    for (const Symbol *S : Out.ImportSec->ImportedSymbols) {
       if (auto *G = dyn_cast<GlobalSymbol>(S)) {
         writeUleb128(GlobalSubsection.OS, G->getGlobalIndex(), "global index");
         writeStr(GlobalSubsection.OS, toString(*S), "symbol name");
       }
     }
 
-    for (const InputGlobal *G : InputGlobals) {
+    for (const InputGlobal *G : Out.GlobalSec->InputGlobals) {
       writeUleb128(GlobalSubsection.OS, G->getGlobalIndex(), "global index");
       writeStr(GlobalSubsection.OS, maybeDemangleSymbol(G->getName()), "symbol name");
     }
 
-    GlobalSubsection.writeTo(Section->getStream());
+    GlobalSubsection.writeTo(BodyOutputStream);
   }
 }
 

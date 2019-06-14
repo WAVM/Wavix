@@ -213,11 +213,13 @@ public:
 };
 
 class StartSection : public SyntheticSection {
-  StartSection() : SyntheticSection(llvm::wasm::WASM_SEC_START) {}
+public:
+  StartSection(const FunctionSymbol* StartFunction)
+      : SyntheticSection(llvm::wasm::WASM_SEC_START),
+        StartFunction(StartFunction) {}
   bool isNeeded() const override { return StartFunction->hasFunctionIndex(); }
   void writeBody() override;
 
-protected:
   const FunctionSymbol* StartFunction;
 };
 

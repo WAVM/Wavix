@@ -364,8 +364,6 @@ static void setConfigs() {
   Config->Pic = Config->Pie || Config->Shared;
 
   if (Config->Pic) {
-    if (Config->ExportTable)
-      error("-shared/-pie is incompatible with --export-table");
     Config->ImportTable = true;
   }
 

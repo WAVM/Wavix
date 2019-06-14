@@ -288,7 +288,7 @@ Process* Wavix::spawnProcess(Process* parent,
 	if(!moduleInstance) { return nullptr; }
 
 	// Get the module's memory and table.
-	process->memory = asMemoryNullable(getInstanceExport(moduleInstance, "__memory"));
+	process->memory = asMemoryNullable(getInstanceExport(moduleInstance, "memory"));
 	process->table
 		= asTableNullable(getInstanceExport(moduleInstance, "__indirect_function_table"));
 
