@@ -592,7 +592,9 @@ void COFFDumper::cacheRelocations() {
       RelocMap[Section].push_back(Reloc);
 
     // Sort relocations by address.
-    llvm::sort(RelocMap[Section], relocAddressLess);
+    llvm::sort(RelocMap[Section], [](RelocationRef L, RelocationRef R) {
+      return L.getOffset() < R.getOffset();
+    });
   }
 }
 
@@ -931,8 +933,7 @@ void COFFDumper::initializeFileAndStringTables(BinaryStreamReader &Reader) {
 
 void COFFDumper::printCodeViewSymbolSection(StringRef SectionName,
                                             const SectionRef &Section) {
-  StringRef SectionContents;
-  error(Section.getContents(SectionContents));
+  StringRef SectionContents = unwrapOrError(Section.getContents());
   StringRef Data = SectionContents;
 
   SmallVector<StringRef, 10> FunctionNames;
@@ -1216,8 +1217,7 @@ void COFFDumper::mergeCodeViewTypes(MergingTypeTableBuilder &CVIDs,
     StringRef SectionName;
     error(S.getName(SectionName));
     if (SectionName == ".debug$T") {
-      StringRef Data;
-      error(S.getContents(Data));
+      StringRef Data = unwrapOrError(S.getContents());
       uint32_t Magic;
       error(consume(Data, Magic));
       if (Magic != 4)
@@ -1253,8 +1253,7 @@ void COFFDumper::printCodeViewTypeSection(StringRef SectionName,
   ListScope D(W, "CodeViewTypes");
   W.printNumber("Section", SectionName, Obj->getSectionID(Section));
 
-  StringRef Data;
-  error(Section.getContents(Data));
+  StringRef Data = unwrapOrError(Section.getContents());
   if (opts::CodeViewSubsectionBytes)
     W.printBinaryBlock("Data", Data);
 
@@ -1314,9 +1313,7 @@ void COFFDumper::printSectionHeaders() {
 
     if (opts::SectionData &&
         !(Section->Characteristics & COFF::IMAGE_SCN_CNT_UNINITIALIZED_DATA)) {
-      StringRef Data;
-      error(Sec.getContents(Data));
-
+      StringRef Data = unwrapOrError(Sec.getContents());
       W.printBinaryBlock("SectionData", Data);
     }
   }
@@ -1390,15 +1387,11 @@ void COFFDumper::printSymbols() {
 
 void COFFDumper::printDynamicSymbols() { ListScope Group(W, "DynamicSymbols"); }
 
-static ErrorOr<StringRef>
+static Expected<StringRef>
 getSectionName(const llvm::object::COFFObjectFile *Obj, int32_t SectionNumber,
                const coff_section *Section) {
-  if (Section) {
-    StringRef SectionName;
-    if (std::error_code EC = Obj->getSectionName(Section, SectionName))
-      return EC;
-    return SectionName;
-  }
+  if (Section)
+    return Obj->getSectionName(Section);
   if (SectionNumber == llvm::COFF::IMAGE_SYM_DEBUG)
     return StringRef("IMAGE_SYM_DEBUG");
   if (SectionNumber == llvm::COFF::IMAGE_SYM_ABSOLUTE)
@@ -1423,11 +1416,10 @@ void COFFDumper::printSymbol(const SymbolRef &Sym) {
   if (Obj->getSymbolName(Symbol, SymbolName))
     SymbolName = "";
 
-  StringRef SectionName = "";
-  ErrorOr<StringRef> Res =
-      getSectionName(Obj, Symbol.getSectionNumber(), Section);
-  if (Res)
-    SectionName = *Res;
+  StringRef SectionName;
+  if (Expected<StringRef> NameOrErr =
+          getSectionName(Obj, Symbol.getSectionNumber(), Section))
+    SectionName = *NameOrErr;
 
   W.printString("Name", SymbolName);
   W.printNumber("Value", Symbol.getValue());
@@ -1495,16 +1487,12 @@ void COFFDumper::printSymbol(const SymbolRef &Sym) {
           && Aux->Selection == COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE) {
         const coff_section *Assoc;
         StringRef AssocName = "";
-        std::error_code EC = Obj->getSection(AuxNumber, Assoc);
-        ErrorOr<StringRef> Res = getSectionName(Obj, AuxNumber, Assoc);
-        if (Res)
-          AssocName = *Res;
-        if (!EC)
-          EC = Res.getError();
-        if (EC) {
-          AssocName = "";
+        if (std::error_code EC = Obj->getSection(AuxNumber, Assoc))
           error(EC);
-        }
+        Expected<StringRef> Res = getSectionName(Obj, AuxNumber, Assoc);
+        if (!Res)
+          error(Res.takeError());
+        AssocName = *Res;
 
         W.printNumber("AssocSection", AssocName, AuxNumber);
       }
@@ -1551,7 +1539,8 @@ void COFFDumper::printUnwindInfo() {
   case COFF::IMAGE_FILE_MACHINE_ARMNT: {
     ARM::WinEH::Decoder Decoder(W, Obj->getMachine() ==
                                        COFF::IMAGE_FILE_MACHINE_ARM64);
-    Decoder.dumpProcedureData(*Obj);
+    // TODO Propagate the error.
+    consumeError(Decoder.dumpProcedureData(*Obj));
     break;
   }
   default:
@@ -1576,7 +1565,7 @@ void COFFDumper::printNeededLibraries() {
   llvm::stable_sort(Libs);
 
   for (const auto &L : Libs) {
-    outs() << "  " << L << "\n";
+    W.startLine() << L << "\n";
   }
 }
 
@@ -1666,15 +1655,13 @@ void COFFDumper::printCOFFExports() {
 
 void COFFDumper::printCOFFDirectives() {
   for (const SectionRef &Section : Obj->sections()) {
-    StringRef Contents;
     StringRef Name;
 
     error(Section.getName(Name));
     if (Name != ".drectve")
       continue;
 
-    error(Section.getContents(Contents));
-
+    StringRef Contents = unwrapOrError(Section.getContents());
     W.printString("Directive(s)", Contents);
   }
 }
@@ -1713,8 +1700,7 @@ void COFFDumper::printCOFFResources() {
     if (!Name.startswith(".rsrc"))
       continue;
 
-    StringRef Ref;
-    error(S.getContents(Ref));
+    StringRef Ref = unwrapOrError(S.getContents());
 
     if ((Name == ".rsrc") || (Name == ".rsrc$01")) {
       ResourceSectionRef RSF(Ref);
@@ -1840,8 +1826,7 @@ void COFFDumper::printStackMap() const {
   if (StackMapSection == object::SectionRef())
     return;
 
-  StringRef StackMapContents;
-  StackMapSection.getContents(StackMapContents);
+  StringRef StackMapContents = unwrapOrError(StackMapSection.getContents());
   ArrayRef<uint8_t> StackMapContentsArray =
       arrayRefFromStringRef(StackMapContents);
 
@@ -1867,8 +1852,7 @@ void COFFDumper::printAddrsig() {
   if (AddrsigSection == object::SectionRef())
     return;
 
-  StringRef AddrsigContents;
-  AddrsigSection.getContents(AddrsigContents);
+  StringRef AddrsigContents = unwrapOrError(AddrsigSection.getContents());
   ArrayRef<uint8_t> AddrsigContentsArray(AddrsigContents.bytes_begin(),
                                          AddrsigContents.size());
 

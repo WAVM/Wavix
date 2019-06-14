@@ -1279,6 +1279,7 @@ void ELFObjectWriter::executePostLayoutBinding(MCAssembler &Asm,
     // This is the first place we are able to copy this information.
     Alias->setExternal(Symbol.isExternal());
     Alias->setBinding(Symbol.getBinding());
+    Alias->setOther(Symbol.getOther());
 
     if (!Symbol.isUndefined() && !Rest.startswith("@@@"))
       continue;
@@ -1371,6 +1372,12 @@ bool ELFObjectWriter::shouldRelocateWithSymbol(const MCAssembler &Asm,
     // has to point to the symbol for a reason analogous to the STB_WEAK case.
     return true;
   }
+
+  // Keep symbol type for a local ifunc because it may result in an IRELATIVE
+  // reloc that the dynamic loader will use to resolve the address at startup
+  // time.
+  if (Sym->getType() == ELF::STT_GNU_IFUNC)
+    return true;
 
   // If a relocation points to a mergeable section, we have to be careful.
   // If the offset is zero, a relocation with the section will encode the

@@ -67,7 +67,28 @@ public:
   /// not large enough to contain the number of modules declared in the stream
   /// header. The consistency of the Module entries themselves is not checked in
   /// any way.
-  Expected<ArrayRef<minidump::Module>> getModuleList() const;
+  Expected<ArrayRef<minidump::Module>> getModuleList() const {
+    return getListStream<minidump::Module>(minidump::StreamType::ModuleList);
+  }
+
+  /// Returns the thread list embedded in the ThreadList stream. An error is
+  /// returned if the file does not contain this stream, or if the stream is
+  /// not large enough to contain the number of threads declared in the stream
+  /// header. The consistency of the Thread entries themselves is not checked in
+  /// any way.
+  Expected<ArrayRef<minidump::Thread>> getThreadList() const {
+    return getListStream<minidump::Thread>(minidump::StreamType::ThreadList);
+  }
+
+  /// Returns the list of memory ranges embedded in the MemoryList stream. An
+  /// error is returned if the file does not contain this stream, or if the
+  /// stream is not large enough to contain the number of memory descriptors
+  /// declared in the stream header. The consistency of the MemoryDescriptor
+  /// entries themselves is not checked in any way.
+  Expected<ArrayRef<minidump::MemoryDescriptor>> getMemoryList() const {
+    return getListStream<minidump::MemoryDescriptor>(
+        minidump::StreamType::MemoryList);
+  }
 
 private:
   static Error createError(StringRef Str) {
@@ -104,6 +125,11 @@ private:
   /// that the stream is large enough to hold an object of this type.
   template <typename T>
   Expected<const T &> getStream(minidump::StreamType Stream) const;
+
+  /// Return the contents of a stream which contains a list of fixed-size items,
+  /// prefixed by the list size.
+  template <typename T>
+  Expected<ArrayRef<T>> getListStream(minidump::StreamType Stream) const;
 
   const minidump::Header &Header;
   ArrayRef<minidump::Directory> Streams;

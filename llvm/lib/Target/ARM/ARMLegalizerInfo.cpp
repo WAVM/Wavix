@@ -82,7 +82,7 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
   }
 
   getActionDefinitionsBuilder({G_SEXT, G_ZEXT, G_ANYEXT})
-      .legalForCartesianProduct({s32}, {s1, s8, s16});
+      .legalForCartesianProduct({s8, s16, s32}, {s1, s8, s16});
 
   getActionDefinitionsBuilder({G_ADD, G_SUB, G_MUL, G_AND, G_OR, G_XOR})
       .legalFor({s32})
@@ -114,8 +114,12 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
       setAction({Op, s32}, Libcall);
   }
 
-  getActionDefinitionsBuilder(G_INTTOPTR).legalFor({{p0, s32}});
-  getActionDefinitionsBuilder(G_PTRTOINT).legalFor({{s32, p0}});
+  getActionDefinitionsBuilder(G_INTTOPTR)
+      .legalFor({{p0, s32}})
+      .minScalar(1, s32);
+  getActionDefinitionsBuilder(G_PTRTOINT)
+      .legalFor({{s32, p0}})
+      .minScalar(0, s32);
 
   getActionDefinitionsBuilder(G_CONSTANT)
       .legalFor({s32, p0})
@@ -125,8 +129,9 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
       .legalForCartesianProduct({s1}, {s32, p0})
       .minScalar(1, s32);
 
-  getActionDefinitionsBuilder(G_SELECT).legalForCartesianProduct({s32, p0},
-                                                                 {s1});
+  getActionDefinitionsBuilder(G_SELECT)
+      .legalForCartesianProduct({s32, p0}, {s1})
+      .minScalar(0, s32);
 
   // We're keeping these builders around because we'll want to add support for
   // floating point to them.
@@ -146,11 +151,13 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
           .legalFor({s32, p0})
           .minScalar(0, s32);
 
-  getActionDefinitionsBuilder(G_GEP).legalFor({{p0, s32}});
+  getActionDefinitionsBuilder(G_GEP)
+      .legalFor({{p0, s32}})
+      .minScalar(1, s32);
 
   getActionDefinitionsBuilder(G_BRCOND).legalFor({s1});
 
-  if (!ST.useSoftFloat() && ST.hasVFP2()) {
+  if (!ST.useSoftFloat() && ST.hasVFP2Base()) {
     getActionDefinitionsBuilder(
         {G_FADD, G_FSUB, G_FMUL, G_FDIV, G_FCONSTANT, G_FNEG})
         .legalFor({s32, s64});
@@ -201,7 +208,7 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
         .libcallForCartesianProduct({s32, s64}, {s32});
   }
 
-  if (!ST.useSoftFloat() && ST.hasVFP4())
+  if (!ST.useSoftFloat() && ST.hasVFP4Base())
     getActionDefinitionsBuilder(G_FMA).legalFor({s32, s64});
   else
     getActionDefinitionsBuilder(G_FMA).libcallFor({s32, s64});

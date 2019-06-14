@@ -192,19 +192,57 @@ example:
 
 .. code-block:: none
 
-  # LLVM-MCA-BEGIN My Code Region
+  # LLVM-MCA-BEGIN
     ...
   # LLVM-MCA-END
 
-Multiple regions can be specified provided that they do not overlap.  A code
-region can have an optional description. If no user-defined region is specified,
-then :program:`llvm-mca` assumes a default region which contains every
-instruction in the input file.  Every region is analyzed in isolation, and the
-final performance report is the union of all the reports generated for every
-code region.
+If no user-defined region is specified, then :program:`llvm-mca` assumes a
+default region which contains every instruction in the input file.  Every region
+is analyzed in isolation, and the final performance report is the union of all
+the reports generated for every code region.
 
-Inline assembly directives may be used from source code to annotate the
-assembly text:
+Code regions can have names. For example:
+
+.. code-block:: none
+
+  # LLVM-MCA-BEGIN A simple example
+    add %eax, %eax
+  # LLVM-MCA-END 
+
+The code from the example above defines a region named "A simple example" with a
+single instruction in it. Note how the region name doesn't have to be repeated
+in the ``LLVM-MCA-END`` directive. In the absence of overlapping regions,
+an anonymous ``LLVM-MCA-END`` directive always ends the currently active user
+defined region.
+
+Example of nesting regions:
+
+.. code-block:: none
+
+  # LLVM-MCA-BEGIN foo
+    add %eax, %edx
+  # LLVM-MCA-BEGIN bar
+    sub %eax, %edx
+  # LLVM-MCA-END bar
+  # LLVM-MCA-END foo
+
+Example of overlapping regions:
+
+.. code-block:: none
+
+  # LLVM-MCA-BEGIN foo
+    add %eax, %edx
+  # LLVM-MCA-BEGIN bar
+    sub %eax, %edx
+  # LLVM-MCA-END foo
+    add %eax, %edx
+  # LLVM-MCA-END bar
+
+Note that multiple anonymous regions cannot overlap. Also, overlapping regions
+cannot have the same name.
+
+There is no support for marking regions from high-level source code, like C or
+C++. As a workaround, inline assembly directives may be used:
 
 .. code-block:: c++
 
@@ -215,6 +253,15 @@ assembly text:
     a *= b;
     return a;
   }
+
+However, this interferes with optimizations like loop vectorization and may have
+an impact on the code generated. This is because the ``__asm`` statements are
+seen as real code having important side effects, which limits how the code
+around them can be transformed. If users want to make use of inline assembly
+to emit markers, then the recommendation is to always verify that the output
+assembly is equivalent to the assembly generated in the absence of markers.
+The `Clang options to emit optimization reports <https://clang.llvm.org/docs/UsersManual.html#options-to-emit-optimization-reports>`_
+can also help in detecting missed optimizations.
 
 HOW LLVM-MCA WORKS
 ------------------

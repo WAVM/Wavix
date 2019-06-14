@@ -23,6 +23,8 @@ static cl::opt<TargetLibraryInfoImpl::VectorLibrary> ClVectorLibrary(
                           "No vector functions library"),
                clEnumValN(TargetLibraryInfoImpl::Accelerate, "Accelerate",
                           "Accelerate framework"),
+               clEnumValN(TargetLibraryInfoImpl::MASSV, "MASSV",
+                          "IBM MASS vector library"),
                clEnumValN(TargetLibraryInfoImpl::SVML, "SVML",
                           "Intel SVML library")));
 
@@ -87,8 +89,8 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
        ShouldSignExtI32Param = false;
   // PowerPC64, Sparc64, SystemZ need signext/zeroext on i32 parameters and
   // returns corresponding to C-level ints and unsigned ints.
-  if (T.getArch() == Triple::ppc64 || T.getArch() == Triple::ppc64le ||
-      T.getArch() == Triple::sparcv9 || T.getArch() == Triple::systemz) {
+  if (T.isPPC64() || T.getArch() == Triple::sparcv9 ||
+      T.getArch() == Triple::systemz) {
     ShouldExtI32Param = true;
     ShouldExtI32Return = true;
   }
@@ -691,11 +693,21 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     return ((NumParams == 2 || NumParams == 3) &&
             FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy());
+  case LibFunc_strcat_chk:
+    --NumParams;
+    if (!IsSizeTTy(FTy.getParamType(NumParams)))
+      return false;
+    LLVM_FALLTHROUGH;
   case LibFunc_strcat:
     return (NumParams == 2 && FTy.getReturnType()->isPointerTy() &&
             FTy.getParamType(0) == FTy.getReturnType() &&
             FTy.getParamType(1) == FTy.getReturnType());
 
+  case LibFunc_strncat_chk:
+    --NumParams;
+    if (!IsSizeTTy(FTy.getParamType(NumParams)))
+      return false;
+    LLVM_FALLTHROUGH;
   case LibFunc_strncat:
     return (NumParams == 3 && FTy.getReturnType()->isPointerTy() &&
             FTy.getParamType(0) == FTy.getReturnType() &&
@@ -713,6 +725,19 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     return (NumParams == 2 && FTy.getReturnType() == FTy.getParamType(0) &&
             FTy.getParamType(0) == FTy.getParamType(1) &&
             FTy.getParamType(0) == PCharTy);
+
+  case LibFunc_strlcat_chk:
+  case LibFunc_strlcpy_chk:
+    --NumParams;
+    if (!IsSizeTTy(FTy.getParamType(NumParams)))
+      return false;
+    LLVM_FALLTHROUGH;
+  case LibFunc_strlcat:
+  case LibFunc_strlcpy:
+    return NumParams == 3 && IsSizeTTy(FTy.getReturnType()) &&
+           FTy.getParamType(0)->isPointerTy() &&
+           FTy.getParamType(1)->isPointerTy() &&
+           IsSizeTTy(FTy.getParamType(2));
 
   case LibFunc_strncpy_chk:
   case LibFunc_stpncpy_chk:
@@ -784,10 +809,27 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     return (NumParams >= 2 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy() &&
             FTy.getReturnType()->isIntegerTy(32));
+
+  case LibFunc_sprintf_chk:
+    return NumParams == 4 && FTy.getParamType(0)->isPointerTy() &&
+           FTy.getParamType(1)->isIntegerTy(32) &&
+           IsSizeTTy(FTy.getParamType(2)) &&
+           FTy.getParamType(3)->isPointerTy() &&
+           FTy.getReturnType()->isIntegerTy(32);
+
   case LibFunc_snprintf:
     return (NumParams == 3 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(2)->isPointerTy() &&
             FTy.getReturnType()->isIntegerTy(32));
+
+  case LibFunc_snprintf_chk:
+    return NumParams == 5 && FTy.getParamType(0)->isPointerTy() &&
+           IsSizeTTy(FTy.getParamType(1)) &&
+           FTy.getParamType(2)->isIntegerTy(32) &&
+           IsSizeTTy(FTy.getParamType(3)) &&
+           FTy.getParamType(4)->isPointerTy() &&
+           FTy.getReturnType()->isIntegerTy(32);
+
   case LibFunc_setitimer:
     return (NumParams == 3 && FTy.getParamType(1)->isPointerTy() &&
             FTy.getParamType(2)->isPointerTy());
@@ -836,6 +878,11 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
             FTy.getParamType(1)->isIntegerTy() &&
             IsSizeTTy(FTy.getParamType(2)));
 
+  case LibFunc_memccpy_chk:
+      --NumParams;
+    if (!IsSizeTTy(FTy.getParamType(NumParams)))
+      return false;
+    LLVM_FALLTHROUGH;
   case LibFunc_memccpy:
     return (NumParams >= 2 && FTy.getParamType(1)->isPointerTy());
   case LibFunc_memalign:
@@ -1004,9 +1051,17 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc_vsprintf:
     return (NumParams == 3 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy());
+  case LibFunc_vsprintf_chk:
+    return NumParams == 5 && FTy.getParamType(0)->isPointerTy() &&
+           FTy.getParamType(1)->isIntegerTy(32) &&
+           IsSizeTTy(FTy.getParamType(2)) && FTy.getParamType(3)->isPointerTy();
   case LibFunc_vsnprintf:
     return (NumParams == 4 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(2)->isPointerTy());
+  case LibFunc_vsnprintf_chk:
+    return NumParams == 6 && FTy.getParamType(0)->isPointerTy() &&
+           FTy.getParamType(2)->isIntegerTy(32) &&
+           IsSizeTTy(FTy.getParamType(3)) && FTy.getParamType(4)->isPointerTy();
   case LibFunc_open:
     return (NumParams >= 2 && FTy.getParamType(0)->isPointerTy());
   case LibFunc_opendir:
@@ -1434,6 +1489,11 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
 
 bool TargetLibraryInfoImpl::getLibFunc(const Function &FDecl,
                                        LibFunc &F) const {
+  // Intrinsics don't overlap w/libcalls; if our module has a large number of
+  // intrinsics, this ends up being an interesting compile time win since we
+  // avoid string normalization and comparison. 
+  if (FDecl.isIntrinsic()) return false;
+  
   const DataLayout *DL =
       FDecl.getParent() ? &FDecl.getParent()->getDataLayout() : nullptr;
   return getLibFunc(FDecl.getName(), F) &&
@@ -1474,6 +1534,14 @@ void TargetLibraryInfoImpl::addVectorizableFunctionsFromVecLib(
   case Accelerate: {
     const VecDesc VecFuncs[] = {
     #define TLI_DEFINE_ACCELERATE_VECFUNCS
+    #include "llvm/Analysis/VecFuncs.def"
+    };
+    addVectorizableFunctions(VecFuncs);
+    break;
+  }
+  case MASSV: {
+    const VecDesc VecFuncs[] = {
+    #define TLI_DEFINE_MASSV_VECFUNCS
     #include "llvm/Analysis/VecFuncs.def"
     };
     addVectorizableFunctions(VecFuncs);

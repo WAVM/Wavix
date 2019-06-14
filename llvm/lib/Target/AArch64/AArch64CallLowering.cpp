@@ -232,7 +232,8 @@ void AArch64CallLowering::splitToValueTypes(
 
 bool AArch64CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
                                       const Value *Val,
-                                      ArrayRef<unsigned> VRegs) const {
+                                      ArrayRef<unsigned> VRegs,
+                                      unsigned SwiftErrorVReg) const {
   auto MIB = MIRBuilder.buildInstrNoInsert(AArch64::RET_ReallyLR);
   assert(((Val && !VRegs.empty()) || (!Val && VRegs.empty())) &&
          "Return value without a vreg");
@@ -286,20 +287,40 @@ bool AArch64CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
           LLT OldLLT(MVT::getVT(CurArgInfo.Ty));
           CurArgInfo.Ty = EVT(NewVT).getTypeForEVT(Ctx);
           // Instead of an extend, we might have a vector type which needs
-          // padding with more elements, e.g. <2 x half> -> <4 x half>
-          if (NewVT.isVector() &&
-              NewLLT.getNumElements() > OldLLT.getNumElements()) {
-            // We don't handle VA types which are not exactly twice the size,
-            // but can easily be done in future.
-            if (NewLLT.getNumElements() != OldLLT.getNumElements() * 2) {
-              LLVM_DEBUG(dbgs() << "Outgoing vector ret has too many elts");
+          // padding with more elements, e.g. <2 x half> -> <4 x half>.
+          if (NewVT.isVector()) {
+            if (OldLLT.isVector()) {
+              if (NewLLT.getNumElements() > OldLLT.getNumElements()) {
+                // We don't handle VA types which are not exactly twice the
+                // size, but can easily be done in future.
+                if (NewLLT.getNumElements() != OldLLT.getNumElements() * 2) {
+                  LLVM_DEBUG(dbgs() << "Outgoing vector ret has too many elts");
+                  return false;
+                }
+                auto Undef = MIRBuilder.buildUndef({OldLLT});
+                CurVReg =
+                    MIRBuilder.buildMerge({NewLLT}, {CurVReg, Undef.getReg(0)})
+                        .getReg(0);
+              } else {
+                // Just do a vector extend.
+                CurVReg = MIRBuilder.buildInstr(ExtendOp, {NewLLT}, {CurVReg})
+                              .getReg(0);
+              }
+            } else if (NewLLT.getNumElements() == 2) {
+              // We need to pad a <1 x S> type to <2 x S>. Since we don't have
+              // <1 x S> vector types in GISel we use a build_vector instead
+              // of a vector merge/concat.
+              auto Undef = MIRBuilder.buildUndef({OldLLT});
+              CurVReg =
+                  MIRBuilder
+                      .buildBuildVector({NewLLT}, {CurVReg, Undef.getReg(0)})
+                      .getReg(0);
+            } else {
+              LLVM_DEBUG(dbgs() << "Could not handle ret ty");
               return false;
             }
-            auto Undef = MIRBuilder.buildUndef({OldLLT});
-            CurVReg =
-                MIRBuilder.buildMerge({NewLLT}, {CurVReg, Undef.getReg(0)})
-                    .getReg(0);
           } else {
+            // A scalar extend.
             CurVReg =
                 MIRBuilder.buildInstr(ExtendOp, {NewLLT}, {CurVReg}).getReg(0);
           }
@@ -318,6 +339,11 @@ bool AArch64CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
 
     OutgoingArgHandler Handler(MIRBuilder, MRI, MIB, AssignFn, AssignFn);
     Success = handleAssignments(MIRBuilder, SplitArgs, Handler);
+  }
+
+  if (SwiftErrorVReg) {
+    MIB.addUse(AArch64::X21, RegState::Implicit);
+    MIRBuilder.buildCopy(AArch64::X21, SwiftErrorVReg);
   }
 
   MIRBuilder.insertInstr(MIB);
@@ -400,7 +426,8 @@ bool AArch64CallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
                                     CallingConv::ID CallConv,
                                     const MachineOperand &Callee,
                                     const ArgInfo &OrigRet,
-                                    ArrayRef<ArgInfo> OrigArgs) const {
+                                    ArrayRef<ArgInfo> OrigArgs,
+                                    unsigned SwiftErrorVReg) const {
   MachineFunction &MF = MIRBuilder.getMF();
   const Function &F = MF.getFunction();
   MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -481,6 +508,11 @@ bool AArch64CallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
 
     if (!RegOffsets.empty())
       MIRBuilder.buildSequence(OrigRet.Reg, SplitRegs, RegOffsets);
+  }
+
+  if (SwiftErrorVReg) {
+    MIB.addDef(AArch64::X21, RegState::Implicit);
+    MIRBuilder.buildCopy(SwiftErrorVReg, AArch64::X21);
   }
 
   CallSeqStart.addImm(Handler.StackSize).addImm(0);

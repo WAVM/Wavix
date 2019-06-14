@@ -3136,6 +3136,11 @@ bool llvm::isKnownNeverNaN(const Value *V, const TargetLibraryInfo *TLI,
     case Intrinsic::sqrt:
       return isKnownNeverNaN(II->getArgOperand(0), TLI, Depth + 1) &&
              CannotBeOrderedLessThanZero(II->getArgOperand(0), TLI);
+    case Intrinsic::minnum:
+    case Intrinsic::maxnum:
+      // If either operand is not NaN, the result is not NaN.
+      return isKnownNeverNaN(II->getArgOperand(0), TLI, Depth + 1) ||
+             isKnownNeverNaN(II->getArgOperand(1), TLI, Depth + 1);
     default:
       return false;
     }
@@ -3982,51 +3987,46 @@ bool llvm::mayBeMemoryDependent(const Instruction &I) {
   return I.mayReadOrWriteMemory() || !isSafeToSpeculativelyExecute(&I);
 }
 
+/// Convert ConstantRange OverflowResult into ValueTracking OverflowResult.
+static OverflowResult mapOverflowResult(ConstantRange::OverflowResult OR) {
+  switch (OR) {
+    case ConstantRange::OverflowResult::MayOverflow:
+      return OverflowResult::MayOverflow;
+    case ConstantRange::OverflowResult::AlwaysOverflowsLow:
+      return OverflowResult::AlwaysOverflowsLow;
+    case ConstantRange::OverflowResult::AlwaysOverflowsHigh:
+      return OverflowResult::AlwaysOverflowsHigh;
+    case ConstantRange::OverflowResult::NeverOverflows:
+      return OverflowResult::NeverOverflows;
+  }
+  llvm_unreachable("Unknown OverflowResult");
+}
+
+/// Combine constant ranges from computeConstantRange() and computeKnownBits().
+static ConstantRange computeConstantRangeIncludingKnownBits(
+    const Value *V, bool ForSigned, const DataLayout &DL, unsigned Depth,
+    AssumptionCache *AC, const Instruction *CxtI, const DominatorTree *DT,
+    OptimizationRemarkEmitter *ORE = nullptr, bool UseInstrInfo = true) {
+  KnownBits Known = computeKnownBits(
+      V, DL, Depth, AC, CxtI, DT, ORE, UseInstrInfo);
+  ConstantRange CR1 = ConstantRange::fromKnownBits(Known, ForSigned);
+  ConstantRange CR2 = computeConstantRange(V, UseInstrInfo);
+  ConstantRange::PreferredRangeType RangeType =
+      ForSigned ? ConstantRange::Signed : ConstantRange::Unsigned;
+  return CR1.intersectWith(CR2, RangeType);
+}
+
 OverflowResult llvm::computeOverflowForUnsignedMul(
     const Value *LHS, const Value *RHS, const DataLayout &DL,
     AssumptionCache *AC, const Instruction *CxtI, const DominatorTree *DT,
     bool UseInstrInfo) {
-  // Multiplying n * m significant bits yields a result of n + m significant
-  // bits. If the total number of significant bits does not exceed the
-  // result bit width (minus 1), there is no overflow.
-  // This means if we have enough leading zero bits in the operands
-  // we can guarantee that the result does not overflow.
-  // Ref: "Hacker's Delight" by Henry Warren
-  unsigned BitWidth = LHS->getType()->getScalarSizeInBits();
-  KnownBits LHSKnown(BitWidth);
-  KnownBits RHSKnown(BitWidth);
-  computeKnownBits(LHS, LHSKnown, DL, /*Depth=*/0, AC, CxtI, DT, nullptr,
-                   UseInstrInfo);
-  computeKnownBits(RHS, RHSKnown, DL, /*Depth=*/0, AC, CxtI, DT, nullptr,
-                   UseInstrInfo);
-  // Note that underestimating the number of zero bits gives a more
-  // conservative answer.
-  unsigned ZeroBits = LHSKnown.countMinLeadingZeros() +
-                      RHSKnown.countMinLeadingZeros();
-  // First handle the easy case: if we have enough zero bits there's
-  // definitely no overflow.
-  if (ZeroBits >= BitWidth)
-    return OverflowResult::NeverOverflows;
-
-  // Get the largest possible values for each operand.
-  APInt LHSMax = ~LHSKnown.Zero;
-  APInt RHSMax = ~RHSKnown.Zero;
-
-  // We know the multiply operation doesn't overflow if the maximum values for
-  // each operand will not overflow after we multiply them together.
-  bool MaxOverflow;
-  (void)LHSMax.umul_ov(RHSMax, MaxOverflow);
-  if (!MaxOverflow)
-    return OverflowResult::NeverOverflows;
-
-  // We know it always overflows if multiplying the smallest possible values for
-  // the operands also results in overflow.
-  bool MinOverflow;
-  (void)LHSKnown.One.umul_ov(RHSKnown.One, MinOverflow);
-  if (MinOverflow)
-    return OverflowResult::AlwaysOverflows;
-
-  return OverflowResult::MayOverflow;
+  KnownBits LHSKnown = computeKnownBits(LHS, DL, /*Depth=*/0, AC, CxtI, DT,
+                                        nullptr, UseInstrInfo);
+  KnownBits RHSKnown = computeKnownBits(RHS, DL, /*Depth=*/0, AC, CxtI, DT,
+                                        nullptr, UseInstrInfo);
+  ConstantRange LHSRange = ConstantRange::fromKnownBits(LHSKnown, false);
+  ConstantRange RHSRange = ConstantRange::fromKnownBits(RHSKnown, false);
+  return mapOverflowResult(LHSRange.unsignedMulMayOverflow(RHSRange));
 }
 
 OverflowResult
@@ -4070,33 +4070,6 @@ llvm::computeOverflowForSignedMul(const Value *LHS, const Value *RHS,
       return OverflowResult::NeverOverflows;
   }
   return OverflowResult::MayOverflow;
-}
-
-/// Convert ConstantRange OverflowResult into ValueTracking OverflowResult.
-static OverflowResult mapOverflowResult(ConstantRange::OverflowResult OR) {
-  switch (OR) {
-    case ConstantRange::OverflowResult::MayOverflow:
-      return OverflowResult::MayOverflow;
-    case ConstantRange::OverflowResult::AlwaysOverflows:
-      return OverflowResult::AlwaysOverflows;
-    case ConstantRange::OverflowResult::NeverOverflows:
-      return OverflowResult::NeverOverflows;
-  }
-  llvm_unreachable("Unknown OverflowResult");
-}
-
-/// Combine constant ranges from computeConstantRange() and computeKnownBits().
-static ConstantRange computeConstantRangeIncludingKnownBits(
-    const Value *V, bool ForSigned, const DataLayout &DL, unsigned Depth,
-    AssumptionCache *AC, const Instruction *CxtI, const DominatorTree *DT,
-    OptimizationRemarkEmitter *ORE = nullptr, bool UseInstrInfo = true) {
-  KnownBits Known = computeKnownBits(
-      V, DL, Depth, AC, CxtI, DT, ORE, UseInstrInfo);
-  ConstantRange CR1 = ConstantRange::fromKnownBits(Known, ForSigned);
-  ConstantRange CR2 = computeConstantRange(V, UseInstrInfo);
-  ConstantRange::PreferredRangeType RangeType =
-      ForSigned ? ConstantRange::Signed : ConstantRange::Unsigned;
-  return CR1.intersectWith(CR2, RangeType);
 }
 
 OverflowResult llvm::computeOverflowForUnsignedAdd(
@@ -4363,6 +4336,8 @@ bool llvm::isGuaranteedToExecuteForEveryIteration(const Instruction *I,
 }
 
 bool llvm::propagatesFullPoison(const Instruction *I) {
+  // TODO: This should include all instructions apart from phis, selects and
+  // call-like instructions.
   switch (I->getOpcode()) {
   case Instruction::Add:
   case Instruction::Sub:
@@ -4415,9 +4390,20 @@ const Value *llvm::getGuaranteedNonFullPoisonOp(const Instruction *I) {
       return I->getOperand(1);
 
     default:
+      // Note: It's really tempting to think that a conditional branch or
+      // switch should be listed here, but that's incorrect.  It's not
+      // branching off of poison which is UB, it is executing a side effecting
+      // instruction which follows the branch.  
       return nullptr;
   }
 }
+
+bool llvm::mustTriggerUB(const Instruction *I,
+                         const SmallSet<const Value *, 16>& KnownPoison) {
+  auto *NotPoison = getGuaranteedNonFullPoisonOp(I);
+  return (NotPoison && KnownPoison.count(NotPoison));
+}
+
 
 bool llvm::programUndefinedIfFullPoison(const Instruction *PoisonI) {
   // We currently only look for uses of poison values within the same basic
@@ -4442,8 +4428,7 @@ bool llvm::programUndefinedIfFullPoison(const Instruction *PoisonI) {
   while (Iter++ < MaxDepth) {
     for (auto &I : make_range(Begin, End)) {
       if (&I != PoisonI) {
-        const Value *NotPoison = getGuaranteedNonFullPoisonOp(&I);
-        if (NotPoison != nullptr && YieldsPoison.count(NotPoison))
+        if (mustTriggerUB(&I, YieldsPoison))
           return true;
         if (!isGuaranteedToTransferExecutionToSuccessor(&I))
           return false;
@@ -5094,11 +5079,19 @@ SelectPatternResult llvm::matchSelectPattern(Value *V, Value *&LHS, Value *&RHS,
   CmpInst *CmpI = dyn_cast<CmpInst>(SI->getCondition());
   if (!CmpI) return {SPF_UNKNOWN, SPNB_NA, false};
 
+  Value *TrueVal = SI->getTrueValue();
+  Value *FalseVal = SI->getFalseValue();
+
+  return llvm::matchDecomposedSelectPattern(CmpI, TrueVal, FalseVal, LHS, RHS,
+                                            CastOp, Depth);
+}
+
+SelectPatternResult llvm::matchDecomposedSelectPattern(
+    CmpInst *CmpI, Value *TrueVal, Value *FalseVal, Value *&LHS, Value *&RHS,
+    Instruction::CastOps *CastOp, unsigned Depth) {
   CmpInst::Predicate Pred = CmpI->getPredicate();
   Value *CmpLHS = CmpI->getOperand(0);
   Value *CmpRHS = CmpI->getOperand(1);
-  Value *TrueVal = SI->getTrueValue();
-  Value *FalseVal = SI->getFalseValue();
   FastMathFlags FMF;
   if (isa<FPMathOperator>(CmpI))
     FMF = CmpI->getFastMathFlags();

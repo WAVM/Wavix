@@ -227,7 +227,7 @@ void DwarfLinker::reportWarning(const Twine &Warning, const DebugMapObject &DMO,
     return;
 
   DIDumpOptions DumpOpts;
-  DumpOpts.RecurseDepth = 0;
+  DumpOpts.ChildRecurseDepth = 0;
   DumpOpts.Verbose = Options.Verbose;
 
   WithColor::note() << "    in DIE:\n";
@@ -436,9 +436,13 @@ static bool isMachOPairedReloc(uint64_t RelocType, uint64_t Arch) {
 void DwarfLinker::RelocationManager::findValidRelocsMachO(
     const object::SectionRef &Section, const object::MachOObjectFile &Obj,
     const DebugMapObject &DMO) {
-  StringRef Contents;
-  Section.getContents(Contents);
-  DataExtractor Data(Contents, Obj.isLittleEndian(), 0);
+  Expected<StringRef> ContentsOrErr = Section.getContents();
+  if (!ContentsOrErr) {
+    consumeError(ContentsOrErr.takeError());
+    Linker.reportWarning("error reading section", DMO);
+    return;
+  }
+  DataExtractor Data(*ContentsOrErr, Obj.isLittleEndian(), 0);
   bool SkipNext = false;
 
   for (const object::RelocationRef &Reloc : Section.relocations()) {
@@ -622,7 +626,7 @@ unsigned DwarfLinker::shouldKeepVariableDIE(RelocationManager &RelocMgr,
     MyInfo.InDebugMap = true;
     return Flags | TF_Keep;
   }
-  
+
   Optional<uint32_t> LocationIdx =
       Abbrev->findAttributeIndex(dwarf::DW_AT_location);
   if (!LocationIdx)
@@ -645,7 +649,7 @@ unsigned DwarfLinker::shouldKeepVariableDIE(RelocationManager &RelocMgr,
 
   if (Options.Verbose) {
     DIDumpOptions DumpOpts;
-    DumpOpts.RecurseDepth = 0;
+    DumpOpts.ChildRecurseDepth = 0;
     DumpOpts.Verbose = Options.Verbose;
     DIE.dump(outs(), 8 /* Indent */, DumpOpts);
   }
@@ -681,7 +685,7 @@ unsigned DwarfLinker::shouldKeepSubprogramDIE(
 
   if (Options.Verbose) {
     DIDumpOptions DumpOpts;
-    DumpOpts.RecurseDepth = 0;
+    DumpOpts.ChildRecurseDepth = 0;
     DumpOpts.Verbose = Options.Verbose;
     DIE.dump(outs(), 8 /* Indent */, DumpOpts);
   }
@@ -1816,7 +1820,7 @@ void DwarfLinker::patchLineTableForUnit(CompileUnit &Unit,
       OrigDwarf.getDWARFObj(), OrigDwarf.getDWARFObj().getLineSection(),
       OrigDwarf.isLittleEndian(), Unit.getOrigUnit().getAddressByteSize());
   if (Options.Translator)
-    return Streamer->translateLineTable(LineExtractor, StmtOffset, Options);
+    return Streamer->translateLineTable(LineExtractor, StmtOffset);
 
   Error Err = LineTable.parse(LineExtractor, &StmtOffset, OrigDwarf,
                               &Unit.getOrigUnit(), DWARFContext::dumpWarning);
@@ -2092,8 +2096,10 @@ void DwarfLinker::DIECloner::copyAbbrev(
   Linker.AssignAbbrev(Copy);
 }
 
-uint32_t DwarfLinker::DIECloner::hashFullyQualifiedName(
-    DWARFDie DIE, CompileUnit &U, const DebugMapObject &DMO, int RecurseDepth) {
+uint32_t
+DwarfLinker::DIECloner::hashFullyQualifiedName(DWARFDie DIE, CompileUnit &U,
+                                               const DebugMapObject &DMO,
+                                               int ChildRecurseDepth) {
   const char *Name = nullptr;
   DWARFUnit *OrigUnit = &U.getOrigUnit();
   CompileUnit *CU = &U;
@@ -2127,13 +2133,13 @@ uint32_t DwarfLinker::DIECloner::hashFullyQualifiedName(
       // FIXME: dsymutil-classic compatibility. Ignore modules.
       CU->getOrigUnit().getDIEAtIndex(CU->getInfo(Idx).ParentIdx).getTag() ==
           dwarf::DW_TAG_module)
-    return djbHash(Name ? Name : "", djbHash(RecurseDepth ? "" : "::"));
+    return djbHash(Name ? Name : "", djbHash(ChildRecurseDepth ? "" : "::"));
 
   DWARFDie Die = OrigUnit->getDIEAtIndex(CU->getInfo(Idx).ParentIdx);
   return djbHash(
       (Name ? Name : ""),
       djbHash((Name ? "::" : ""),
-              hashFullyQualifiedName(Die, *CU, DMO, ++RecurseDepth)));
+              hashFullyQualifiedName(Die, *CU, DMO, ++ChildRecurseDepth)));
 }
 
 static uint64_t getDwoId(const DWARFDie &CUDie, const DWARFUnit &Unit) {
@@ -2652,7 +2658,7 @@ bool DwarfLinker::link(const DebugMap &Map) {
       if (Options.Verbose) {
         outs() << "Input compilation unit:";
         DIDumpOptions DumpOpts;
-        DumpOpts.RecurseDepth = 0;
+        DumpOpts.ChildRecurseDepth = 0;
         DumpOpts.Verbose = Options.Verbose;
         CUDie.dump(outs(), 0, DumpOpts);
       }
@@ -2841,7 +2847,7 @@ bool DwarfLinker::link(const DebugMap &Map) {
             copySwiftInterfaces(ParseableSwiftInterfaces, ArchName, Options))
       return error(toString(std::move(E)));
   }
-  
+
   return Streamer->finish(Map, Options.Translator);
 } // namespace dsymutil
 

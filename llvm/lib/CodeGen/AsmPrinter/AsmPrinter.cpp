@@ -100,6 +100,7 @@
 #include "llvm/MC/SectionKind.h"
 #include "llvm/Pass.h"
 #include "llvm/Remarks/Remark.h"
+#include "llvm/Remarks/RemarkStringTable.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
@@ -1073,6 +1074,7 @@ void AsmPrinter::EmitFunctionBody() {
       case TargetOpcode::LOCAL_ESCAPE:
         emitFrameAlloc(MI);
         break;
+      case TargetOpcode::ANNOTATION_LABEL:
       case TargetOpcode::EH_LABEL:
       case TargetOpcode::GC_LABEL:
         OutStreamer->EmitLabel(MI.getOperand(0).getMCSymbol());
@@ -1346,6 +1348,7 @@ void AsmPrinter::emitRemarksSection(Module &M) {
   RemarkStreamer *RS = M.getContext().getRemarkStreamer();
   if (!RS)
     return;
+  const remarks::Serializer &Serializer = RS->getSerializer();
 
   // Switch to the right section: .remarks/__remarks.
   MCSection *RemarksSection =
@@ -1367,23 +1370,27 @@ void AsmPrinter::emitRemarksSection(Module &M) {
   // Note: we need to use the streamer here to emit it in the section. We can't
   // just use the serialize function with a raw_ostream because of the way
   // MCStreamers work.
-  const remarks::StringTable &StrTab = RS->getStringTable();
-  std::vector<StringRef> StrTabStrings = StrTab.serialize();
-  uint64_t StrTabSize = StrTab.SerializedSize;
+  uint64_t StrTabSize =
+      Serializer.StrTab ? Serializer.StrTab->SerializedSize : 0;
   // Emit the total size of the string table (the size itself excluded):
   // little-endian uint64_t.
   // The total size is located after the version number.
+  // Note: even if no string table is used, emit 0.
   std::array<char, 8> StrTabSizeBuf;
   support::endian::write64le(StrTabSizeBuf.data(), StrTabSize);
   OutStreamer->EmitBinaryData(
       StringRef(StrTabSizeBuf.data(), StrTabSizeBuf.size()));
-  // Emit a list of null-terminated strings.
-  // Note: the order is important here: the ID used in the remarks corresponds
-  // to the position of the string in the section.
-  for (StringRef Str : StrTabStrings) {
-    OutStreamer->EmitBytes(Str);
-    // Explicitly emit a '\0'.
-    OutStreamer->EmitIntValue(/*Value=*/0, /*Size=*/1);
+
+  if (const Optional<remarks::StringTable> &StrTab = Serializer.StrTab) {
+    std::vector<StringRef> StrTabStrings = StrTab->serialize();
+    // Emit a list of null-terminated strings.
+    // Note: the order is important here: the ID used in the remarks corresponds
+    // to the position of the string in the section.
+    for (StringRef Str : StrTabStrings) {
+      OutStreamer->EmitBytes(Str);
+      // Explicitly emit a '\0'.
+      OutStreamer->EmitIntValue(/*Value=*/0, /*Size=*/1);
+    }
   }
 
   // Emit the null-terminated absolute path to the remark file.
@@ -1629,6 +1636,24 @@ bool AsmPrinter::doFinalization(Module &M) {
           !GV.hasDLLImportStorageClass() && !GV.getName().startswith("llvm.") &&
           !GV.hasAtLeastLocalUnnamedAddr())
         OutStreamer->EmitAddrsigSym(getSymbol(&GV));
+  }
+
+  // Emit symbol partition specifications (ELF only).
+  if (TM.getTargetTriple().isOSBinFormatELF()) {
+    unsigned UniqueID = 0;
+    for (const GlobalValue &GV : M.global_values()) {
+      if (!GV.hasPartition() || GV.isDeclarationForLinker() ||
+          GV.getVisibility() != GlobalValue::DefaultVisibility)
+        continue;
+
+      OutStreamer->SwitchSection(OutContext.getELFSection(
+          ".llvm_sympart", ELF::SHT_LLVM_SYMPART, 0, 0, "", ++UniqueID));
+      OutStreamer->EmitBytes(GV.getPartition());
+      OutStreamer->EmitZeros(1);
+      OutStreamer->EmitValue(
+          MCSymbolRefExpr::create(getSymbol(&GV), OutContext),
+          MAI->getCodePointerSize());
+    }
   }
 
   // Allow the target to emit any magic that it wants at the end of the file,
@@ -1966,7 +1991,7 @@ struct Structor {
 /// priority.
 void AsmPrinter::EmitXXStructorList(const DataLayout &DL, const Constant *List,
                                     bool isCtor) {
-  // Should be an array of '{ int, void ()* }' structs.  The first value is the
+  // Should be an array of '{ i32, void ()*, i8* }' structs.  The first value is the
   // init priority.
   if (!isa<ConstantArray>(List)) return;
 
@@ -1974,12 +1999,10 @@ void AsmPrinter::EmitXXStructorList(const DataLayout &DL, const Constant *List,
   const ConstantArray *InitList = dyn_cast<ConstantArray>(List);
   if (!InitList) return; // Not an array!
   StructType *ETy = dyn_cast<StructType>(InitList->getType()->getElementType());
-  // FIXME: Only allow the 3-field form in LLVM 4.0.
-  if (!ETy || ETy->getNumElements() < 2 || ETy->getNumElements() > 3)
-    return; // Not an array of two or three elements!
-  if (!isa<IntegerType>(ETy->getTypeAtIndex(0U)) ||
-      !isa<PointerType>(ETy->getTypeAtIndex(1U))) return; // Not (int, ptr).
-  if (ETy->getNumElements() == 3 && !isa<PointerType>(ETy->getTypeAtIndex(2U)))
+  if (!ETy || ETy->getNumElements() != 3 ||
+      !isa<IntegerType>(ETy->getTypeAtIndex(0U)) ||
+      !isa<PointerType>(ETy->getTypeAtIndex(1U)) ||
+      !isa<PointerType>(ETy->getTypeAtIndex(2U)))
     return; // Not (int, ptr, ptr).
 
   // Gather the structors in a form that's convenient for sorting by priority.
@@ -1995,7 +2018,7 @@ void AsmPrinter::EmitXXStructorList(const DataLayout &DL, const Constant *List,
     Structor &S = Structors.back();
     S.Priority = Priority->getLimitedValue(65535);
     S.Func = CS->getOperand(1);
-    if (ETy->getNumElements() == 3 && !CS->getOperand(2)->isNullValue())
+    if (!CS->getOperand(2)->isNullValue())
       S.ComdatKey =
           dyn_cast<GlobalValue>(CS->getOperand(2)->stripPointerCasts());
   }
@@ -2232,7 +2255,10 @@ const MCExpr *AsmPrinter::lowerConstant(const Constant *CV) {
 
     // We can emit the pointer value into this slot if the slot is an
     // integer slot equal to the size of the pointer.
-    if (DL.getTypeAllocSize(Ty) == DL.getTypeAllocSize(Op->getType()))
+    //
+    // If the pointer is larger than the resultant integer, then
+    // as with Trunc just depend on the assembler to truncate it.
+    if (DL.getTypeAllocSize(Ty) <= DL.getTypeAllocSize(Op->getType()))
       return OpExpr;
 
     // Otherwise the pointer is smaller than the resultant integer, mask off

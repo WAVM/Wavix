@@ -244,8 +244,16 @@ struct LegacyLICMPass : public LoopPass {
   using llvm::Pass::doFinalization;
 
   bool doFinalization() override {
-    assert(LICM.getLoopToAliasSetMap().empty() &&
+    auto &AliasSetMap = LICM.getLoopToAliasSetMap();
+    // All loops in the AliasSetMap should be cleaned up already. The only case
+    // where we fail to do so is if an outer loop gets deleted before LICM
+    // visits it.
+    assert(all_of(AliasSetMap,
+                  [](LoopInvariantCodeMotion::ASTrackerMapTy::value_type &KV) {
+                    return !KV.first->getParentLoop();
+                  }) &&
            "Didn't free loop alias sets");
+    AliasSetMap.clear();
     return false;
   }
 
@@ -286,6 +294,8 @@ PreservedAnalyses LICMPass::run(Loop &L, LoopAnalysisManager &AM,
 
   PA.preserve<DominatorTreeAnalysis>();
   PA.preserve<LoopAnalysis>();
+  if (EnableMSSALoopDependency)
+    PA.preserve<MemorySSAAnalysis>();
 
   return PA;
 }

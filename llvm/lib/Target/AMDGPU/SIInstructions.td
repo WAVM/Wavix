@@ -188,9 +188,18 @@ class WrapTerminatorInst<SOP_Pseudo base_inst> : SPseudoInstSI<
   let CodeSize = base_inst.CodeSize;
 }
 
+let WaveSizePredicate = isWave64 in {
 def S_MOV_B64_term : WrapTerminatorInst<S_MOV_B64>;
 def S_XOR_B64_term : WrapTerminatorInst<S_XOR_B64>;
 def S_ANDN2_B64_term : WrapTerminatorInst<S_ANDN2_B64>;
+}
+
+let WaveSizePredicate = isWave32 in {
+def S_MOV_B32_term : WrapTerminatorInst<S_MOV_B32>;
+def S_XOR_B32_term : WrapTerminatorInst<S_XOR_B32>;
+def S_OR_B32_term : WrapTerminatorInst<S_OR_B32>;
+def S_ANDN2_B32_term : WrapTerminatorInst<S_ANDN2_B32>;
+}
 
 def WAVE_BARRIER : SPseudoInstSI<(outs), (ins),
   [(int_amdgcn_wave_barrier)]> {
@@ -343,6 +352,15 @@ def SI_INIT_EXEC : SPseudoInstSI <
   let Defs = [EXEC];
   let usesCustomInserter = 1;
   let isAsCheapAsAMove = 1;
+  let WaveSizePredicate = isWave64;
+}
+
+def SI_INIT_EXEC_LO : SPseudoInstSI <
+  (outs), (ins i32imm:$src), []> {
+  let Defs = [EXEC_LO];
+  let usesCustomInserter = 1;
+  let isAsCheapAsAMove = 1;
+  let WaveSizePredicate = isWave32;
 }
 
 def SI_INIT_EXEC_FROM_INPUT : SPseudoInstSI <
@@ -383,6 +401,8 @@ def SI_CALL_ISEL : SPseudoInstSI <
   let isCall = 1;
   let SchedRW = [WriteBranch];
   let usesCustomInserter = 1;
+  // TODO: Should really base this on the call target
+  let isConvergent = 1;
 }
 
 // Wrapper around s_swappc_b64 with extra $callee parameter to track
@@ -393,6 +413,8 @@ def SI_CALL : SPseudoInstSI <
   let isCall = 1;
   let UseNamedOperandTable = 1;
   let SchedRW = [WriteBranch];
+  // TODO: Should really base this on the call target
+  let isConvergent = 1;
 }
 
 // Tail call handling pseudo
@@ -406,6 +428,8 @@ def SI_TCRETURN : SPseudoInstSI <(outs),
   let isBarrier = 1;
   let UseNamedOperandTable = 1;
   let SchedRW = [WriteBranch];
+  // TODO: Should really base this on the call target
+  let isConvergent = 1;
 }
 
 
@@ -580,7 +604,12 @@ def : Pat <
   // TODO: we could add more variants for other types of conditionals
 
 def : Pat <
-  (int_amdgcn_icmp i1:$src, (i1 0), (i32 33)),
+  (i64 (int_amdgcn_icmp i1:$src, (i1 0), (i32 33))),
+  (COPY $src) // Return the SGPRs representing i1 src
+>;
+
+def : Pat <
+  (i32 (int_amdgcn_icmp i1:$src, (i1 0), (i32 33))),
   (COPY $src) // Return the SGPRs representing i1 src
 >;
 
@@ -1462,7 +1491,7 @@ def : GCNPat<
 
 def : GCNPat<
   (fcanonicalize (v2f16 (VOP3PMods v2f16:$src, i32:$src_mods))),
-  (V_PK_MUL_F16 0, (i32 CONST.V2FP16_ONE), $src_mods, $src, DSTCLAMP.NONE)
+  (V_PK_MUL_F16 0, (i32 CONST.FP16_ONE), $src_mods, $src, DSTCLAMP.NONE)
 >;
 }
 
@@ -1523,6 +1552,14 @@ def : GCNPat <
 >;
 } // End OtherPredicates = [HasDLInsts]
 
+let SubtargetPredicate = isGFX10Plus in
+def : GCNPat <
+  (fma (f16 (VOP3Mods0 f32:$src0, i32:$src0_modifiers, i1:$clamp, i32:$omod)),
+       (f16 (VOP3Mods f32:$src1, i32:$src1_modifiers)),
+       (f16 (VOP3NoMods f32:$src2))),
+  (V_FMAC_F16_e64 $src0_modifiers, $src0, $src1_modifiers, $src1,
+                  SRCMODS.NONE, $src2, $clamp, $omod)
+>;
 
 // Allow integer inputs
 class ExpPattern<SDPatternOperator node, ValueType vt, Instruction Inst> : GCNPat<

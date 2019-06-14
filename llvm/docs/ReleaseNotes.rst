@@ -62,6 +62,15 @@ Changes to the LLVM IR
   parameter is required to be a simple constant. This annotation must
   be accurate to avoid possible miscompiles.
 
+* The 2-field form of global variables ``@llvm.global_ctors`` and
+  ``@llvm.global_dtors`` has been deleted. The third field of their element
+  type is now mandatory. Specify `i8* null` to migrate from the obsoleted
+  2-field form.
+
+* The ``byval`` attribute can now take a type parameter:
+  ``byval(<ty>)``. If present it must be identical to the argument's
+  pointee type. In the next release we intend to make this parameter
+  mandatory in preparation for opaque pointer types.
 
 Changes to the ARM Backend
 --------------------------

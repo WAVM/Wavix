@@ -73,6 +73,7 @@ namespace {
     int JT;
     unsigned Align;    // CP alignment.
     unsigned char SymbolFlags;  // X86II::MO_*
+    bool NegateIndex = false;
 
     X86ISelAddressMode()
         : BaseType(RegBase), Base_FrameIndex(0), Scale(1), IndexReg(), Disp(0),
@@ -115,6 +116,8 @@ namespace {
         dbgs() << " Base.FrameIndex " << Base_FrameIndex << '\n';
       dbgs() << " Scale " << Scale << '\n'
              << "IndexReg ";
+      if (NegateIndex)
+        dbgs() << "negate ";
       if (IndexReg.getNode())
         IndexReg.getNode()->dump(DAG);
       else
@@ -169,8 +172,8 @@ namespace {
 
   public:
     explicit X86DAGToDAGISel(X86TargetMachine &tm, CodeGenOpt::Level OptLevel)
-        : SelectionDAGISel(tm, OptLevel), OptForSize(false),
-          OptForMinSize(false) {}
+        : SelectionDAGISel(tm, OptLevel), Subtarget(nullptr), OptForSize(false),
+          OptForMinSize(false), IndirectTlsSegRefs(false) {}
 
     StringRef getPassName() const override {
       return "X86 DAG->DAG Instruction Selection";
@@ -270,6 +273,14 @@ namespace {
         Base = CurDAG->getRegister(0, VT);
 
       Scale = getI8Imm(AM.Scale, DL);
+
+      // Negate the index if needed.
+      if (AM.NegateIndex) {
+        unsigned NegOpc = VT == MVT::i64 ? X86::NEG64r : X86::NEG32r;
+        SDValue Neg = SDValue(CurDAG->getMachineNode(NegOpc, DL, VT, MVT::i32,
+                                                     AM.IndexReg), 0);
+        AM.IndexReg = Neg;
+      }
 
       if (AM.IndexReg.getNode())
         Index = AM.IndexReg;
@@ -779,28 +790,100 @@ void X86DAGToDAGISel::PreprocessISelDAG() {
       continue;
     }
 
-    // Replace vector shifts with their X86 specific equivalent so we don't
-    // need 2 sets of patterns.
     switch (N->getOpcode()) {
     case ISD::SHL:
     case ISD::SRA:
-    case ISD::SRL:
-      if (N->getValueType(0).isVector()) {
-        unsigned NewOpc;
+    case ISD::SRL: {
+      // Replace vector shifts with their X86 specific equivalent so we don't
+      // need 2 sets of patterns.
+      if (!N->getValueType(0).isVector())
+        break;
+
+      unsigned NewOpc;
+      switch (N->getOpcode()) {
+      default: llvm_unreachable("Unexpected opcode!");
+      case ISD::SHL: NewOpc = X86ISD::VSHLV; break;
+      case ISD::SRA: NewOpc = X86ISD::VSRAV; break;
+      case ISD::SRL: NewOpc = X86ISD::VSRLV; break;
+      }
+      SDValue Res = CurDAG->getNode(NewOpc, SDLoc(N), N->getValueType(0),
+                                    N->getOperand(0), N->getOperand(1));
+      --I;
+      CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 0), Res);
+      ++I;
+      CurDAG->DeleteNode(N);
+      continue;
+    }
+    case ISD::FCEIL:
+    case ISD::FFLOOR:
+    case ISD::FTRUNC:
+    case ISD::FNEARBYINT:
+    case ISD::FRINT: {
+      // Replace fp rounding with their X86 specific equivalent so we don't
+      // need 2 sets of patterns.
+      unsigned Imm;
+      switch (N->getOpcode()) {
+      default: llvm_unreachable("Unexpected opcode!");
+      case ISD::FCEIL:      Imm = 0xA; break;
+      case ISD::FFLOOR:     Imm = 0x9; break;
+      case ISD::FTRUNC:     Imm = 0xB; break;
+      case ISD::FNEARBYINT: Imm = 0xC; break;
+      case ISD::FRINT:      Imm = 0x4; break;
+      }
+      SDLoc dl(N);
+      SDValue Res = CurDAG->getNode(X86ISD::VRNDSCALE, dl,
+                                    N->getValueType(0),
+                                    N->getOperand(0),
+                                    CurDAG->getConstant(Imm, dl, MVT::i8));
+      --I;
+      CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 0), Res);
+      ++I;
+      CurDAG->DeleteNode(N);
+      continue;
+    }
+    case X86ISD::FANDN:
+    case X86ISD::FAND:
+    case X86ISD::FOR:
+    case X86ISD::FXOR: {
+      // Widen scalar fp logic ops to vector to reduce isel patterns.
+      // FIXME: Can we do this during lowering/combine.
+      MVT VT = N->getSimpleValueType(0);
+      if (VT.isVector() || VT == MVT::f128)
+        break;
+
+      MVT VecVT = VT == MVT::f64 ? MVT::v2f64 : MVT::v4f32;
+      SDLoc dl(N);
+      SDValue Op0 = CurDAG->getNode(ISD::SCALAR_TO_VECTOR, dl, VecVT,
+                                    N->getOperand(0));
+      SDValue Op1 = CurDAG->getNode(ISD::SCALAR_TO_VECTOR, dl, VecVT,
+                                    N->getOperand(1));
+
+      SDValue Res;
+      if (Subtarget->hasSSE2()) {
+        EVT IntVT = EVT(VecVT).changeVectorElementTypeToInteger();
+        Op0 = CurDAG->getNode(ISD::BITCAST, dl, IntVT, Op0);
+        Op1 = CurDAG->getNode(ISD::BITCAST, dl, IntVT, Op1);
+        unsigned Opc;
         switch (N->getOpcode()) {
         default: llvm_unreachable("Unexpected opcode!");
-        case ISD::SHL: NewOpc = X86ISD::VSHLV; break;
-        case ISD::SRA: NewOpc = X86ISD::VSRAV; break;
-        case ISD::SRL: NewOpc = X86ISD::VSRLV; break;
+        case X86ISD::FANDN: Opc = X86ISD::ANDNP; break;
+        case X86ISD::FAND:  Opc = ISD::AND;      break;
+        case X86ISD::FOR:   Opc = ISD::OR;       break;
+        case X86ISD::FXOR:  Opc = ISD::XOR;      break;
         }
-        SDValue Res = CurDAG->getNode(NewOpc, SDLoc(N), N->getValueType(0),
-                                      N->getOperand(0), N->getOperand(1));
-        --I;
-        CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 0), Res);
-        ++I;
-        CurDAG->DeleteNode(N);
-        continue;
+        Res = CurDAG->getNode(Opc, dl, IntVT, Op0, Op1);
+        Res = CurDAG->getNode(ISD::BITCAST, dl, VecVT, Res);
+      } else {
+        Res = CurDAG->getNode(N->getOpcode(), dl, VecVT, Op0, Op1);
       }
+      Res = CurDAG->getNode(ISD::EXTRACT_VECTOR_ELT, dl, VT, Res,
+                            CurDAG->getIntPtrConstant(0, dl));
+      --I;
+      CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 0), Res);
+      ++I;
+      CurDAG->DeleteNode(N);
+      continue;
+    }
     }
 
     if (OptLevel != CodeGenOpt::None &&
@@ -848,65 +931,135 @@ void X86DAGToDAGISel::PreprocessISelDAG() {
     // and the node legalization.  As such this pass basically does "really
     // late" legalization of these inline with the X86 isel pass.
     // FIXME: This should only happen when not compiled with -O0.
-    if (N->getOpcode() != ISD::FP_ROUND && N->getOpcode() != ISD::FP_EXTEND)
-      continue;
+    switch (N->getOpcode()) {
+    default: continue;
+    case ISD::FP_ROUND:
+    case ISD::FP_EXTEND:
+    {
+      MVT SrcVT = N->getOperand(0).getSimpleValueType();
+      MVT DstVT = N->getSimpleValueType(0);
 
-    MVT SrcVT = N->getOperand(0).getSimpleValueType();
-    MVT DstVT = N->getSimpleValueType(0);
-
-    // If any of the sources are vectors, no fp stack involved.
-    if (SrcVT.isVector() || DstVT.isVector())
-      continue;
-
-    // If the source and destination are SSE registers, then this is a legal
-    // conversion that should not be lowered.
-    const X86TargetLowering *X86Lowering =
-        static_cast<const X86TargetLowering *>(TLI);
-    bool SrcIsSSE = X86Lowering->isScalarFPTypeInSSEReg(SrcVT);
-    bool DstIsSSE = X86Lowering->isScalarFPTypeInSSEReg(DstVT);
-    if (SrcIsSSE && DstIsSSE)
-      continue;
-
-    if (!SrcIsSSE && !DstIsSSE) {
-      // If this is an FPStack extension, it is a noop.
-      if (N->getOpcode() == ISD::FP_EXTEND)
+      // If any of the sources are vectors, no fp stack involved.
+      if (SrcVT.isVector() || DstVT.isVector())
         continue;
-      // If this is a value-preserving FPStack truncation, it is a noop.
-      if (N->getConstantOperandVal(1))
+
+      // If the source and destination are SSE registers, then this is a legal
+      // conversion that should not be lowered.
+      const X86TargetLowering *X86Lowering =
+          static_cast<const X86TargetLowering *>(TLI);
+      bool SrcIsSSE = X86Lowering->isScalarFPTypeInSSEReg(SrcVT);
+      bool DstIsSSE = X86Lowering->isScalarFPTypeInSSEReg(DstVT);
+      if (SrcIsSSE && DstIsSSE)
         continue;
+
+      if (!SrcIsSSE && !DstIsSSE) {
+        // If this is an FPStack extension, it is a noop.
+        if (N->getOpcode() == ISD::FP_EXTEND)
+          continue;
+        // If this is a value-preserving FPStack truncation, it is a noop.
+        if (N->getConstantOperandVal(1))
+          continue;
+      }
+
+      // Here we could have an FP stack truncation or an FPStack <-> SSE convert.
+      // FPStack has extload and truncstore.  SSE can fold direct loads into other
+      // operations.  Based on this, decide what we want to do.
+      MVT MemVT;
+      if (N->getOpcode() == ISD::FP_ROUND)
+        MemVT = DstVT;  // FP_ROUND must use DstVT, we can't do a 'trunc load'.
+      else
+        MemVT = SrcIsSSE ? SrcVT : DstVT;
+
+      SDValue MemTmp = CurDAG->CreateStackTemporary(MemVT);
+      SDLoc dl(N);
+
+      // FIXME: optimize the case where the src/dest is a load or store?
+
+      SDValue Store = CurDAG->getTruncStore(CurDAG->getEntryNode(), dl, N->getOperand(0),
+                                          MemTmp, MachinePointerInfo(), MemVT);
+      SDValue Result = CurDAG->getExtLoad(ISD::EXTLOAD, dl, DstVT, Store, MemTmp,
+                                          MachinePointerInfo(), MemVT);
+
+      // We're about to replace all uses of the FP_ROUND/FP_EXTEND with the
+      // extload we created.  This will cause general havok on the dag because
+      // anything below the conversion could be folded into other existing nodes.
+      // To avoid invalidating 'I', back it up to the convert node.
+      --I;
+      CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 0), Result);
+      break;
     }
 
-    // Here we could have an FP stack truncation or an FPStack <-> SSE convert.
-    // FPStack has extload and truncstore.  SSE can fold direct loads into other
-    // operations.  Based on this, decide what we want to do.
-    MVT MemVT;
-    if (N->getOpcode() == ISD::FP_ROUND)
-      MemVT = DstVT;  // FP_ROUND must use DstVT, we can't do a 'trunc load'.
-    else
-      MemVT = SrcIsSSE ? SrcVT : DstVT;
+    //The sequence of events for lowering STRICT_FP versions of these nodes requires
+    //dealing with the chain differently, as there is already a preexisting chain.
+    case ISD::STRICT_FP_ROUND:
+    case ISD::STRICT_FP_EXTEND:
+    {
+      MVT SrcVT = N->getOperand(1).getSimpleValueType();
+      MVT DstVT = N->getSimpleValueType(0);
 
-    SDValue MemTmp = CurDAG->CreateStackTemporary(MemVT);
-    SDLoc dl(N);
+      // If any of the sources are vectors, no fp stack involved.
+      if (SrcVT.isVector() || DstVT.isVector())
+        continue;
 
-    // FIXME: optimize the case where the src/dest is a load or store?
-    SDValue Store =
-        CurDAG->getTruncStore(CurDAG->getEntryNode(), dl, N->getOperand(0),
-                              MemTmp, MachinePointerInfo(), MemVT);
-    SDValue Result = CurDAG->getExtLoad(ISD::EXTLOAD, dl, DstVT, Store, MemTmp,
-                                        MachinePointerInfo(), MemVT);
+      // If the source and destination are SSE registers, then this is a legal
+      // conversion that should not be lowered.
+      const X86TargetLowering *X86Lowering =
+          static_cast<const X86TargetLowering *>(TLI);
+      bool SrcIsSSE = X86Lowering->isScalarFPTypeInSSEReg(SrcVT);
+      bool DstIsSSE = X86Lowering->isScalarFPTypeInSSEReg(DstVT);
+      if (SrcIsSSE && DstIsSSE)
+        continue;
 
-    // We're about to replace all uses of the FP_ROUND/FP_EXTEND with the
-    // extload we created.  This will cause general havok on the dag because
-    // anything below the conversion could be folded into other existing nodes.
-    // To avoid invalidating 'I', back it up to the convert node.
-    --I;
-    CurDAG->ReplaceAllUsesOfValueWith(SDValue(N, 0), Result);
+      if (!SrcIsSSE && !DstIsSSE) {
+        // If this is an FPStack extension, it is a noop.
+        if (N->getOpcode() == ISD::STRICT_FP_EXTEND)
+          continue;
+        // If this is a value-preserving FPStack truncation, it is a noop.
+        if (N->getConstantOperandVal(2))
+          continue;
+      }
+
+      // Here we could have an FP stack truncation or an FPStack <-> SSE convert.
+      // FPStack has extload and truncstore.  SSE can fold direct loads into other
+      // operations.  Based on this, decide what we want to do.
+      MVT MemVT;
+      if (N->getOpcode() == ISD::STRICT_FP_ROUND)
+        MemVT = DstVT;  // FP_ROUND must use DstVT, we can't do a 'trunc load'.
+      else
+        MemVT = SrcIsSSE ? SrcVT : DstVT;
+
+      SDValue MemTmp = CurDAG->CreateStackTemporary(MemVT);
+      SDLoc dl(N);
+
+      // FIXME: optimize the case where the src/dest is a load or store?
+
+      //Since the operation is StrictFP, use the preexisting chain.
+      SDValue Store = CurDAG->getTruncStore(N->getOperand(0), dl, N->getOperand(1),
+                                MemTmp, MachinePointerInfo(), MemVT);
+      SDValue Result = CurDAG->getExtLoad(ISD::EXTLOAD, dl, DstVT, Store, MemTmp,
+                                          MachinePointerInfo(), MemVT);
+
+      // We're about to replace all uses of the FP_ROUND/FP_EXTEND with the
+      // extload we created.  This will cause general havok on the dag because
+      // anything below the conversion could be folded into other existing nodes.
+      // To avoid invalidating 'I', back it up to the convert node.
+      --I;
+      CurDAG->ReplaceAllUsesWith(N, Result.getNode());
+      break;
+    }
+    }
+
 
     // Now that we did that, the node is dead.  Increment the iterator to the
     // next node to process, then delete N.
     ++I;
     CurDAG->DeleteNode(N);
   }
+
+  // The load+call transform above can leave some dead nodes in the graph. Make
+  // sure we remove them. Its possible some of the other transforms do to so
+  // just remove dead nodes unconditionally.
+  CurDAG->RemoveDeadNodes();
 }
 
 // Look for a redundant movzx/movsx that can occur after an 8-bit divrem.
@@ -1858,14 +2011,11 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
     }
 
     // Ok, the transformation is legal and appears profitable. Go for it.
-    SDValue Zero = CurDAG->getConstant(0, dl, N.getValueType());
-    SDValue Neg = CurDAG->getNode(ISD::SUB, dl, N.getValueType(), Zero, RHS);
-    AM.IndexReg = Neg;
+    // Negation will be emitted later to avoid creating dangling nodes if this
+    // was an unprofitable LEA.
+    AM.IndexReg = RHS;
+    AM.NegateIndex = true;
     AM.Scale = 1;
-
-    // Insert the new nodes into the topological ordering.
-    insertDAGNode(*CurDAG, N, Zero);
-    insertDAGNode(*CurDAG, N, Neg);
     return false;
   }
 
@@ -2058,6 +2208,8 @@ bool X86DAGToDAGISel::selectAddr(SDNode *Parent, SDValue N, SDValue &Base,
       Parent->getOpcode() != ISD::INTRINSIC_W_CHAIN && // unaligned loads, fixme
       Parent->getOpcode() != ISD::INTRINSIC_VOID && // nontemporal stores
       Parent->getOpcode() != X86ISD::TLSCALL && // Fixme
+      Parent->getOpcode() != X86ISD::ENQCMD && // Fixme
+      Parent->getOpcode() != X86ISD::ENQCMDS && // Fixme
       Parent->getOpcode() != X86ISD::EH_SJLJ_SETJMP && // setjmp
       Parent->getOpcode() != X86ISD::EH_SJLJ_LONGJMP) { // longjmp
     unsigned AddrSpace =
@@ -3725,7 +3877,7 @@ bool X86DAGToDAGISel::tryVPTESTM(SDNode *Root, SDValue Setcc,
   bool FoldedBCast = false;
   if (!FoldedLoad && CanFoldLoads &&
       (CmpSVT == MVT::i32 || CmpSVT == MVT::i64)) {
-    SDNode *ParentNode;
+    SDNode *ParentNode = nullptr;
     if ((Load = findBroadcastedOp(Src1, CmpSVT, ParentNode))) {
       FoldedBCast = tryFoldLoad(Root, ParentNode, Load, Tmp0,
                                 Tmp1, Tmp2, Tmp3, Tmp4);
@@ -4657,6 +4809,35 @@ void X86DAGToDAGISel::Select(SDNode *Node) {
     if (foldLoadStoreIntoMemOperand(Node))
       return;
     break;
+  case ISD::FCEIL:
+  case ISD::FFLOOR:
+  case ISD::FTRUNC:
+  case ISD::FNEARBYINT:
+  case ISD::FRINT: {
+    // Replace fp rounding with their X86 specific equivalent so we don't
+    // need 2 sets of patterns.
+    // FIXME: This can only happen when the nodes started as STRICT_* and have
+    // been mutated into their non-STRICT equivalents. Eventually this
+    // mutation will be removed and we should switch the STRICT_ nodes to a
+    // strict version of RNDSCALE in PreProcessISelDAG.
+    unsigned Imm;
+    switch (Node->getOpcode()) {
+    default: llvm_unreachable("Unexpected opcode!");
+    case ISD::FCEIL:      Imm = 0xA; break;
+    case ISD::FFLOOR:     Imm = 0x9; break;
+    case ISD::FTRUNC:     Imm = 0xB; break;
+    case ISD::FNEARBYINT: Imm = 0xC; break;
+    case ISD::FRINT:      Imm = 0x4; break;
+    }
+    SDLoc dl(Node);
+    SDValue Res = CurDAG->getNode(X86ISD::VRNDSCALE, dl,
+                                  Node->getValueType(0),
+                                  Node->getOperand(0),
+                                  CurDAG->getConstant(Imm, dl, MVT::i8));
+    ReplaceNode(Node, Res.getNode());
+    SelectCode(Res.getNode());
+    return;
+  }
   }
 
   SelectCode(Node);

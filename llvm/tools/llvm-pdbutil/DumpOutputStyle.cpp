@@ -995,6 +995,10 @@ Error DumpOutputStyle::dumpInlineeLines() {
           P.formatLine("{0,+8} | {1,+5} | ", Entry.Header->Inlinee,
                        fmtle(Entry.Header->SourceLineNum));
           Strings.formatFromChecksumsOffset(P, Entry.Header->FileID, true);
+          for (const auto &ExtraFileID : Entry.ExtraFiles) {
+            P.formatLine("                   ");
+            Strings.formatFromChecksumsOffset(P, ExtraFileID, true);
+          }
         }
         P.NewLine();
       });
@@ -1376,12 +1380,12 @@ Error DumpOutputStyle::dumpTypesFromObjectFile() {
     else
       continue;
 
-    StringRef Contents;
-    if (auto EC = S.getContents(Contents))
-      return errorCodeToError(EC);
+    Expected<StringRef> ContentsOrErr = S.getContents();
+    if (!ContentsOrErr)
+      return ContentsOrErr.takeError();
 
     uint32_t Magic;
-    BinaryStreamReader Reader(Contents, llvm::support::little);
+    BinaryStreamReader Reader(*ContentsOrErr, llvm::support::little);
     if (auto EC = Reader.readInteger(Magic))
       return EC;
     if (Magic != COFF::DEBUG_SECTION_MAGIC)

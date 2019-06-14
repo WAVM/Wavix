@@ -63,9 +63,9 @@ static bool allocateSGPRTuple(unsigned ValNo, MVT ValVT, MVT LocVT,
   case MVT::v2f32:
   case MVT::v4i16:
   case MVT::v4f16: {
-    // Up to SGPR0-SGPR39
+    // Up to SGPR0-SGPR105
     return allocateCCRegs(ValNo, ValVT, LocVT, LocInfo, ArgFlags, State,
-                          &AMDGPU::SGPR_64RegClass, 20);
+                          &AMDGPU::SGPR_64RegClass, 53);
   }
   default:
     return false;
@@ -522,6 +522,9 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
   // will be uniform and we always use vector compares. Assume we are using
   // vector compares until that is fixed.
   setHasMultipleConditionRegisters(true);
+
+  setMinCmpXchgSizeInBits(32);
+  setSupportsUnalignedAtomics(false);
 
   PredictableSelectIsExpensive = false;
 
@@ -2886,6 +2889,61 @@ bool AMDGPUTargetLowering::shouldCombineMemoryType(EVT VT) const {
   return true;
 }
 
+// Find a load or store from corresponding pattern root.
+// Roots may be build_vector, bitconvert or their combinations.
+static MemSDNode* findMemSDNode(SDNode *N) {
+  N = AMDGPUTargetLowering::stripBitcast(SDValue(N,0)).getNode();
+  if (MemSDNode *MN = dyn_cast<MemSDNode>(N))
+    return MN;
+  assert(isa<BuildVectorSDNode>(N));
+  for (SDValue V : N->op_values())
+    if (MemSDNode *MN =
+          dyn_cast<MemSDNode>(AMDGPUTargetLowering::stripBitcast(V)))
+      return MN;
+  llvm_unreachable("cannot find MemSDNode in the pattern!");
+}
+
+bool AMDGPUTargetLowering::SelectFlatOffset(bool IsSigned,
+                                            SelectionDAG &DAG,
+                                            SDNode *N,
+                                            SDValue Addr,
+                                            SDValue &VAddr,
+                                            SDValue &Offset,
+                                            SDValue &SLC) const {
+  const GCNSubtarget &ST =
+        DAG.getMachineFunction().getSubtarget<GCNSubtarget>();
+  int64_t OffsetVal = 0;
+
+  if (ST.hasFlatInstOffsets() &&
+      (!ST.hasFlatSegmentOffsetBug() ||
+       findMemSDNode(N)->getAddressSpace() != AMDGPUAS::FLAT_ADDRESS) &&
+      DAG.isBaseWithConstantOffset(Addr)) {
+    SDValue N0 = Addr.getOperand(0);
+    SDValue N1 = Addr.getOperand(1);
+    int64_t COffsetVal = cast<ConstantSDNode>(N1)->getSExtValue();
+
+    if (ST.getGeneration() >= AMDGPUSubtarget::GFX10) {
+      if ((IsSigned && isInt<12>(COffsetVal)) ||
+          (!IsSigned && isUInt<11>(COffsetVal))) {
+        Addr = N0;
+        OffsetVal = COffsetVal;
+      }
+    } else {
+      if ((IsSigned && isInt<13>(COffsetVal)) ||
+          (!IsSigned && isUInt<12>(COffsetVal))) {
+        Addr = N0;
+        OffsetVal = COffsetVal;
+      }
+    }
+  }
+
+  VAddr = Addr;
+  Offset = DAG.getTargetConstant(OffsetVal, SDLoc(), MVT::i16);
+  SLC = DAG.getTargetConstant(0, SDLoc(), MVT::i1);
+
+  return true;
+}
+
 // Replace load of an illegal type with a store of a bitcast to a friendlier
 // type.
 SDValue AMDGPUTargetLowering::performLoadCombine(SDNode *N,
@@ -2910,7 +2968,8 @@ SDValue AMDGPUTargetLowering::performLoadCombine(SDNode *N,
     // Expand unaligned loads earlier than legalization. Due to visitation order
     // problems during legalization, the emitted instructions to pack and unpack
     // the bytes again are not eliminated in the case of an unaligned copy.
-    if (!allowsMisalignedMemoryAccesses(VT, AS, Align, &IsFast)) {
+    if (!allowsMisalignedMemoryAccesses(
+            VT, AS, Align, LN->getMemOperand()->getFlags(), &IsFast)) {
       if (VT.isVector())
         return scalarizeVectorLoad(LN, DAG);
 
@@ -2962,7 +3021,8 @@ SDValue AMDGPUTargetLowering::performStoreCombine(SDNode *N,
     // order problems during legalization, the emitted instructions to pack and
     // unpack the bytes again are not eliminated in the case of an unaligned
     // copy.
-    if (!allowsMisalignedMemoryAccesses(VT, AS, Align, &IsFast)) {
+    if (!allowsMisalignedMemoryAccesses(
+            VT, AS, Align, SN->getMemOperand()->getFlags(), &IsFast)) {
       if (VT.isVector())
         return scalarizeVectorStore(SN, DAG);
 

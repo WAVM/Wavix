@@ -129,8 +129,7 @@ Error CtorDtorRunner::run() {
 
   auto &ES = JD.getExecutionSession();
   if (auto CtorDtorMap =
-          ES.lookup(JITDylibSearchList({{&JD, true}}), std::move(Names),
-                    NoDependenciesToRegister, true)) {
+          ES.lookup(JITDylibSearchList({{&JD, true}}), std::move(Names))) {
     for (auto &KV : CtorDtorsByPriority) {
       for (auto &Name : KV.second) {
         assert(CtorDtorMap->count(Name) && "No entry for Name");
@@ -139,13 +138,10 @@ Error CtorDtorRunner::run() {
         CtorDtor();
       }
     }
+    CtorDtorsByPriority.clear();
     return Error::success();
   } else
     return CtorDtorMap.takeError();
-
-  CtorDtorsByPriority.clear();
-
-  return Error::success();
 }
 
 void LocalCXXRuntimeOverridesBase::runDestructors() {

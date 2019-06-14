@@ -185,40 +185,6 @@ static inline bool IsFreeToInvert(Value *V, bool WillInvertAllUses) {
   return false;
 }
 
-/// Specific patterns of overflow check idioms that we match.
-enum OverflowCheckFlavor {
-  OCF_UNSIGNED_ADD,
-  OCF_SIGNED_ADD,
-  OCF_UNSIGNED_SUB,
-  OCF_SIGNED_SUB,
-  OCF_UNSIGNED_MUL,
-  OCF_SIGNED_MUL,
-
-  OCF_INVALID
-};
-
-/// Returns the OverflowCheckFlavor corresponding to a overflow_with_op
-/// intrinsic.
-static inline OverflowCheckFlavor
-IntrinsicIDToOverflowCheckFlavor(unsigned ID) {
-  switch (ID) {
-  default:
-    return OCF_INVALID;
-  case Intrinsic::uadd_with_overflow:
-    return OCF_UNSIGNED_ADD;
-  case Intrinsic::sadd_with_overflow:
-    return OCF_SIGNED_ADD;
-  case Intrinsic::usub_with_overflow:
-    return OCF_UNSIGNED_SUB;
-  case Intrinsic::ssub_with_overflow:
-    return OCF_SIGNED_SUB;
-  case Intrinsic::umul_with_overflow:
-    return OCF_UNSIGNED_MUL;
-  case Intrinsic::smul_with_overflow:
-    return OCF_SIGNED_MUL;
-  }
-}
-
 /// Some binary operators require special handling to avoid poison and undefined
 /// behavior. If a constant vector has undef elements, replace those undefs with
 /// identity constants if possible because those are always safe to execute.
@@ -347,6 +313,7 @@ public:
   //     I          - Change was made, I is still valid, I may be dead though
   //   otherwise    - Change was made, replace I with returned instruction
   //
+  Instruction *visitFNeg(UnaryOperator &I);
   Instruction *visitAdd(BinaryOperator &I);
   Instruction *visitFAdd(BinaryOperator &I);
   Value *OptimizePointerDifference(Value *LHS, Value *RHS, Type *Ty);
@@ -468,7 +435,8 @@ private:
   /// operation in OperationResult and result of the overflow check in
   /// OverflowResult, and return true.  If no simplification is possible,
   /// returns false.
-  bool OptimizeOverflowCheck(OverflowCheckFlavor OCF, Value *LHS, Value *RHS,
+  bool OptimizeOverflowCheck(Instruction::BinaryOps BinaryOp, bool IsSigned,
+                             Value *LHS, Value *RHS,
                              Instruction &CtxI, Value *&OperationResult,
                              Constant *&OverflowResult);
 
@@ -724,7 +692,7 @@ public:
   }
 
   OverflowResult computeOverflowForSignedMul(const Value *LHS,
-	                                         const Value *RHS,
+                                             const Value *RHS,
                                              const Instruction *CxtI) const {
     return llvm::computeOverflowForSignedMul(LHS, RHS, DL, &AC, CxtI, &DT);
   }
@@ -751,6 +719,10 @@ public:
                                              const Instruction *CxtI) const {
     return llvm::computeOverflowForSignedSub(LHS, RHS, DL, &AC, CxtI, &DT);
   }
+
+  OverflowResult computeOverflow(
+      Instruction::BinaryOps BinaryOp, bool IsSigned,
+      Value *LHS, Value *RHS, Instruction *CxtI) const;
 
   /// Maximum size of array considered when transforming.
   uint64_t MaxArraySizeForCombine;
