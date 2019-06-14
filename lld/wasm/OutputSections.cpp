@@ -79,10 +79,7 @@ void OutputSection::createHeader(size_t BodySize) {
       " total=" + Twine(getSize()));
 }
 
-CodeSection::CodeSection(ArrayRef<InputFunction *> Functions)
-    : OutputSection(WASM_SEC_CODE), Functions(Functions) {
-  assert(Functions.size() > 0);
-
+void CodeSection::finalizeContents() {
   raw_string_ostream OS(CodeSectionHeader);
   writeUleb128(OS, Functions.size(), "function count");
   OS.flush();
@@ -128,8 +125,7 @@ void CodeSection::writeRelocations(raw_ostream &OS) const {
     C->writeRelocations(OS);
 }
 
-DataSection::DataSection(ArrayRef<OutputSegment *> Segments)
-    : OutputSection(WASM_SEC_DATA), Segments(Segments) {
+void DataSection::finalizeContents() {
   raw_string_ostream OS(DataSectionHeader);
 
   writeUleb128(OS, Segments.size(), "data segment count");
@@ -155,7 +151,8 @@ DataSection::DataSection(ArrayRef<OutputSegment *> Segments)
 
     Segment->SectionOffset = BodySize;
     BodySize += Segment->Header.size() + Segment->Size;
-    log("Data segment: size=" + Twine(Segment->Size));
+    log("Data segment: size=" + Twine(Segment->Size) + ", startVA=" +
+        Twine::utohexstr(Segment->StartVA) + ", name=" + Segment->Name);
 
     for (InputSegment *InputSeg : Segment->InputSegments)
       InputSeg->OutputOffset = Segment->SectionOffset + Segment->Header.size() +
@@ -202,10 +199,7 @@ void DataSection::writeRelocations(raw_ostream &OS) const {
       C->writeRelocations(OS);
 }
 
-CustomSection::CustomSection(std::string Name,
-                             ArrayRef<InputSection *> InputSections)
-    : OutputSection(WASM_SEC_CUSTOM, Name), PayloadSize(0),
-      InputSections(InputSections) {
+void CustomSection::finalizeContents() {
   raw_string_ostream OS(NameData);
   encodeULEB128(Name.size(), OS);
   OS << Name;
@@ -213,6 +207,7 @@ CustomSection::CustomSection(std::string Name,
 
   for (InputSection *Section : InputSections) {
     Section->OutputOffset = PayloadSize;
+    Section->OutputSec = this;
     PayloadSize += Section->getSize();
   }
 
