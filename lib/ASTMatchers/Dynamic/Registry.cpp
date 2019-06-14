@@ -320,6 +320,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasUnqualifiedDesugaredType);
   REGISTER_MATCHER(hasValueType);
   REGISTER_MATCHER(ifStmt);
+  REGISTER_MATCHER(ignoringElidableConstructorCall);
   REGISTER_MATCHER(ignoringImpCasts);
   REGISTER_MATCHER(ignoringImplicit);
   REGISTER_MATCHER(ignoringParenCasts);
@@ -366,6 +367,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isExternC);
   REGISTER_MATCHER(isFinal);
   REGISTER_MATCHER(isImplicit);
+  REGISTER_MATCHER(isInStdNamespace);
   REGISTER_MATCHER(isInTemplateInstantiation);
   REGISTER_MATCHER(isInline);
   REGISTER_MATCHER(isInstanceMessage);

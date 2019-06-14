@@ -630,7 +630,7 @@ static bool isIIFE(const UnwrappedLine &Line,
 
 static bool ShouldBreakBeforeBrace(const FormatStyle &Style,
                                    const FormatToken &InitialToken) {
-  if (InitialToken.is(tok::kw_namespace))
+  if (InitialToken.isOneOf(tok::kw_namespace, TT_NamespaceMacro))
     return Style.BraceWrapping.AfterNamespace;
   if (InitialToken.is(tok::kw_class))
     return Style.BraceWrapping.AfterClass;
@@ -1122,6 +1122,10 @@ void UnwrappedLineParser::parseStructuralElement() {
       parseStatementMacro();
       return;
     }
+    if (Style.isCpp() && FormatTok->is(TT_NamespaceMacro)) {
+      parseNamespace();
+      return;
+    }
     // In all other cases, parse the declaration.
     break;
   default:
@@ -1335,10 +1339,15 @@ void UnwrappedLineParser::parseStructuralElement() {
       // See if the following token should start a new unwrapped line.
       StringRef Text = FormatTok->TokenText;
       nextToken();
-      if (Line->Tokens.size() == 1 &&
-          // JS doesn't have macros, and within classes colons indicate fields,
-          // not labels.
-          Style.Language != FormatStyle::LK_JavaScript) {
+
+      // JS doesn't have macros, and within classes colons indicate fields, not
+      // labels.
+      if (Style.Language == FormatStyle::LK_JavaScript)
+        break;
+
+      TokenCount = Line->Tokens.size();
+      if (TokenCount == 1 ||
+          (TokenCount == 2 && Line->Tokens.front().Tok->is(tok::comment))) {
         if (FormatTok->Tok.is(tok::colon) && !Line->MustBeDeclaration) {
           Line->Tokens.begin()->Tok->MustBreakBefore = true;
           parseLabel();
@@ -1855,12 +1864,17 @@ void UnwrappedLineParser::parseTryCatch() {
 }
 
 void UnwrappedLineParser::parseNamespace() {
-  assert(FormatTok->Tok.is(tok::kw_namespace) && "'namespace' expected");
+  assert(FormatTok->isOneOf(tok::kw_namespace, TT_NamespaceMacro) &&
+         "'namespace' expected");
 
   const FormatToken &InitialToken = *FormatTok;
   nextToken();
-  while (FormatTok->isOneOf(tok::identifier, tok::coloncolon))
-    nextToken();
+  if (InitialToken.is(TT_NamespaceMacro)) {
+    parseParens();
+  } else {
+    while (FormatTok->isOneOf(tok::identifier, tok::coloncolon))
+      nextToken();
+  }
   if (FormatTok->Tok.is(tok::l_brace)) {
     if (ShouldBreakBeforeBrace(Style, InitialToken))
       addUnwrappedLine();

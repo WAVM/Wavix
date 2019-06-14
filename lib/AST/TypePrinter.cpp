@@ -259,6 +259,7 @@ bool TypePrinter::canPrefixQualifiers(const Type *T,
     case Type::Paren:
     case Type::PackExpansion:
     case Type::SubstTemplateTypeParm:
+    case Type::MacroQualified:
       CanPrefixQualifiers = false;
       break;
 
@@ -733,6 +734,8 @@ FunctionProtoType::printExceptionSpecification(raw_ostream &OS,
         OS << getExceptionType(I).stream(Policy);
       }
     OS << ')';
+  } else if (EST_NoThrow == getExceptionSpecType()) {
+    OS << " __attribute__((nothrow))";
   } else if (isNoexceptExceptionSpec(getExceptionSpecType())) {
     OS << " noexcept";
     // FIXME:Is it useful to print out the expression for a non-dependent
@@ -961,6 +964,21 @@ void TypePrinter::printUnresolvedUsingAfter(const UnresolvedUsingType *T,
 
 void TypePrinter::printTypedefBefore(const TypedefType *T, raw_ostream &OS) {
   printTypeSpec(T->getDecl(), OS);
+}
+
+void TypePrinter::printMacroQualifiedBefore(const MacroQualifiedType *T,
+                                            raw_ostream &OS) {
+  StringRef MacroName = T->getMacroIdentifier()->getName();
+  OS << MacroName << " ";
+
+  // Since this type is meant to print the macro instead of the whole attribute,
+  // we trim any attributes and go directly to the original modified type.
+  printBefore(T->getModifiedType(), OS);
+}
+
+void TypePrinter::printMacroQualifiedAfter(const MacroQualifiedType *T,
+                                           raw_ostream &OS) {
+  printAfter(T->getModifiedType(), OS);
 }
 
 void TypePrinter::printTypedefAfter(const TypedefType *T, raw_ostream &OS) {}
@@ -1217,8 +1235,18 @@ void TypePrinter::printTemplateTypeParmBefore(const TemplateTypeParmType *T,
                                               raw_ostream &OS) {
   if (IdentifierInfo *Id = T->getIdentifier())
     OS << Id->getName();
-  else
-    OS << "type-parameter-" << T->getDepth() << '-' << T->getIndex();
+  else {
+    bool IsLambdaAutoParam = false;
+    if (auto D = T->getDecl()) {
+      if (auto M = dyn_cast_or_null<CXXMethodDecl>(D->getDeclContext()))
+        IsLambdaAutoParam = D->isImplicit() && M->getParent()->isLambda();
+    }
+
+    if (IsLambdaAutoParam)
+      OS << "auto";
+    else
+      OS << "type-parameter-" << T->getDepth() << '-' << T->getIndex();
+  }
   spaceBeforePlaceHolder(OS);
 }
 
@@ -1777,17 +1805,19 @@ void Qualifiers::print(raw_ostream &OS, const PrintingPolicy& Policy,
       case LangAS::opencl_private:
         break;
       case LangAS::opencl_constant:
-      case LangAS::cuda_constant:
         OS << "__constant";
         break;
       case LangAS::opencl_generic:
         OS << "__generic";
         break;
       case LangAS::cuda_device:
-        OS << "__device";
+        OS << "__device__";
+        break;
+      case LangAS::cuda_constant:
+        OS << "__constant__";
         break;
       case LangAS::cuda_shared:
-        OS << "__shared";
+        OS << "__shared__";
         break;
       default:
         OS << "__attribute__((address_space(";

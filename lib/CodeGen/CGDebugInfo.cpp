@@ -422,8 +422,12 @@ llvm::DIFile *CGDebugInfo::getOrCreateFile(SourceLocation Loc) {
   }
 
   SmallString<32> Checksum;
+
+  // Compute the checksum if possible. If the location is affected by a #line
+  // directive that refers to a file, PLoc will have an invalid FileID, and we
+  // will correctly get no checksum.
   Optional<llvm::DIFile::ChecksumKind> CSKind =
-      computeChecksum(SM.getFileID(Loc), Checksum);
+      computeChecksum(PLoc.getFileID(), Checksum);
   Optional<llvm::DIFile::ChecksumInfo<StringRef>> CSInfo;
   if (CSKind)
     CSInfo.emplace(*CSKind, Checksum);
@@ -1087,14 +1091,17 @@ llvm::DIType *CGDebugInfo::CreateType(const TemplateSpecializationType *Ty,
   assert(Ty->isTypeAlias());
   llvm::DIType *Src = getOrCreateType(Ty->getAliasedType(), Unit);
 
+  auto *AliasDecl =
+      cast<TypeAliasTemplateDecl>(Ty->getTemplateName().getAsTemplateDecl())
+          ->getTemplatedDecl();
+
+  if (AliasDecl->hasAttr<NoDebugAttr>())
+    return Src;
+
   SmallString<128> NS;
   llvm::raw_svector_ostream OS(NS);
   Ty->getTemplateName().print(OS, getPrintingPolicy(), /*qualified*/ false);
   printTemplateArgumentList(OS, Ty->template_arguments(), getPrintingPolicy());
-
-  auto *AliasDecl =
-      cast<TypeAliasTemplateDecl>(Ty->getTemplateName().getAsTemplateDecl())
-          ->getTemplatedDecl();
 
   SourceLocation Loc = AliasDecl->getLocation();
   return DBuilder.createTypedef(Src, OS.str(), getOrCreateFile(Loc),
@@ -1104,15 +1111,20 @@ llvm::DIType *CGDebugInfo::CreateType(const TemplateSpecializationType *Ty,
 
 llvm::DIType *CGDebugInfo::CreateType(const TypedefType *Ty,
                                       llvm::DIFile *Unit) {
+  llvm::DIType *Underlying =
+      getOrCreateType(Ty->getDecl()->getUnderlyingType(), Unit);
+
+  if (Ty->getDecl()->hasAttr<NoDebugAttr>())
+    return Underlying;
+
   // We don't set size information, but do specify where the typedef was
   // declared.
   SourceLocation Loc = Ty->getDecl()->getLocation();
 
   // Typedefs are derived from some other type.
-  return DBuilder.createTypedef(
-      getOrCreateType(Ty->getDecl()->getUnderlyingType(), Unit),
-      Ty->getDecl()->getName(), getOrCreateFile(Loc), getLineNumber(Loc),
-      getDeclContextDescriptor(Ty->getDecl()));
+  return DBuilder.createTypedef(Underlying, Ty->getDecl()->getName(),
+                                getOrCreateFile(Loc), getLineNumber(Loc),
+                                getDeclContextDescriptor(Ty->getDecl()));
 }
 
 static unsigned getDwarfCC(CallingConv CC) {
@@ -1827,32 +1839,24 @@ CGDebugInfo::CollectFunctionTemplateParams(const FunctionDecl *FD,
 }
 
 llvm::DINodeArray CGDebugInfo::CollectVarTemplateParams(const VarDecl *VL,
-    llvm::DIFile *Unit) {
-  if (auto *TS = dyn_cast<VarTemplateSpecializationDecl>(VL)) {
-    auto T = TS->getSpecializedTemplateOrPartial();
-    auto TA = TS->getTemplateArgs().asArray();
-    // Collect parameters for a partial specialization
-    if (T.is<VarTemplatePartialSpecializationDecl *>()) {
-      const TemplateParameterList *TList =
-        T.get<VarTemplatePartialSpecializationDecl *>()
-        ->getTemplateParameters();
-      return CollectTemplateParams(TList, TA, Unit);
-    }
-
-    // Collect parameters for an explicit specialization
-    if (T.is<VarTemplateDecl *>()) {
-      const TemplateParameterList *TList = T.get<VarTemplateDecl *>()
-        ->getTemplateParameters();
-      return CollectTemplateParams(TList, TA, Unit);
-    }
-  }
-  return llvm::DINodeArray();
+                                                        llvm::DIFile *Unit) {
+  // Always get the full list of parameters, not just the ones from the
+  // specialization. A partial specialization may have fewer parameters than
+  // there are arguments.
+  auto *TS = dyn_cast<VarTemplateSpecializationDecl>(VL);
+  if (!TS)
+    return llvm::DINodeArray();
+  VarTemplateDecl *T = TS->getSpecializedTemplate();
+  const TemplateParameterList *TList = T->getTemplateParameters();
+  auto TA = TS->getTemplateArgs().asArray();
+  return CollectTemplateParams(TList, TA, Unit);
 }
 
 llvm::DINodeArray CGDebugInfo::CollectCXXTemplateParams(
     const ClassTemplateSpecializationDecl *TSpecial, llvm::DIFile *Unit) {
-  // Always get the full list of parameters, not just the ones from
-  // the specialization.
+  // Always get the full list of parameters, not just the ones from the
+  // specialization. A partial specialization may have fewer parameters than
+  // there are arguments.
   TemplateParameterList *TPList =
       TSpecial->getSpecializedTemplate()->getTemplateParameters();
   const TemplateArgumentList &TAList = TSpecial->getTemplateArgs();
@@ -2852,6 +2856,9 @@ static QualType UnwrapTypeForDebugInfo(QualType T, const ASTContext &C) {
     case Type::Paren:
       T = cast<ParenType>(T)->getInnerType();
       break;
+    case Type::MacroQualified:
+      T = cast<MacroQualifiedType>(T)->getUnderlyingType();
+      break;
     case Type::SubstTemplateTypeParm:
       T = cast<SubstTemplateTypeParmType>(T)->getReplacementType();
       break;
@@ -3031,6 +3038,7 @@ llvm::DIType *CGDebugInfo::CreateTypeNode(QualType Ty, llvm::DIFile *Unit) {
   case Type::DeducedTemplateSpecialization:
   case Type::Elaborated:
   case Type::Paren:
+  case Type::MacroQualified:
   case Type::SubstTemplateTypeParm:
   case Type::TypeOfExpr:
   case Type::TypeOf:
@@ -4240,7 +4248,7 @@ void CGDebugInfo::EmitDeclareOfBlockLiteralArgVariable(const CGBlockInfo &block,
 
 llvm::DIDerivedType *
 CGDebugInfo::getOrCreateStaticDataMemberDeclarationOrNull(const VarDecl *D) {
-  if (!D->isStaticDataMember())
+  if (!D || !D->isStaticDataMember())
     return nullptr;
 
   auto MI = StaticDataMemberCache.find(D->getCanonicalDecl());
@@ -4352,22 +4360,32 @@ void CGDebugInfo::EmitGlobalVariable(const ValueDecl *VD, const APValue &Init) {
   llvm::DIFile *Unit = getOrCreateFile(VD->getLocation());
   StringRef Name = VD->getName();
   llvm::DIType *Ty = getOrCreateType(VD->getType(), Unit);
+
+  // Do not use global variables for enums, unless in CodeView.
   if (const auto *ECD = dyn_cast<EnumConstantDecl>(VD)) {
     const auto *ED = cast<EnumDecl>(ECD->getDeclContext());
     assert(isa<EnumType>(ED->getTypeForDecl()) && "Enum without EnumType?");
-    Ty = getOrCreateType(QualType(ED->getTypeForDecl(), 0), Unit);
+    (void)ED;
+
+    // If CodeView, emit enums as global variables, unless they are defined
+    // inside a class. We do this because MSVC doesn't emit S_CONSTANTs for
+    // enums in classes, and because it is difficult to attach this scope
+    // information to the global variable.
+    if (!CGM.getCodeGenOpts().EmitCodeView ||
+        isa<RecordDecl>(ED->getDeclContext()))
+      return;
   }
-  // Do not use global variables for enums.
-  //
-  // FIXME: why not?
-  if (Ty->getTag() == llvm::dwarf::DW_TAG_enumeration_type)
-    return;
-  // Do not emit separate definitions for function local const/statics.
+
+  llvm::DIScope *DContext = nullptr;
+
+  // Do not emit separate definitions for function local consts.
   if (isa<FunctionDecl>(VD->getDeclContext()))
     return;
+
+  // Emit definition for static members in CodeView.
   VD = cast<ValueDecl>(VD->getCanonicalDecl());
-  auto *VarD = cast<VarDecl>(VD);
-  if (VarD->isStaticDataMember()) {
+  auto *VarD = dyn_cast<VarDecl>(VD);
+  if (VarD && VarD->isStaticDataMember()) {
     auto *RD = cast<RecordDecl>(VarD->getDeclContext());
     getDeclContextDescriptor(VarD);
     // Ensure that the type is retained even though it's otherwise unreferenced.
@@ -4376,10 +4394,16 @@ void CGDebugInfo::EmitGlobalVariable(const ValueDecl *VD, const APValue &Init) {
     // through its scope.
     RetainedTypes.push_back(
         CGM.getContext().getRecordType(RD).getAsOpaquePtr());
-    return;
-  }
 
-  llvm::DIScope *DContext = getDeclContextDescriptor(VD);
+    if (!CGM.getCodeGenOpts().EmitCodeView)
+      return;
+
+    // Use the global scope for static members.
+    DContext = getContextDescriptor(
+        cast<Decl>(CGM.getContext().getTranslationUnitDecl()), TheCU);
+  } else {
+    DContext = getDeclContextDescriptor(VD);
+  }
 
   auto &GV = DeclCache[VD];
   if (GV)

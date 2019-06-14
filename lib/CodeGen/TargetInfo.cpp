@@ -915,14 +915,6 @@ ABIArgInfo PNaClABIInfo::classifyReturnType(QualType RetTy) const {
                                            : ABIArgInfo::getDirect());
 }
 
-/// IsX86_MMXType - Return true if this is an MMX type.
-bool IsX86_MMXType(llvm::Type *IRType) {
-  // Return true if the type is an MMX type <2 x i32>, <4 x i16>, or <8 x i8>.
-  return IRType->isVectorTy() && IRType->getPrimitiveSizeInBits() == 64 &&
-    cast<llvm::VectorType>(IRType)->getElementType()->isIntegerTy() &&
-    IRType->getScalarSizeInBits() != 64;
-}
-
 static llvm::Type* X86AdjustInlineAsmType(CodeGen::CodeGenFunction &CGF,
                                           StringRef Constraint,
                                           llvm::Type* Ty) {
@@ -1011,6 +1003,7 @@ class X86_32ABIInfo : public SwiftABIInfo {
   bool IsSoftFloatABI;
   bool IsMCUABI;
   unsigned DefaultNumRegisterParameters;
+  bool IsMMXEnabled;
 
   static bool isRegisterSize(unsigned Size) {
     return (Size == 8 || Size == 16 || Size == 32 || Size == 64);
@@ -1070,13 +1063,15 @@ public:
 
   X86_32ABIInfo(CodeGen::CodeGenTypes &CGT, bool DarwinVectorABI,
                 bool RetSmallStructInRegABI, bool Win32StructABI,
-                unsigned NumRegisterParameters, bool SoftFloatABI)
+                unsigned NumRegisterParameters, bool SoftFloatABI,
+                bool MMXEnabled)
     : SwiftABIInfo(CGT), IsDarwinVectorABI(DarwinVectorABI),
       IsRetSmallStructInRegABI(RetSmallStructInRegABI),
       IsWin32StructABI(Win32StructABI),
       IsSoftFloatABI(SoftFloatABI),
       IsMCUABI(CGT.getTarget().getTriple().isOSIAMCU()),
-      DefaultNumRegisterParameters(NumRegisterParameters) {}
+      DefaultNumRegisterParameters(NumRegisterParameters),
+      IsMMXEnabled(MMXEnabled) {}
 
   bool shouldPassIndirectlyForSwift(ArrayRef<llvm::Type*> scalars,
                                     bool asReturnValue) const override {
@@ -1091,16 +1086,30 @@ public:
     // x86-32 lowering does not support passing swifterror in a register.
     return false;
   }
+
+  bool isPassInMMXRegABI() const {
+    // The System V i386 psABI requires __m64 to be passed in MMX registers.
+    // Clang historically had a bug where it failed to apply this rule, and
+    // some platforms (e.g. Darwin, PS4, and FreeBSD) have opted to maintain
+    // compatibility with the old Clang behavior, so we only apply it on
+    // platforms that have specifically requested it (currently just Linux and
+    // NetBSD).
+    const llvm::Triple &T = getTarget().getTriple();
+    if (IsMMXEnabled && (T.isOSLinux() || T.isOSNetBSD()))
+      return true;
+    return false;
+  }
 };
 
 class X86_32TargetCodeGenInfo : public TargetCodeGenInfo {
 public:
   X86_32TargetCodeGenInfo(CodeGen::CodeGenTypes &CGT, bool DarwinVectorABI,
                           bool RetSmallStructInRegABI, bool Win32StructABI,
-                          unsigned NumRegisterParameters, bool SoftFloatABI)
+                          unsigned NumRegisterParameters, bool SoftFloatABI,
+                          bool MMXEnabled = false)
       : TargetCodeGenInfo(new X86_32ABIInfo(
             CGT, DarwinVectorABI, RetSmallStructInRegABI, Win32StructABI,
-            NumRegisterParameters, SoftFloatABI)) {}
+            NumRegisterParameters, SoftFloatABI, MMXEnabled)) {}
 
   static bool isStructReturnInRegABI(
       const llvm::Triple &Triple, const CodeGenOptions &Opts);
@@ -1386,10 +1395,9 @@ ABIArgInfo X86_32ABIInfo::classifyReturnType(QualType RetTy,
   }
 
   if (const VectorType *VT = RetTy->getAs<VectorType>()) {
+    uint64_t Size = getContext().getTypeSize(RetTy);
     // On Darwin, some vectors are returned in registers.
     if (IsDarwinVectorABI) {
-      uint64_t Size = getContext().getTypeSize(RetTy);
-
       // 128-bit vectors are a special case; they are returned in
       // registers and we need to make sure to pick a type the LLVM
       // backend will like.
@@ -1406,6 +1414,10 @@ ABIArgInfo X86_32ABIInfo::classifyReturnType(QualType RetTy,
 
       return getIndirectReturnResult(RetTy, State);
     }
+
+    if (VT->getElementType()->isIntegerType() && Size == 64 &&
+        isPassInMMXRegABI())
+      return ABIArgInfo::getDirect(llvm::Type::getX86_MMXTy(getVMContext()));
 
     return ABIArgInfo::getDirect();
   }
@@ -1701,22 +1713,25 @@ ABIArgInfo X86_32ABIInfo::classifyArgumentType(QualType Ty,
   }
 
   if (const VectorType *VT = Ty->getAs<VectorType>()) {
+    uint64_t Size = getContext().getTypeSize(Ty);
     // On Darwin, some vectors are passed in memory, we handle this by passing
     // it as an i8/i16/i32/i64.
     if (IsDarwinVectorABI) {
-      uint64_t Size = getContext().getTypeSize(Ty);
       if ((Size == 8 || Size == 16 || Size == 32) ||
           (Size == 64 && VT->getNumElements() == 1))
         return ABIArgInfo::getDirect(llvm::IntegerType::get(getVMContext(),
                                                             Size));
     }
 
-    if (IsX86_MMXType(CGT.ConvertType(Ty)))
-      return ABIArgInfo::getDirect(llvm::IntegerType::get(getVMContext(), 64));
-
+    if (VT->getElementType()->isIntegerType() && Size == 64) {
+      if (isPassInMMXRegABI())
+        return ABIArgInfo::getDirect(llvm::Type::getX86_MMXTy(getVMContext()));
+      else
+        return ABIArgInfo::getDirect(
+          llvm::IntegerType::get(getVMContext(), 64));
+    }
     return ABIArgInfo::getDirect();
   }
-
 
   if (const EnumType *EnumTy = Ty->getAs<EnumType>())
     Ty = EnumTy->getDecl()->getIntegerType();
@@ -2345,22 +2360,6 @@ public:
         Fn->setCallingConv(llvm::CallingConv::X86_INTR);
       }
     }
-  }
-};
-
-class PS4TargetCodeGenInfo : public X86_64TargetCodeGenInfo {
-public:
-  PS4TargetCodeGenInfo(CodeGen::CodeGenTypes &CGT, X86AVXABILevel AVXLevel)
-    : X86_64TargetCodeGenInfo(CGT, AVXLevel) {}
-
-  void getDependentLibraryOption(llvm::StringRef Lib,
-                                 llvm::SmallString<24> &Opt) const override {
-    Opt = "\01";
-    // If the argument contains a space, enclose it in quotes.
-    if (Lib.find(" ") != StringRef::npos)
-      Opt += "\"" + Lib.str() + "\"";
-    else
-      Opt += Lib;
   }
 };
 
@@ -5294,13 +5293,13 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr,
   llvm::BasicBlock *OnStackBlock = CGF.createBasicBlock("vaarg.on_stack");
   llvm::BasicBlock *ContBlock = CGF.createBasicBlock("vaarg.end");
 
-  auto TyInfo = getContext().getTypeInfoInChars(Ty);
-  CharUnits TyAlign = TyInfo.second;
+  CharUnits TySize = getContext().getTypeSizeInChars(Ty);
+  CharUnits TyAlign = getContext().getTypeUnadjustedAlignInChars(Ty);
 
   Address reg_offs_p = Address::invalid();
   llvm::Value *reg_offs = nullptr;
   int reg_top_index;
-  int RegSize = IsIndirect ? 8 : TyInfo.first.getQuantity();
+  int RegSize = IsIndirect ? 8 : TySize.getQuantity();
   if (!IsFPR) {
     // 3 is the field number of __gr_offs
     reg_offs_p = CGF.Builder.CreateStructGEP(VAListAddr, 3, "gr_offs_p");
@@ -5428,8 +5427,8 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr,
     CharUnits SlotSize = BaseAddr.getAlignment();
     if (CGF.CGM.getDataLayout().isBigEndian() && !IsIndirect &&
         (IsHFA || !isAggregateTypeForABI(Ty)) &&
-        TyInfo.first < SlotSize) {
-      CharUnits Offset = SlotSize - TyInfo.first;
+        TySize < SlotSize) {
+      CharUnits Offset = SlotSize - TySize;
       BaseAddr = CGF.Builder.CreateConstInBoundsByteGEP(BaseAddr, Offset);
     }
 
@@ -5471,7 +5470,7 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr,
   if (IsIndirect)
     StackSize = StackSlotSize;
   else
-    StackSize = TyInfo.first.alignTo(StackSlotSize);
+    StackSize = TySize.alignTo(StackSlotSize);
 
   llvm::Value *StackSizeC = CGF.Builder.getSize(StackSize);
   llvm::Value *NewStack =
@@ -5481,8 +5480,8 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr,
   CGF.Builder.CreateStore(NewStack, stack_p);
 
   if (CGF.CGM.getDataLayout().isBigEndian() && !isAggregateTypeForABI(Ty) &&
-      TyInfo.first < StackSlotSize) {
-    CharUnits Offset = StackSlotSize - TyInfo.first;
+      TySize < StackSlotSize) {
+    CharUnits Offset = StackSlotSize - TySize;
     OnStackAddr = CGF.Builder.CreateConstInBoundsByteGEP(OnStackAddr, Offset);
   }
 
@@ -5500,7 +5499,7 @@ Address AArch64ABIInfo::EmitAAPCSVAArg(Address VAListAddr,
 
   if (IsIndirect)
     return Address(CGF.Builder.CreateLoad(ResAddr, "vaarg.addr"),
-                   TyInfo.second);
+                   TyAlign);
 
   return ResAddr;
 }
@@ -6226,19 +6225,19 @@ Address ARMABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     return Addr;
   }
 
-  auto TyInfo = getContext().getTypeInfoInChars(Ty);
-  CharUnits TyAlignForABI = TyInfo.second;
+  CharUnits TySize = getContext().getTypeSizeInChars(Ty);
+  CharUnits TyAlignForABI = getContext().getTypeUnadjustedAlignInChars(Ty);
 
   // Use indirect if size of the illegal vector is bigger than 16 bytes.
   bool IsIndirect = false;
   const Type *Base = nullptr;
   uint64_t Members = 0;
-  if (TyInfo.first > CharUnits::fromQuantity(16) && isIllegalVectorType(Ty)) {
+  if (TySize > CharUnits::fromQuantity(16) && isIllegalVectorType(Ty)) {
     IsIndirect = true;
 
   // ARMv7k passes structs bigger than 16 bytes indirectly, in space
   // allocated by the caller.
-  } else if (TyInfo.first > CharUnits::fromQuantity(16) &&
+  } else if (TySize > CharUnits::fromQuantity(16) &&
              getABIKind() == ARMABIInfo::AAPCS16_VFP &&
              !isHomogeneousAggregate(Ty, Base, Members)) {
     IsIndirect = true;
@@ -6258,8 +6257,8 @@ Address ARMABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   } else {
     TyAlignForABI = CharUnits::fromQuantity(4);
   }
-  TyInfo.second = TyAlignForABI;
 
+  std::pair<CharUnits, CharUnits> TyInfo = { TySize, TyAlignForABI };
   return emitVoidPtrVAArg(CGF, VAListAddr, Ty, IsIndirect, TyInfo,
                           SlotSize, /*AllowHigherAlign*/ true);
 }
@@ -7869,7 +7868,8 @@ void AMDGPUTargetCodeGenInfo::setTargetAttributes(
   const auto *ReqdWGS = M.getLangOpts().OpenCL ?
     FD->getAttr<ReqdWorkGroupSizeAttr>() : nullptr;
 
-  if (M.getLangOpts().OpenCL && FD->hasAttr<OpenCLKernelAttr>() &&
+  if (((M.getLangOpts().OpenCL && FD->hasAttr<OpenCLKernelAttr>()) ||
+      (M.getLangOpts().HIP && FD->hasAttr<CUDAGlobalAttr>())) &&
       (M.getTriple().getOS() == llvm::Triple::AMDHSA))
     F->addFnAttr("amdgpu-implicitarg-num-bytes", "48");
 
@@ -9476,10 +9476,11 @@ const TargetCodeGenInfo &CodeGenModule::getTargetCodeGenInfo() {
           Types, IsDarwinVectorABI, RetSmallStructInRegABI,
           IsWin32FloatStructABI, CodeGenOpts.NumRegisterParameters));
     } else {
+      bool EnableMMX = getContext().getTargetInfo().getABI() != "no-mmx";
       return SetCGInfo(new X86_32TargetCodeGenInfo(
           Types, IsDarwinVectorABI, RetSmallStructInRegABI,
           IsWin32FloatStructABI, CodeGenOpts.NumRegisterParameters,
-          CodeGenOpts.FloatABI == "soft"));
+          CodeGenOpts.FloatABI == "soft", EnableMMX));
     }
   }
 
@@ -9493,8 +9494,6 @@ const TargetCodeGenInfo &CodeGenModule::getTargetCodeGenInfo() {
     switch (Triple.getOS()) {
     case llvm::Triple::Win32:
       return SetCGInfo(new WinX86_64TargetCodeGenInfo(Types, AVXLevel));
-    case llvm::Triple::PS4:
-      return SetCGInfo(new PS4TargetCodeGenInfo(Types, AVXLevel));
     default:
       return SetCGInfo(new X86_64TargetCodeGenInfo(Types, AVXLevel));
     }
