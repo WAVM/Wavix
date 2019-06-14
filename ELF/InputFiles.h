@@ -54,6 +54,9 @@ extern std::unique_ptr<llvm::TarWriter> Tar;
 // Opens a given file.
 llvm::Optional<MemoryBufferRef> readFile(StringRef Path);
 
+// Add symbols in File to the symbol table.
+void parseFile(InputFile *File);
+
 // The root class of input files.
 class InputFile {
 public:
@@ -87,7 +90,7 @@ public:
   // function on files of other types.
   ArrayRef<Symbol *> getSymbols() { return getMutableSymbols(); }
 
-  std::vector<Symbol *> &getMutableSymbols() {
+  MutableArrayRef<Symbol *> getMutableSymbols() {
     assert(FileKind == BinaryKind || FileKind == ObjKind ||
            FileKind == BitcodeKind);
     return Symbols;
@@ -114,6 +117,10 @@ public:
   // True if this is an argument for --just-symbols. Usually false.
   bool JustSymbols = false;
 
+  // OutSecOff of .got2 in the current file. This is used by PPC32 -fPIC/-fPIE
+  // to compute offsets in PLT call stubs.
+  uint32_t PPC32Got2OutSecOff = 0;
+
   // On PPC64 we need to keep track of which files contain small code model
   // relocations that access the .toc section. To minimize the chance of a
   // relocation overflow, files that do contain said relocations should have
@@ -136,10 +143,11 @@ public:
   // Index of MIPS GOT built for this file.
   llvm::Optional<size_t> MipsGotIndex;
 
+  std::vector<Symbol *> Symbols;
+
 protected:
   InputFile(Kind K, MemoryBufferRef M);
   std::vector<InputSectionBase *> Sections;
-  std::vector<Symbol *> Symbols;
 
 private:
   const Kind FileKind;
@@ -148,7 +156,6 @@ private:
 class ELFFileBase : public InputFile {
 public:
   ELFFileBase(Kind K, MemoryBufferRef M);
-  template <typename ELFT> void parseHeader();
   static bool classof(const InputFile *F) { return F->isElf(); }
 
   template <typename ELFT> llvm::object::ELFFile<ELFT> getObj() const {
@@ -166,13 +173,13 @@ public:
   }
 
 protected:
+  // Initializes this class's member variables.
+  template <typename ELFT> void init();
+
   const void *ELFSyms = nullptr;
   size_t NumELFSyms = 0;
   uint32_t FirstGlobal = 0;
   StringRef StringTable;
-  template <typename ELFT>
-  void initSymtab(ArrayRef<typename ELFT::Shdr> Sections,
-                  const typename ELFT::Shdr *Symtab);
 };
 
 // .o file.
@@ -184,9 +191,6 @@ template <class ELFT> class ObjFile : public ELFFileBase {
   using Elf_Word = typename ELFT::Word;
   using Elf_CGProfile = typename ELFT::CGProfile;
 
-  StringRef getShtGroupSignature(ArrayRef<Elf_Shdr> Sections,
-                                 const Elf_Shdr &Sec);
-
 public:
   static bool classof(const InputFile *F) { return F->kind() == ObjKind; }
 
@@ -197,8 +201,14 @@ public:
   ArrayRef<Symbol *> getLocalSymbols();
   ArrayRef<Symbol *> getGlobalSymbols();
 
-  ObjFile(MemoryBufferRef M, StringRef ArchiveName);
-  void parse(llvm::DenseSet<llvm::CachedHashStringRef> &ComdatGroups);
+  ObjFile(MemoryBufferRef M, StringRef ArchiveName) : ELFFileBase(ObjKind, M) {
+    this->ArchiveName = ArchiveName;
+  }
+
+  void parse(bool IgnoreComdats = false);
+
+  StringRef getShtGroupSignature(ArrayRef<Elf_Shdr> Sections,
+                                 const Elf_Shdr &Sec);
 
   Symbol &getSymbol(uint32_t SymbolIndex) const {
     if (SymbolIndex >= this->Symbols.size())
@@ -221,6 +231,8 @@ public:
   // R_MIPS_GPREL16 / R_MIPS_GPREL32 relocations.
   uint32_t MipsGp0 = 0;
 
+  uint32_t AndFeatures = 0;
+
   // Name of source file obtained from STT_FILE symbol value,
   // or empty string if there is no such symbol in object file
   // symbol table.
@@ -234,10 +246,6 @@ public:
   // but had one or more functions with the no_split_stack attribute.
   bool SomeNoSplitStack = false;
 
-  // True if the file has any live Regular or Merge sections that aren't
-  // the LDSA section.
-  bool HasLiveCodeOrData = false;
-
   // Pointer to this input file's .llvm_addrsig section, if it has one.
   const Elf_Shdr *AddrsigSec = nullptr;
 
@@ -245,8 +253,7 @@ public:
   ArrayRef<Elf_CGProfile> CGProfile;
 
 private:
-  void
-  initializeSections(llvm::DenseSet<llvm::CachedHashStringRef> &ComdatGroups);
+  void initializeSections(bool IgnoreComdats);
   void initializeSymbols();
   void initializeJustSymbols();
   void initializeDwarf();
@@ -255,7 +262,6 @@ private:
   StringRef getSectionName(const Elf_Shdr &Sec);
 
   bool shouldMerge(const Elf_Shdr &Sec);
-  Symbol *createSymbol(const Elf_Sym *Sym);
 
   // Each ELF symbol contains a section index which the symbol belongs to.
   // However, because the number of bits dedicated for that is limited, a
@@ -307,9 +313,7 @@ public:
   static bool classof(const InputFile *F) { return F->kind() == LazyObjKind; }
 
   template <class ELFT> void parse();
-  MemoryBufferRef getBuffer();
-  InputFile *fetch();
-  bool AddedToLink = false;
+  void fetch();
 
 private:
   uint64_t OffsetInArchive;
@@ -320,13 +324,13 @@ class ArchiveFile : public InputFile {
 public:
   explicit ArchiveFile(std::unique_ptr<Archive> &&File);
   static bool classof(const InputFile *F) { return F->kind() == ArchiveKind; }
-  template <class ELFT> void parse();
+  void parse();
 
   // Pulls out an object file that contains a definition for Sym and
   // returns it. If the same file was instantiated before, this
-  // function returns a nullptr (so we don't instantiate the same file
+  // function does nothing (so we don't instantiate the same file
   // more than once.)
-  InputFile *fetch(const Archive::Symbol &Sym);
+  void fetch(const Archive::Symbol &Sym);
 
 private:
   std::unique_ptr<Archive> File;
@@ -338,14 +342,17 @@ public:
   BitcodeFile(MemoryBufferRef M, StringRef ArchiveName,
               uint64_t OffsetInArchive);
   static bool classof(const InputFile *F) { return F->kind() == BitcodeKind; }
-  template <class ELFT>
-  void parse(llvm::DenseSet<llvm::CachedHashStringRef> &ComdatGroups);
+  template <class ELFT> void parse();
   std::unique_ptr<llvm::lto::InputFile> Obj;
 };
 
 // .so file.
 class SharedFile : public ELFFileBase {
 public:
+  SharedFile(MemoryBufferRef M, StringRef DefaultSoName)
+      : ELFFileBase(SharedKind, M), SoName(DefaultSoName),
+        IsNeeded(!Config->AsNeeded) {}
+
   // This is actually a vector of Elf_Verdef pointers.
   std::vector<const void *> Verdefs;
 
@@ -360,8 +367,6 @@ public:
   std::string SoName;
 
   static bool classof(const InputFile *F) { return F->kind() == SharedKind; }
-
-  SharedFile(MemoryBufferRef M, StringRef DefaultSoName);
 
   template <typename ELFT> void parse();
 
@@ -381,7 +386,6 @@ public:
 
 InputFile *createObjectFile(MemoryBufferRef MB, StringRef ArchiveName = "",
                             uint64_t OffsetInArchive = 0);
-InputFile *createSharedFile(MemoryBufferRef MB, StringRef DefaultSoName);
 
 inline bool isBitcode(MemoryBufferRef MB) {
   return identify_magic(MB.getBuffer()) == llvm::file_magic::bitcode;

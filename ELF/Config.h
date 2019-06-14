@@ -73,7 +73,6 @@ struct VersionDefinition {
   llvm::StringRef Name;
   uint16_t Id = 0;
   std::vector<SymbolVersion> Globals;
-  size_t NameOff = 0; // Offset in the string table
 };
 
 // This struct contains the global configuration for the linker.
@@ -82,6 +81,7 @@ struct VersionDefinition {
 // Most fields are initialized by the driver.
 struct Configuration {
   uint8_t OSABI = 0;
+  uint32_t AndFeatures = 0;
   llvm::CachePruningPolicy ThinLTOCachePolicy;
   llvm::StringMap<uint64_t> SectionStartMap;
   llvm::StringRef Chroot;
@@ -137,6 +137,7 @@ struct Configuration {
   bool Cref;
   bool DefineCommon;
   bool Demangle = true;
+  bool DependentLibraries;
   bool DisableVerify;
   bool EhFrameHdr;
   bool EmitLLVM;
@@ -145,7 +146,9 @@ struct Configuration {
   bool ExecuteOnly;
   bool ExportDynamic;
   bool FixCortexA53Errata843419;
+  bool ForceBTI;
   bool FormatBinary = false;
+  bool RequireCET;
   bool GcSections;
   bool GdbIndex;
   bool GnuHash = false;
@@ -159,11 +162,13 @@ struct Configuration {
   bool LTONewPassManager;
   bool MergeArmExidx;
   bool MipsN32Abi = false;
+  bool Nmagic;
   bool NoinhibitExec;
   bool Nostdlib;
   bool OFormatBinary;
   bool Omagic;
   bool OptRemarksWithHotness;
+  bool PacPlt;
   bool PicThunk;
   bool Pie;
   bool PrintGcSections;
@@ -193,6 +198,7 @@ struct Configuration {
   bool ZExecstack;
   bool ZGlobal;
   bool ZHazardplt;
+  bool ZIfuncNoplt;
   bool ZInitfirst;
   bool ZInterpose;
   bool ZKeepTextSectionPrefix;
@@ -219,6 +225,7 @@ struct Configuration {
   uint16_t DefaultSymbolVersion = llvm::ELF::VER_NDX_GLOBAL;
   uint16_t EMachine = llvm::ELF::EM_NONE;
   llvm::Optional<uint64_t> ImageBase;
+  uint64_t CommonPageSize;
   uint64_t MaxPageSize;
   uint64_t MipsGotSize;
   uint64_t ZStackSize;

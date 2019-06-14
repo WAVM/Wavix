@@ -401,6 +401,8 @@ static std::pair<ELFKind, uint16_t> parseBfdName(StringRef S) {
       .Case("elf32-ntradlittlemips", {ELF32LEKind, EM_MIPS})
       .Case("elf64-tradbigmips", {ELF64BEKind, EM_MIPS})
       .Case("elf64-tradlittlemips", {ELF64LEKind, EM_MIPS})
+      .Case("elf32-littleriscv", {ELF32LEKind, EM_RISCV})
+      .Case("elf64-littleriscv", {ELF64LEKind, EM_RISCV})
       .Default({ELFNoneKind, EM_NONE});
 }
 
@@ -1039,7 +1041,7 @@ Expr ScriptParser::getPageSize() {
   std::string Location = getCurrentLocation();
   return [=]() -> uint64_t {
     if (Target)
-      return Target->PageSize;
+      return Config->CommonPageSize;
     error(Location + ": unable to calculate page size");
     return 4096; // Return a dummy value.
   };
