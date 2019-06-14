@@ -29,6 +29,7 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/PassTimingInfo.h"
+#include "llvm/IR/RemarkStreamer.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/LTO/LTO.h"
@@ -69,9 +70,9 @@ using namespace llvm;
 namespace llvm {
 // Flags -discard-value-names, defined in LTOCodeGenerator.cpp
 extern cl::opt<bool> LTODiscardValueNames;
-extern cl::opt<std::string> LTORemarksFilename;
-extern cl::opt<std::string> LTORemarksPasses;
-extern cl::opt<bool> LTOPassRemarksWithHotness;
+extern cl::opt<std::string> RemarksFilename;
+extern cl::opt<std::string> RemarksPasses;
+extern cl::opt<bool> RemarksWithHotness;
 }
 
 namespace {
@@ -457,7 +458,8 @@ ProcessThinLTOModule(Module &TheModule, ModuleSummaryIndex &Index,
 static void resolvePrevailingInIndex(
     ModuleSummaryIndex &Index,
     StringMap<std::map<GlobalValue::GUID, GlobalValue::LinkageTypes>>
-        &ResolvedODR) {
+        &ResolvedODR,
+    const DenseSet<GlobalValue::GUID> &GUIDPreservedSymbols) {
 
   DenseMap<GlobalValue::GUID, const GlobalValueSummary *> PrevailingCopy;
   computePrevailingCopies(Index, PrevailingCopy);
@@ -476,7 +478,8 @@ static void resolvePrevailingInIndex(
     ResolvedODR[ModuleIdentifier][GUID] = NewLinkage;
   };
 
-  thinLTOResolvePrevailingInIndex(Index, isPrevailing, recordNewLinkage);
+  thinLTOResolvePrevailingInIndex(Index, isPrevailing, recordNewLinkage,
+                                  GUIDPreservedSymbols);
 }
 
 // Initialize the TargetMachine builder for a given Triple
@@ -630,7 +633,7 @@ void ThinLTOCodeGenerator::promote(Module &TheModule, ModuleSummaryIndex &Index,
 
   // Resolve prevailing symbols
   StringMap<std::map<GlobalValue::GUID, GlobalValue::LinkageTypes>> ResolvedODR;
-  resolvePrevailingInIndex(Index, ResolvedODR);
+  resolvePrevailingInIndex(Index, ResolvedODR, GUIDPreservedSymbols);
 
   thinLTOResolvePrevailingInModule(
       TheModule, ModuleToDefinedGVSummaries[ModuleIdentifier]);
@@ -786,7 +789,7 @@ void ThinLTOCodeGenerator::internalize(Module &TheModule,
 
   // Resolve prevailing symbols
   StringMap<std::map<GlobalValue::GUID, GlobalValue::LinkageTypes>> ResolvedODR;
-  resolvePrevailingInIndex(Index, ResolvedODR);
+  resolvePrevailingInIndex(Index, ResolvedODR, GUIDPreservedSymbols);
 
   // Promote the exported values in the index, so that they are promoted
   // in the module.
@@ -945,7 +948,7 @@ void ThinLTOCodeGenerator::run() {
 
   // Resolve prevailing symbols, this has to be computed early because it
   // impacts the caching.
-  resolvePrevailingInIndex(*Index, ResolvedODR);
+  resolvePrevailingInIndex(*Index, ResolvedODR, GUIDPreservedSymbols);
 
   // Use global summary-based analysis to identify symbols that can be
   // internalized (because they aren't exported or preserved as per callback).
@@ -1017,8 +1020,8 @@ void ThinLTOCodeGenerator::run() {
         Context.setDiscardValueNames(LTODiscardValueNames);
         Context.enableDebugTypeODRUniquing();
         auto DiagFileOrErr = lto::setupOptimizationRemarks(
-            Context, LTORemarksFilename, LTORemarksPasses,
-            LTOPassRemarksWithHotness, count);
+            Context, RemarksFilename, RemarksPasses,
+            RemarksWithHotness, count);
         if (!DiagFileOrErr) {
           errs() << "Error: " << toString(DiagFileOrErr.takeError()) << "\n";
           report_fatal_error("ThinLTO: Can't get an output file for the "

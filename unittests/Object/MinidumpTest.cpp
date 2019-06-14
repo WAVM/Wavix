@@ -343,7 +343,7 @@ TEST(MinidumpFile, getModuleList) {
       5, 6, 7, 8, 9, 0, 1, 2, // Reserved1
   };
 
-  for (const std::vector<uint8_t> &Data : {OneModule, PaddedModule}) {
+  for (ArrayRef<uint8_t> Data : {OneModule, PaddedModule}) {
     auto ExpectedFile = create(Data);
     ASSERT_THAT_EXPECTED(ExpectedFile, Succeeded());
     const MinidumpFile &File = **ExpectedFile;
@@ -395,4 +395,119 @@ TEST(MinidumpFile, getModuleList) {
   ASSERT_THAT_EXPECTED(ExpectedFile, Succeeded());
   const MinidumpFile &File = **ExpectedFile;
   EXPECT_THAT_EXPECTED(File.getModuleList(), Failed<BinaryError>());
+}
+
+TEST(MinidumpFile, getThreadList) {
+  std::vector<uint8_t> OneThread{
+      // Header
+      'M', 'D', 'M', 'P', 0x93, 0xa7, 0, 0, // Signature, Version
+      1, 0, 0, 0,                           // NumberOfStreams,
+      32, 0, 0, 0,                          // StreamDirectoryRVA
+      0, 1, 2, 3, 4, 5, 6, 7,               // Checksum, TimeDateStamp
+      0, 0, 0, 0, 0, 0, 0, 0,               // Flags
+                                            // Stream Directory
+      3, 0, 0, 0, 52, 0, 0, 0,              // Type, DataSize,
+      44, 0, 0, 0,                          // RVA
+      // ThreadList
+      1, 0, 0, 0,             // NumberOfThreads
+      1, 2, 3, 4, 5, 6, 7, 8, // ThreadId, SuspendCount
+      9, 0, 1, 2, 3, 4, 5, 6, // PriorityClass, Priority
+      7, 8, 9, 0, 1, 2, 3, 4, // EnvironmentBlock
+      // Stack
+      5, 6, 7, 8, 9, 0, 1, 2, // StartOfMemoryRange
+      3, 4, 5, 6, 7, 8, 9, 0, // DataSize, RVA
+      // Context
+      1, 2, 3, 4, 5, 6, 7, 8, // DataSize, RVA
+  };
+  // Same as before, but with a padded thread list.
+  std::vector<uint8_t> PaddedThread{
+      // Header
+      'M', 'D', 'M', 'P', 0x93, 0xa7, 0, 0, // Signature, Version
+      1, 0, 0, 0,                           // NumberOfStreams,
+      32, 0, 0, 0,                          // StreamDirectoryRVA
+      0, 1, 2, 3, 4, 5, 6, 7,               // Checksum, TimeDateStamp
+      0, 0, 0, 0, 0, 0, 0, 0,               // Flags
+                                            // Stream Directory
+      3, 0, 0, 0, 56, 0, 0, 0,              // Type, DataSize,
+      44, 0, 0, 0,                          // RVA
+      // ThreadList
+      1, 0, 0, 0,             // NumberOfThreads
+      0, 0, 0, 0,             // Padding
+      1, 2, 3, 4, 5, 6, 7, 8, // ThreadId, SuspendCount
+      9, 0, 1, 2, 3, 4, 5, 6, // PriorityClass, Priority
+      7, 8, 9, 0, 1, 2, 3, 4, // EnvironmentBlock
+      // Stack
+      5, 6, 7, 8, 9, 0, 1, 2, // StartOfMemoryRange
+      3, 4, 5, 6, 7, 8, 9, 0, // DataSize, RVA
+      // Context
+      1, 2, 3, 4, 5, 6, 7, 8, // DataSize, RVA
+  };
+
+  for (ArrayRef<uint8_t> Data : {OneThread, PaddedThread}) {
+    auto ExpectedFile = create(Data);
+    ASSERT_THAT_EXPECTED(ExpectedFile, Succeeded());
+    const MinidumpFile &File = **ExpectedFile;
+    Expected<ArrayRef<Thread>> ExpectedThread = File.getThreadList();
+    ASSERT_THAT_EXPECTED(ExpectedThread, Succeeded());
+    ASSERT_EQ(1u, ExpectedThread->size());
+    const Thread &T = ExpectedThread.get()[0];
+    EXPECT_EQ(0x04030201u, T.ThreadId);
+    EXPECT_EQ(0x08070605u, T.SuspendCount);
+    EXPECT_EQ(0x02010009u, T.PriorityClass);
+    EXPECT_EQ(0x06050403u, T.Priority);
+    EXPECT_EQ(0x0403020100090807u, T.EnvironmentBlock);
+    EXPECT_EQ(0x0201000908070605u, T.Stack.StartOfMemoryRange);
+    EXPECT_EQ(0x06050403u, T.Stack.Memory.DataSize);
+    EXPECT_EQ(0x00090807u, T.Stack.Memory.RVA);
+    EXPECT_EQ(0x04030201u, T.Context.DataSize);
+    EXPECT_EQ(0x08070605u, T.Context.RVA);
+  }
+}
+
+TEST(MinidumpFile, getMemoryList) {
+  std::vector<uint8_t> OneRange{
+      // Header
+      'M', 'D', 'M', 'P', 0x93, 0xa7, 0, 0, // Signature, Version
+      1, 0, 0, 0,                           // NumberOfStreams,
+      32, 0, 0, 0,                          // StreamDirectoryRVA
+      0, 1, 2, 3, 4, 5, 6, 7,               // Checksum, TimeDateStamp
+      0, 0, 0, 0, 0, 0, 0, 0,               // Flags
+                                            // Stream Directory
+      5, 0, 0, 0, 20, 0, 0, 0,              // Type, DataSize,
+      44, 0, 0, 0,                          // RVA
+      // MemoryDescriptor
+      1, 0, 0, 0,             // NumberOfMemoryRanges
+      5, 6, 7, 8, 9, 0, 1, 2, // StartOfMemoryRange
+      3, 4, 5, 6, 7, 8, 9, 0, // DataSize, RVA
+  };
+  // Same as before, but with a padded memory list.
+  std::vector<uint8_t> PaddedRange{
+      // Header
+      'M', 'D', 'M', 'P', 0x93, 0xa7, 0, 0, // Signature, Version
+      1, 0, 0, 0,                           // NumberOfStreams,
+      32, 0, 0, 0,                          // StreamDirectoryRVA
+      0, 1, 2, 3, 4, 5, 6, 7,               // Checksum, TimeDateStamp
+      0, 0, 0, 0, 0, 0, 0, 0,               // Flags
+                                            // Stream Directory
+      5, 0, 0, 0, 24, 0, 0, 0,              // Type, DataSize,
+      44, 0, 0, 0,                          // RVA
+      // MemoryDescriptor
+      1, 0, 0, 0,             // NumberOfMemoryRanges
+      0, 0, 0, 0,             // Padding
+      5, 6, 7, 8, 9, 0, 1, 2, // StartOfMemoryRange
+      3, 4, 5, 6, 7, 8, 9, 0, // DataSize, RVA
+  };
+
+  for (ArrayRef<uint8_t> Data : {OneRange, PaddedRange}) {
+    auto ExpectedFile = create(Data);
+    ASSERT_THAT_EXPECTED(ExpectedFile, Succeeded());
+    const MinidumpFile &File = **ExpectedFile;
+    Expected<ArrayRef<MemoryDescriptor>> ExpectedRanges = File.getMemoryList();
+    ASSERT_THAT_EXPECTED(ExpectedRanges, Succeeded());
+    ASSERT_EQ(1u, ExpectedRanges->size());
+    const MemoryDescriptor &MD = ExpectedRanges.get()[0];
+    EXPECT_EQ(0x0201000908070605u, MD.StartOfMemoryRange);
+    EXPECT_EQ(0x06050403u, MD.Memory.DataSize);
+    EXPECT_EQ(0x00090807u, MD.Memory.RVA);
+  }
 }

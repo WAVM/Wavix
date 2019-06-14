@@ -65,6 +65,7 @@
 #include "llvm/Transforms/AggressiveInstCombine/AggressiveInstCombine.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/ArgumentPromotion.h"
+#include "llvm/Transforms/IPO/Attributor.h"
 #include "llvm/Transforms/IPO/CalledValuePropagation.h"
 #include "llvm/Transforms/IPO/ConstantMerge.h"
 #include "llvm/Transforms/IPO/CrossDSOCFI.h"
@@ -94,6 +95,7 @@
 #include "llvm/Transforms/Instrumentation/CGProfile.h"
 #include "llvm/Transforms/Instrumentation/ControlHeightReduction.h"
 #include "llvm/Transforms/Instrumentation/GCOVProfiler.h"
+#include "llvm/Transforms/Instrumentation/HWAddressSanitizer.h"
 #include "llvm/Transforms/Instrumentation/InstrOrderFile.h"
 #include "llvm/Transforms/Instrumentation/InstrProfiling.h"
 #include "llvm/Transforms/Instrumentation/MemorySanitizer.h"
@@ -141,6 +143,7 @@
 #include "llvm/Transforms/Scalar/MakeGuardsExplicit.h"
 #include "llvm/Transforms/Scalar/MemCpyOptimizer.h"
 #include "llvm/Transforms/Scalar/MergedLoadStoreMotion.h"
+#include "llvm/Transforms/Scalar/MergeICmps.h"
 #include "llvm/Transforms/Scalar/NaryReassociate.h"
 #include "llvm/Transforms/Scalar/NewGVN.h"
 #include "llvm/Transforms/Scalar/PartiallyInlineLibCalls.h"
@@ -214,6 +217,9 @@ static cl::opt<bool>
 PipelineTuningOptions::PipelineTuningOptions() {
   LoopInterleaving = EnableLoopInterleaving;
   LoopVectorization = EnableLoopVectorization;
+  SLPVectorization = RunSLPVectorization;
+  LoopUnrolling = true;
+  ForgetAllSCEVInLoopUnroll = ForgetSCEVInLoopUnroll;
   LicmMssaOptCap = SetLicmMssaOptCap;
   LicmMssaNoAccForPromotionCap = SetLicmMssaNoAccForPromotionCap;
 }
@@ -456,9 +462,11 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   // Do not enable unrolling in PreLinkThinLTO phase during sample PGO
   // because it changes IR to makes profile annotation in back compile
   // inaccurate.
-  if (Phase != ThinLTOPhase::PreLink || !PGOOpt ||
-      PGOOpt->Action != PGOOptions::SampleUse)
-    LPM2.addPass(LoopFullUnrollPass(Level));
+  if ((Phase != ThinLTOPhase::PreLink || !PGOOpt ||
+       PGOOpt->Action != PGOOptions::SampleUse) &&
+      PTO.LoopUnrolling)
+    LPM2.addPass(
+        LoopFullUnrollPass(Level, false, PTO.ForgetAllSCEVInLoopUnroll));
 
   for (auto &C : LoopOptimizerEndEPCallbacks)
     C(LPM2, Level);
@@ -888,7 +896,8 @@ ModulePassManager PassBuilder::buildModuleOptimizationPipeline(
                                      sinkCommonInsts(true)));
 
   // Optimize parallel scalar instruction chains into SIMD instructions.
-  OptimizePM.addPass(SLPVectorizerPass());
+  if (PTO.SLPVectorization)
+    OptimizePM.addPass(SLPVectorizerPass());
 
   OptimizePM.addPass(InstCombinePass());
 
@@ -903,7 +912,9 @@ ModulePassManager PassBuilder::buildModuleOptimizationPipeline(
     OptimizePM.addPass(
         createFunctionToLoopPassAdaptor(LoopUnrollAndJamPass(Level)));
   }
-  OptimizePM.addPass(LoopUnrollPass(LoopUnrollOptions(Level)));
+  if (PTO.LoopUnrolling)
+    OptimizePM.addPass(LoopUnrollPass(
+        LoopUnrollOptions(Level, false, PTO.ForgetAllSCEVInLoopUnroll)));
   OptimizePM.addPass(WarnMissedTransformationsPass());
   OptimizePM.addPass(InstCombinePass());
   OptimizePM.addPass(RequireAnalysisPass<OptimizationRemarkEmitterAnalysis, Function>());
@@ -941,7 +952,7 @@ ModulePassManager PassBuilder::buildModuleOptimizationPipeline(
 
   // Optimize PHIs by speculating around them when profitable. Note that this
   // pass needs to be run after any PRE or similar pass as it is essentially
-  // inserting redudnancies into the progrem. This even includes SimplifyCFG.
+  // inserting redundancies into the program. This even includes SimplifyCFG.
   OptimizePM.addPass(SpeculateAroundPHIsPass());
 
   for (auto &C : OptimizerLastEPCallbacks)
@@ -1235,7 +1246,6 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level, bool DebugLogging,
 
   // FIXME: once we fix LoopPass Manager, add LICM here.
   // FIXME: once we provide support for enabling MLSM, add it here.
-  // FIXME: once we provide support for enabling NewGVN, add it here.
   if (RunNewGVN)
     MainFPM.addPass(NewGVNPass());
   else
@@ -1248,7 +1258,7 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level, bool DebugLogging,
   MainFPM.addPass(DSEPass());
 
   // FIXME: at this point, we run a bunch of loop passes:
-  // indVarSimplify, loopDeletion, loopInterchange, loopUnrool,
+  // indVarSimplify, loopDeletion, loopInterchange, loopUnroll,
   // loopVectorize. Enable them once the remaining issue with LPM
   // are sorted out.
 
@@ -1298,7 +1308,7 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level, bool DebugLogging,
   // Now that we have optimized the program, discard unreachable functions.
   MPM.addPass(GlobalDCEPass());
 
-  // FIXME: Enable MergeFuncs, conditionally, after ported, maybe.
+  // FIXME: Maybe enable MergeFuncs conditionally after it's ported.
   return MPM;
 }
 

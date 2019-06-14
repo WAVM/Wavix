@@ -140,10 +140,9 @@ DebugHandlerBase::getFunctionLocalOffsetAfterInsn(const MachineInstr *MI) {
 }
 
 /// If this type is derived from a base type then return base type size.
-uint64_t DebugHandlerBase::getBaseTypeSize(const DITypeRef TyRef) {
-  DIType *Ty = TyRef.resolve();
+uint64_t DebugHandlerBase::getBaseTypeSize(const DIType *Ty) {
   assert(Ty);
-  DIDerivedType *DDTy = dyn_cast<DIDerivedType>(Ty);
+  const DIDerivedType *DDTy = dyn_cast<DIDerivedType>(Ty);
   if (!DDTy)
     return Ty->getSizeInBits();
 
@@ -154,7 +153,7 @@ uint64_t DebugHandlerBase::getBaseTypeSize(const DITypeRef TyRef) {
       Tag != dwarf::DW_TAG_restrict_type && Tag != dwarf::DW_TAG_atomic_type)
     return DDTy->getSizeInBits();
 
-  DIType *BaseType = DDTy->getBaseType().resolve();
+  DIType *BaseType = DDTy->getBaseType();
 
   if (!BaseType)
     return 0;
@@ -247,8 +246,13 @@ void DebugHandlerBase::beginFunction(const MachineFunction *MF) {
                                        Pred.getInstr()->getDebugExpression());
                           }))
             break;
-          if (!IsDescribedByReg(I->getInstr()))
-            LabelsBeforeInsn[I->getInstr()] = Asm->getFunctionBegin();
+          // The code that generates location lists for DWARF assumes that the
+          // entries' start labels are monotonically increasing, and since we
+          // don't change the label for fragments that are described by
+          // registers, we must bail out when encountering such a fragment.
+          if (IsDescribedByReg(I->getInstr()))
+            break;
+          LabelsBeforeInsn[I->getInstr()] = Asm->getFunctionBegin();
         }
       }
     }

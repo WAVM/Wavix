@@ -78,7 +78,7 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
   // unset everything else if it is disabled
 
   // Assuming ECC is enabled is the conservative default.
-  SmallString<256> FullFS("+promote-alloca,+load-store-opt,+sram-ecc,");
+  SmallString<256> FullFS("+promote-alloca,+load-store-opt,+sram-ecc,+xnack,");
 
   if (isAmdHsaOS()) // Turn on FlatForGlobal for HSA.
     FullFS += "+flat-for-global,+unaligned-buffer-access,+trap-handler,";
@@ -93,6 +93,16 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
   }
 
   FullFS += "+enable-prt-strict-null,"; // This is overridden by a disable in FS
+
+  // Disable mutually exclusive bits.
+  if (FS.find_lower("+wavefrontsize") != StringRef::npos) {
+    if (FS.find_lower("wavefrontsize16") == StringRef::npos)
+      FullFS += "-wavefrontsize16,";
+    if (FS.find_lower("wavefrontsize32") == StringRef::npos)
+      FullFS += "-wavefrontsize32,";
+    if (FS.find_lower("wavefrontsize64") == StringRef::npos)
+      FullFS += "-wavefrontsize64,";
+  }
 
   FullFS += FS;
 
@@ -129,6 +139,11 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
     WavefrontSize = 64;
 
   HasFminFmaxLegacy = getGeneration() < AMDGPUSubtarget::VOLCANIC_ISLANDS;
+
+  if (DoesNotSupportXNACK && EnableXNACK) {
+    ToggleFeature(AMDGPU::FeatureXNACK);
+    EnableXNACK = false;
+  }
 
   // ECC is on by default, but turn it off if the hardware doesn't support it
   // anyway. This matters for the gfx9 targets with d16 loads, but don't support
@@ -181,10 +196,10 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
 
     HasApertureRegs(false),
     EnableXNACK(false),
+    DoesNotSupportXNACK(false),
     EnableCuMode(false),
     TrapHandler(false),
 
-    EnableHugePrivateBuffer(false),
     EnableLoadStoreOpt(false),
     EnableUnsafeDSOffsetFolding(false),
     EnableSIScheduler(false),
@@ -213,11 +228,14 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     HasSDWAMac(false),
     HasSDWAOutModsVOPC(false),
     HasDPP(false),
+    HasDPP8(false),
     HasR128A16(false),
     HasNSAEncoding(false),
     HasDLInsts(false),
     HasDot1Insts(false),
     HasDot2Insts(false),
+    HasDot5Insts(false),
+    HasDot6Insts(false),
     EnableSRAMECC(false),
     DoesNotSupportSRAMECC(false),
     HasNoSdstCMPX(false),
@@ -254,6 +272,26 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
   RegBankInfo.reset(new AMDGPURegisterBankInfo(*getRegisterInfo()));
   InstSelector.reset(new AMDGPUInstructionSelector(
   *this, *static_cast<AMDGPURegisterBankInfo *>(RegBankInfo.get()), TM));
+}
+
+unsigned GCNSubtarget::getConstantBusLimit(unsigned Opcode) const {
+  if (getGeneration() < GFX10)
+    return 1;
+
+  switch (Opcode) {
+  case AMDGPU::V_LSHLREV_B64:
+  case AMDGPU::V_LSHLREV_B64_gfx10:
+  case AMDGPU::V_LSHL_B64:
+  case AMDGPU::V_LSHRREV_B64:
+  case AMDGPU::V_LSHRREV_B64_gfx10:
+  case AMDGPU::V_LSHR_B64:
+  case AMDGPU::V_ASHRREV_I64:
+  case AMDGPU::V_ASHRREV_I64_gfx10:
+  case AMDGPU::V_ASHR_I64:
+    return 1;
+  }
+
+  return 2;
 }
 
 unsigned AMDGPUSubtarget::getMaxLocalMemSizeWithWaveCount(unsigned NWaves,
@@ -315,12 +353,6 @@ std::pair<unsigned, unsigned> AMDGPUSubtarget::getFlatWorkGroupSizes(
   std::pair<unsigned, unsigned> Default =
     getDefaultFlatWorkGroupSize(F.getCallingConv());
 
-  // TODO: Do not process "amdgpu-max-work-group-size" attribute once mesa
-  // starts using "amdgpu-flat-work-group-size" attribute.
-  Default.second = AMDGPU::getIntegerAttribute(
-    F, "amdgpu-max-work-group-size", Default.second);
-  Default.first = std::min(Default.first, Default.second);
-
   // Requested minimum/maximum flat work group sizes.
   std::pair<unsigned, unsigned> Requested = AMDGPU::getIntegerPairAttribute(
     F, "amdgpu-flat-work-group-size", Default);
@@ -354,10 +386,7 @@ std::pair<unsigned, unsigned> AMDGPUSubtarget::getWavesPerEU(
     getMaxWavesPerEU(FlatWorkGroupSizes.second);
   bool RequestedFlatWorkGroupSize = false;
 
-  // TODO: Do not process "amdgpu-max-work-group-size" attribute once mesa
-  // starts using "amdgpu-flat-work-group-size" attribute.
-  if (F.hasFnAttribute("amdgpu-max-work-group-size") ||
-      F.hasFnAttribute("amdgpu-flat-work-group-size")) {
+  if (F.hasFnAttribute("amdgpu-flat-work-group-size")) {
     Default.first = MinImpliedByFlatWorkGroupSize;
     RequestedFlatWorkGroupSize = true;
   }

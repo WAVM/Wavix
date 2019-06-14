@@ -13,6 +13,7 @@
 #ifndef LLVM_EXECUTIONENGINE_JITLINK_JITLINK_H
 #define LLVM_EXECUTIONENGINE_JITLINK_JITLINK_H
 
+#include "JITLinkMemoryManager.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/Optional.h"
@@ -22,6 +23,7 @@
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Memory.h"
 #include "llvm/Support/MemoryBuffer.h"
 
@@ -46,71 +48,6 @@ public:
 
 private:
   std::string ErrMsg;
-};
-
-/// Manages allocations of JIT memory.
-///
-/// Instances of this class may be accessed concurrently from multiple threads
-/// and their implemetations should include any necessary synchronization.
-class JITLinkMemoryManager {
-public:
-  using ProtectionFlags = sys::Memory::ProtectionFlags;
-
-  class SegmentRequest {
-  public:
-    SegmentRequest() = default;
-    SegmentRequest(size_t ContentSize, unsigned ContentAlign,
-                   uint64_t ZeroFillSize, unsigned ZeroFillAlign)
-        : ContentSize(ContentSize), ZeroFillSize(ZeroFillSize),
-          ContentAlign(ContentAlign), ZeroFillAlign(ZeroFillAlign) {}
-    size_t getContentSize() const { return ContentSize; }
-    unsigned getContentAlignment() const { return ContentAlign; }
-    uint64_t getZeroFillSize() const { return ZeroFillSize; }
-    unsigned getZeroFillAlignment() const { return ZeroFillAlign; }
-
-  private:
-    size_t ContentSize = 0;
-    uint64_t ZeroFillSize = 0;
-    unsigned ContentAlign = 0;
-    unsigned ZeroFillAlign = 0;
-  };
-
-  using SegmentsRequestMap = DenseMap<unsigned, SegmentRequest>;
-
-  /// Represents an allocation created by the memory manager.
-  ///
-  /// An allocation object is responsible for allocating and owning jit-linker
-  /// working and target memory, and for transfering from working to target
-  /// memory.
-  ///
-  class Allocation {
-  public:
-
-    using FinalizeContinuation = std::function<void(Error)>;
-
-    virtual ~Allocation();
-
-    /// Should return the address of linker working memory for the segment with
-    /// the given protection flags.
-    virtual MutableArrayRef<char> getWorkingMemory(ProtectionFlags Seg) = 0;
-
-    /// Should return the final address in the target process where the segment
-    /// will reside.
-    virtual JITTargetAddress getTargetMemory(ProtectionFlags Seg) = 0;
-
-    /// Should transfer from working memory to target memory, and release
-    /// working memory.
-    virtual void finalizeAsync(FinalizeContinuation OnFinalize) = 0;
-
-    /// Should deallocate target memory.
-    virtual Error deallocate() = 0;
-  };
-
-  virtual ~JITLinkMemoryManager();
-
-  /// Create an Allocation object.
-  virtual Expected<std::unique_ptr<Allocation>>
-  allocate(const SegmentsRequestMap &Request) = 0;
 };
 
 // Forward declare the Atom class.
@@ -296,14 +233,45 @@ raw_ostream &operator<<(raw_ostream &OS, const Atom &A);
 void printEdge(raw_ostream &OS, const Atom &FixupAtom, const Edge &E,
                StringRef EdgeKindName);
 
+/// Represents a section address range via a pair of DefinedAtom pointers to
+/// the first and last atoms in the section.
+class SectionRange {
+public:
+  SectionRange() = default;
+  SectionRange(DefinedAtom *First, DefinedAtom *Last)
+      : First(First), Last(Last) {}
+  DefinedAtom *getFirstAtom() const {
+    assert((!Last || First) && "First can not be null if end is non-null");
+    return First;
+  }
+  DefinedAtom *getLastAtom() const {
+    assert((First || !Last) && "Last can not be null if start is non-null");
+    return Last;
+  }
+  bool isEmpty() const {
+    assert((First || !Last) && "Last can not be null if start is non-null");
+    return !First;
+  }
+  JITTargetAddress getStart() const;
+  JITTargetAddress getEnd() const;
+  uint64_t getSize() const;
+
+private:
+  DefinedAtom *First = nullptr;
+  DefinedAtom *Last = nullptr;
+};
+
 /// Represents an object file section.
 class Section {
   friend class AtomGraph;
 
 private:
-  Section(StringRef Name, sys::Memory::ProtectionFlags Prot, unsigned Ordinal,
-          bool IsZeroFill)
-      : Name(Name), Prot(Prot), Ordinal(Ordinal), IsZeroFill(IsZeroFill) {}
+  Section(StringRef Name, uint32_t Alignment, sys::Memory::ProtectionFlags Prot,
+          unsigned Ordinal, bool IsZeroFill)
+      : Name(Name), Alignment(Alignment), Prot(Prot), Ordinal(Ordinal),
+        IsZeroFill(IsZeroFill) {
+    assert(isPowerOf2_32(Alignment) && "Alignments must be a power of 2");
+  }
 
   using DefinedAtomSet = DenseSet<DefinedAtom *>;
 
@@ -313,6 +281,7 @@ public:
 
   ~Section();
   StringRef getName() const { return Name; }
+  uint32_t getAlignment() const { return Alignment; }
   sys::Memory::ProtectionFlags getProtectionFlags() const { return Prot; }
   unsigned getSectionOrdinal() const { return Ordinal; }
   size_t getNextAtomOrdinal() { return ++NextAtomOrdinal; }
@@ -337,6 +306,17 @@ public:
   /// Return true if this section contains no atoms.
   bool atoms_empty() const { return DefinedAtoms.empty(); }
 
+  /// Returns the range of this section as the pair of atoms with the lowest
+  /// and highest target address. This operation is expensive, as it
+  /// must traverse all atoms in the section.
+  ///
+  /// Note: If the section is empty, both values will be null. The section
+  /// address will evaluate to null, and the size to zero. If the section
+  /// contains a single atom both values will point to it, the address will
+  /// evaluate to the address of that atom, and the size will be the size of
+  /// that atom.
+  SectionRange getRange() const;
+
 private:
   void addAtom(DefinedAtom &DA) {
     assert(!DefinedAtoms.count(&DA) && "Atom is already in this section");
@@ -349,6 +329,7 @@ private:
   }
 
   StringRef Name;
+  uint32_t Alignment = 0;
   sys::Memory::ProtectionFlags Prot;
   unsigned Ordinal = 0;
   unsigned NextAtomOrdinal = 0;
@@ -364,12 +345,16 @@ class DefinedAtom : public Atom {
 private:
   DefinedAtom(Section &Parent, JITTargetAddress Address, uint32_t Alignment)
       : Atom("", Address), Parent(Parent), Ordinal(Parent.getNextAtomOrdinal()),
-        Alignment(Alignment) {}
+        Alignment(Alignment) {
+    assert(isPowerOf2_32(Alignment) && "Alignments must be a power of two");
+  }
 
   DefinedAtom(Section &Parent, StringRef Name, JITTargetAddress Address,
               uint32_t Alignment)
       : Atom(Name, Address), Parent(Parent),
-        Ordinal(Parent.getNextAtomOrdinal()), Alignment(Alignment) {}
+        Ordinal(Parent.getNextAtomOrdinal()), Alignment(Alignment) {
+    assert(isPowerOf2_32(Alignment) && "Alignments must be a power of two");
+  }
 
 public:
   using edge_iterator = EdgeVector::iterator;
@@ -431,7 +416,7 @@ public:
   void addEdge(Edge::Kind K, Edge::OffsetT Offset, Atom &Target,
                Edge::AddendT Addend) {
     assert(K != Edge::LayoutNext &&
-           "Layout edges should be added via addLayoutNext");
+           "Layout edges should be added via setLayoutNext");
     Edges.push_back(Edge(K, Offset, Target, Addend));
   }
 
@@ -457,6 +442,29 @@ private:
   unsigned Ordinal = 0;
   uint32_t Alignment = 0;
 };
+
+inline JITTargetAddress SectionRange::getStart() const {
+  return First ? First->getAddress() : 0;
+}
+
+inline JITTargetAddress SectionRange::getEnd() const {
+  return Last ? Last->getAddress() + Last->getSize() : 0;
+}
+
+inline uint64_t SectionRange::getSize() const { return getEnd() - getStart(); }
+
+inline SectionRange Section::getRange() const {
+  if (atoms_empty())
+    return SectionRange();
+  DefinedAtom *First = *DefinedAtoms.begin(), *Last = *DefinedAtoms.begin();
+  for (auto *DA : atoms()) {
+    if (DA->getAddress() < First->getAddress())
+      First = DA;
+    if (DA->getAddress() > Last->getAddress())
+      Last = DA;
+  }
+  return SectionRange(First, Last);
+}
 
 class AtomGraph {
 private:
@@ -540,10 +548,10 @@ public:
   support::endianness getEndianness() const { return Endianness; }
 
   /// Create a section with the given name, protection flags, and alignment.
-  Section &createSection(StringRef Name, sys::Memory::ProtectionFlags Prot,
-                         bool IsZeroFill) {
+  Section &createSection(StringRef Name, uint32_t Alignment,
+                         sys::Memory::ProtectionFlags Prot, bool IsZeroFill) {
     std::unique_ptr<Section> Sec(
-        new Section(Name, Prot, Sections.size(), IsZeroFill));
+        new Section(Name, Alignment, Prot, Sections.size(), IsZeroFill));
     Sections.push_back(std::move(Sec));
     return *Sections.back();
   }
@@ -619,6 +627,15 @@ public:
   iterator_range<section_iterator> sections() {
     return make_range(section_iterator(Sections.begin()),
                       section_iterator(Sections.end()));
+  }
+
+  /// Returns the section with the given name if it exists, otherwise returns
+  /// null.
+  Section *findSectionByName(StringRef Name) {
+    for (auto &S : sections())
+      if (S.getName() == Name)
+        return &S;
+    return nullptr;
   }
 
   iterator_range<external_atom_iterator> external_atoms() {
@@ -826,13 +843,6 @@ struct PassConfiguration {
   ///
   /// Notable use cases: Testing and validation.
   AtomGraphPassList PostFixupPasses;
-};
-
-/// A JITLinkMemoryManager that allocates in-process memory.
-class InProcessMemoryManager : public JITLinkMemoryManager {
-public:
-  Expected<std::unique_ptr<Allocation>>
-  allocate(const SegmentsRequestMap &Request) override;
 };
 
 /// A map of symbol names to resolved addresses.

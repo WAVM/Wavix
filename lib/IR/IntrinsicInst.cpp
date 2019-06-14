@@ -142,6 +142,8 @@ bool ConstrainedFPIntrinsic::isUnaryOp() const {
   switch (getIntrinsicID()) {
     default:
       return false;
+    case Intrinsic::experimental_constrained_fptrunc:
+    case Intrinsic::experimental_constrained_fpext:
     case Intrinsic::experimental_constrained_sqrt:
     case Intrinsic::experimental_constrained_sin:
     case Intrinsic::experimental_constrained_cos:
@@ -169,13 +171,17 @@ bool ConstrainedFPIntrinsic::isTernaryOp() const {
   }
 }
 
-Instruction::BinaryOps WithOverflowInst::getBinaryOp() const {
+Instruction::BinaryOps BinaryOpIntrinsic::getBinaryOp() const {
   switch (getIntrinsicID()) {
     case Intrinsic::uadd_with_overflow:
     case Intrinsic::sadd_with_overflow:
+    case Intrinsic::uadd_sat:
+    case Intrinsic::sadd_sat:
       return Instruction::Add;
     case Intrinsic::usub_with_overflow:
     case Intrinsic::ssub_with_overflow:
+    case Intrinsic::usub_sat:
+    case Intrinsic::ssub_sat:
       return Instruction::Sub;
     case Intrinsic::umul_with_overflow:
     case Intrinsic::smul_with_overflow:
@@ -185,18 +191,20 @@ Instruction::BinaryOps WithOverflowInst::getBinaryOp() const {
   }
 }
 
-bool WithOverflowInst::isSigned() const {
+bool BinaryOpIntrinsic::isSigned() const {
   switch (getIntrinsicID()) {
     case Intrinsic::sadd_with_overflow:
     case Intrinsic::ssub_with_overflow:
     case Intrinsic::smul_with_overflow:
+    case Intrinsic::sadd_sat:
+    case Intrinsic::ssub_sat:
       return true;
     default:
       return false;
   }
 }
 
-unsigned WithOverflowInst::getNoWrapKind() const {
+unsigned BinaryOpIntrinsic::getNoWrapKind() const {
   if (isSigned())
     return OverflowingBinaryOperator::NoSignedWrap;
   else

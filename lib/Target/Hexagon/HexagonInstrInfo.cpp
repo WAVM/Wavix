@@ -697,11 +697,11 @@ bool HexagonInstrInfo::analyzeLoop(MachineLoop &L,
 /// Generate code to reduce the loop iteration by one and check if the loop is
 /// finished. Return the value/register of the new loop count. this function
 /// assumes the nth iteration is peeled first.
-unsigned HexagonInstrInfo::reduceLoopCount(MachineBasicBlock &MBB,
-      MachineInstr *IndVar, MachineInstr &Cmp,
-      SmallVectorImpl<MachineOperand> &Cond,
-      SmallVectorImpl<MachineInstr *> &PrevInsts,
-      unsigned Iter, unsigned MaxIter) const {
+unsigned HexagonInstrInfo::reduceLoopCount(
+    MachineBasicBlock &MBB, MachineBasicBlock &PreHeader, MachineInstr *IndVar,
+    MachineInstr &Cmp, SmallVectorImpl<MachineOperand> &Cond,
+    SmallVectorImpl<MachineInstr *> &PrevInsts, unsigned Iter,
+    unsigned MaxIter) const {
   // We expect a hardware loop currently. This means that IndVar is set
   // to null, and the compare is the ENDLOOP instruction.
   assert((!IndVar) && isEndLoopN(Cmp.getOpcode())
@@ -1712,17 +1712,19 @@ bool HexagonInstrInfo::isSchedulingBoundary(const MachineInstr &MI,
 /// Hexagon counts the number of ##'s and adjust for that many
 /// constant exenders.
 unsigned HexagonInstrInfo::getInlineAsmLength(const char *Str,
-      const MCAsmInfo &MAI) const {
+                                              const MCAsmInfo &MAI,
+                                              const TargetSubtargetInfo *STI) const {
   StringRef AStr(Str);
   // Count the number of instructions in the asm.
   bool atInsnStart = true;
   unsigned Length = 0;
+  const unsigned MaxInstLength = MAI.getMaxInstLength(STI);
   for (; *Str; ++Str) {
     if (*Str == '\n' || strncmp(Str, MAI.getSeparatorString(),
                                 strlen(MAI.getSeparatorString())) == 0)
       atInsnStart = true;
     if (atInsnStart && !std::isspace(static_cast<unsigned char>(*Str))) {
-      Length += MAI.getMaxInstLength();
+      Length += MaxInstLength;
       atInsnStart = false;
     }
     if (atInsnStart && strncmp(Str, MAI.getCommentString().data(),

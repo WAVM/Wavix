@@ -6,6 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+def isWave32 : Predicate<"Subtarget->getWavefrontSize() == 32">,
+  AssemblerPredicate <"FeatureWavefrontSize32">;
+def isWave64 : Predicate<"Subtarget->getWavefrontSize() == 64">,
+  AssemblerPredicate <"FeatureWavefrontSize64">;
+
 def DisableInst : Predicate <"false">, AssemblerPredicate<"FeatureDisable">;
 
 class GCNPredicateControl : PredicateControl {
@@ -722,6 +727,26 @@ def WAIT_FLAG : Operand <i32> {
 include "SIInstrFormats.td"
 include "VIInstrFormats.td"
 
+def BoolReg : AsmOperandClass {
+  let Name = "BoolReg";
+  let ParserMethod = "parseBoolReg";
+  let RenderMethod = "addRegOperands";
+}
+
+class BoolRC : RegisterOperand<SReg_1> {
+  let ParserMatchClass = BoolReg;
+  let DecoderMethod = "decodeBoolReg";
+}
+
+def SSrc_i1 : RegisterOperand<SReg_1_XEXEC> {
+  let ParserMatchClass = BoolReg;
+  let DecoderMethod = "decodeBoolReg";
+}
+
+def VOPDstS64orS32 : BoolRC {
+  let PrintMethod = "printVOPDst";
+}
+
 // ===----------------------------------------------------------------------===//
 // ExpSrc* Special cases for exp src operands which are printed as
 // "off" depending on en operand.
@@ -830,6 +855,7 @@ def omod : NamedOperandU32<"OModSI", NamedMatchClass<"OModSI">>;
 def clampmod : NamedOperandBit<"ClampSI", NamedMatchClass<"ClampSI">>;
 def highmod : NamedOperandBit<"High", NamedMatchClass<"High">>;
 
+def DLC : NamedOperandBit<"DLC", NamedMatchClass<"DLC">>;
 def GLC : NamedOperandBit<"GLC", NamedMatchClass<"GLC">>;
 def SLC : NamedOperandBit<"SLC", NamedMatchClass<"SLC">>;
 def TFE : NamedOperandBit<"TFE", NamedMatchClass<"TFE">>;
@@ -844,11 +870,15 @@ def exp_vm : NamedOperandBit<"ExpVM", NamedMatchClass<"ExpVM">>;
 def FORMAT : NamedOperandU8<"FORMAT", NamedMatchClass<"FORMAT">>;
 
 def DMask : NamedOperandU16<"DMask", NamedMatchClass<"DMask">>;
+def Dim : NamedOperandU8<"Dim", NamedMatchClass<"Dim", 0>>;
+
+def dpp8 : NamedOperandU32<"DPP8", NamedMatchClass<"DPP8", 0>>;
 
 def dpp_ctrl : NamedOperandU32<"DPPCtrl", NamedMatchClass<"DPPCtrl", 0>>;
 def row_mask : NamedOperandU32<"RowMask", NamedMatchClass<"RowMask">>;
 def bank_mask : NamedOperandU32<"BankMask", NamedMatchClass<"BankMask">>;
 def bound_ctrl : NamedOperandBit<"BoundCtrl", NamedMatchClass<"BoundCtrl">>;
+def FI : NamedOperandU32<"FI", NamedMatchClass<"FI">>;
 
 def dst_sel : NamedOperandU32<"SDWADstSel", NamedMatchClass<"SDWADstSel">>;
 def src0_sel : NamedOperandU32<"SDWASrc0Sel", NamedMatchClass<"SDWASrc0Sel">>;
@@ -1157,6 +1187,14 @@ multiclass EXP_m<bit done, SDPatternOperator node> {
         let DecoderNamespace = "GFX8";
         let DisableDecoder = DisableVIDecoder;
       }
+
+      def _gfx10 : EXP_Helper<done>,
+                SIMCInstr <"exp"#!if(done, "_done", ""), SIEncodingFamily.GFX10>,
+                EXPe {
+        let AssemblerPredicates = [isGFX10Plus];
+        let DecoderNamespace = "GFX10";
+        let DisableDecoder = DisableSIDecoder;
+      }
     }
   }
 }
@@ -1207,7 +1245,7 @@ class getVOPSrc0ForVT<ValueType VT> {
          !if(!eq(VT.Value, f16.Value),
             VSrc_f16,
             !if(!eq(VT.Value, v2f16.Value),
-               VCSrc_v2f16,
+               VSrc_v2f16,
                VSrc_f32
             )
          )
@@ -1217,7 +1255,7 @@ class getVOPSrc0ForVT<ValueType VT> {
           !if(!eq(VT.Value, i16.Value),
              VSrc_b16,
              !if(!eq(VT.Value, v2i16.Value),
-                VCSrc_v2b16,
+                VSrc_v2b16,
                 VSrc_b32
              )
           )
@@ -1253,23 +1291,23 @@ class getVOP3SrcForVT<ValueType VT> {
      VSrc_128,
      !if(!eq(VT.Size, 64),
         !if(isFP,
-           VCSrc_f64,
-           VCSrc_b64),
+           VSrc_f64,
+           VSrc_b64),
         !if(!eq(VT.Value, i1.Value),
            SCSrc_i1,
            !if(isFP,
               !if(!eq(VT.Value, f16.Value),
-                 VCSrc_f16,
+                 VSrc_f16,
                  !if(!eq(VT.Value, v2f16.Value),
-                    VCSrc_v2f16,
-                    VCSrc_f32
+                    VSrc_v2f16,
+                    VSrc_f32
                  )
               ),
               !if(!eq(VT.Value, i16.Value),
-                 VCSrc_b16,
+                 VSrc_b16,
                  !if(!eq(VT.Value, v2i16.Value),
-                    VCSrc_v2b16,
-                    VCSrc_b32
+                    VSrc_v2b16,
+                    VSrc_b32
                  )
               )
            )
@@ -1515,6 +1553,42 @@ class getInsDPP <RegisterOperand DstRC, RegisterClass Src0RC, RegisterClass Src1
              /* endif */)));
 }
 
+class getInsDPP16 <RegisterOperand DstRC, RegisterClass Src0RC, RegisterClass Src1RC,
+                   int NumSrcArgs, bit HasModifiers,
+                   Operand Src0Mod, Operand Src1Mod> {
+  dag ret = !con(getInsDPP<DstRC, Src0RC, Src1RC, NumSrcArgs,
+                           HasModifiers, Src0Mod, Src1Mod>.ret,
+                 (ins FI:$fi));
+}
+
+class getInsDPP8 <RegisterOperand DstRC, RegisterClass Src0RC, RegisterClass Src1RC,
+                 int NumSrcArgs, bit HasModifiers,
+                 Operand Src0Mod, Operand Src1Mod> {
+  dag ret = !if (!eq(NumSrcArgs, 0),
+                // VOP1 without input operands (V_NOP)
+                (ins dpp8:$dpp8, FI:$fi),
+            !if (!eq(NumSrcArgs, 1),
+              !if (!eq(HasModifiers, 1),
+                // VOP1_DPP with modifiers
+                (ins DstRC:$old, Src0Mod:$src0_modifiers,
+                     Src0RC:$src0, dpp8:$dpp8, FI:$fi)
+              /* else */,
+                // VOP1_DPP without modifiers
+                (ins DstRC:$old, Src0RC:$src0, dpp8:$dpp8, FI:$fi)
+              /* endif */)
+              /* NumSrcArgs == 2 */,
+              !if (!eq(HasModifiers, 1),
+                // VOP2_DPP with modifiers
+                (ins DstRC:$old,
+                     Src0Mod:$src0_modifiers, Src0RC:$src0,
+                     Src1Mod:$src1_modifiers, Src1RC:$src1,
+                     dpp8:$dpp8, FI:$fi)
+              /* else */,
+                // VOP2_DPP without modifiers
+                (ins DstRC:$old,
+                     Src0RC:$src0, Src1RC:$src1, dpp8:$dpp8, FI:$fi)
+             /* endif */)));
+}
 
 
 // Ins for SDWA
@@ -1671,6 +1745,26 @@ class getAsmDPP <bit HasDst, int NumSrcArgs, bit HasModifiers, ValueType DstVT =
                      getAsm32<0, NumSrcArgs, DstVT>.ret,
                      ", "#src0#src1);
   string ret = dst#args#" $dpp_ctrl$row_mask$bank_mask$bound_ctrl";
+}
+
+class getAsmDPP16 <bit HasDst, int NumSrcArgs, bit HasModifiers, ValueType DstVT = i32> {
+  string ret = getAsmDPP<HasDst, NumSrcArgs, HasModifiers, DstVT>.ret#"$fi";
+}
+
+class getAsmDPP8 <bit HasDst, int NumSrcArgs, bit HasModifiers, ValueType DstVT = i32> {
+  string dst = !if(HasDst,
+                   !if(!eq(DstVT.Size, 1),
+                       "$sdst",
+                       "$vdst"),
+                    ""); // use $sdst for VOPC
+  string src0 = !if(!eq(NumSrcArgs, 1), "$src0_modifiers", "$src0_modifiers,");
+  string src1 = !if(!eq(NumSrcArgs, 1), "",
+                   !if(!eq(NumSrcArgs, 2), " $src1_modifiers",
+                                           " $src1_modifiers,"));
+  string args = !if(!eq(HasModifiers, 0),
+                     getAsm32<0, NumSrcArgs, DstVT>.ret,
+                     ", "#src0#src1);
+  string ret = dst#args#"$dpp8$fi";
 }
 
 class getAsmSDWA <bit HasDst, int NumSrcArgs, ValueType DstVT = i32> {
@@ -1856,6 +1950,7 @@ class VOPProfile <list<ValueType> _ArgVT, bit _EnableF32SrcMods = 0,
   field dag Outs32 = Outs;
   field dag Outs64 = Outs;
   field dag OutsDPP = getOutsExt<HasDst, DstVT, DstRCDPP>.ret;
+  field dag OutsDPP8 = getOutsExt<HasDst, DstVT, DstRCDPP>.ret;
   field dag OutsSDWA = getOutsSDWA<HasDst, DstVT, DstRCSDWA>.ret;
 
   field dag Ins32 = getIns32<Src0RC32, Src1RC32, NumSrcArgs>.ret;
@@ -1875,6 +1970,10 @@ class VOPProfile <list<ValueType> _ArgVT, bit _EnableF32SrcMods = 0,
                          getInsDPP<DstRCDPP, Src0DPP, Src1DPP, NumSrcArgs,
                                    HasModifiers, Src0ModDPP, Src1ModDPP>.ret,
                          (ins));
+  field dag InsDPP16 = getInsDPP16<DstRCDPP, Src0DPP, Src1DPP, NumSrcArgs,
+                                   HasModifiers, Src0ModDPP, Src1ModDPP>.ret;
+  field dag InsDPP8 = getInsDPP8<DstRCDPP, Src0DPP, Src1DPP, NumSrcArgs, 0,
+                                 Src0ModDPP, Src1ModDPP>.ret;
   field dag InsSDWA = getInsSDWA<Src0SDWA, Src1SDWA, NumSrcArgs,
                                  HasSDWAOMod, Src0ModSDWA, Src1ModSDWA,
                                  DstVT>.ret;
@@ -1890,6 +1989,8 @@ class VOPProfile <list<ValueType> _ArgVT, bit _EnableF32SrcMods = 0,
                                               HasSrc2FloatMods>.ret;
   field string AsmDPP = !if(HasExtDPP,
                             getAsmDPP<HasDst, NumSrcArgs, HasModifiers, DstVT>.ret, "");
+  field string AsmDPP16 = getAsmDPP16<HasDst, NumSrcArgs, HasModifiers, DstVT>.ret;
+  field string AsmDPP8 = getAsmDPP8<HasDst, NumSrcArgs, 0, DstVT>.ret;
   field string AsmSDWA = getAsmSDWA<HasDst, NumSrcArgs, DstVT>.ret;
   field string AsmSDWA9 = getAsmSDWA9<HasDst, HasSDWAOMod, NumSrcArgs, DstVT>.ret;
 
@@ -1998,13 +2099,12 @@ class VINTRP_Pseudo <string opName, dag outs, dag ins, list<dag> pattern> :
   let isCodeGenOnly = 1;
 }
 
+// FIXME-GFX10: WIP.
 class VINTRP_Real_si <bits <2> op, string opName, dag outs, dag ins,
-                      string asm> :
+                      string asm, int encodingFamily> :
   VINTRPCommon <outs, ins, asm, []>,
   VINTRPe <op>,
-  SIMCInstr<opName, SIEncodingFamily.SI> {
-  let AssemblerPredicate = SIAssemblerPredicate;
-  let DecoderNamespace = "GFX6GFX7";
+  SIMCInstr<opName, encodingFamily> {
   let DisableDecoder = DisableSIDecoder;
 }
 
@@ -2018,15 +2118,21 @@ class VINTRP_Real_vi <bits <2> op, string opName, dag outs, dag ins,
   let DisableDecoder = DisableVIDecoder;
 }
 
+// FIXME-GFX10: WIP.
 multiclass VINTRP_m <bits <2> op, dag outs, dag ins, string asm,
                      list<dag> pattern = []> {
   def "" : VINTRP_Pseudo <NAME, outs, ins, pattern>;
 
-  def _si : VINTRP_Real_si <op, NAME, outs, ins, asm>;
+  let AssemblerPredicate = isGFX6GFX7, DecoderNamespace = "GFX6GFX7" in {
+    def _si : VINTRP_Real_si <op, NAME, outs, ins, asm, SIEncodingFamily.SI>;
+  } // End AssemblerPredicate = isGFX6GFX7, DecoderNamespace = "GFX6GFX7"
 
   def _vi : VINTRP_Real_vi <op, NAME, outs, ins, asm>;
-}
 
+  let AssemblerPredicate = isGFX10Plus, DecoderNamespace = "GFX10" in {
+    def _gfx10 : VINTRP_Real_si<op, NAME, outs, ins, asm, SIEncodingFamily.GFX10>;
+  } // End AssemblerPredicate = isGFX10Plus, DecoderNamespace = "GFX10"
+}
 //===----------------------------------------------------------------------===//
 // Vector instruction mappings
 //===----------------------------------------------------------------------===//

@@ -1312,6 +1312,26 @@ void MachineVerifier::verifyPreISelGenericInstruction(const MachineInstr *MI) {
 
     break;
   }
+  case TargetOpcode::G_JUMP_TABLE: {
+    if (!MI->getOperand(1).isJTI())
+      report("G_JUMP_TABLE source operand must be a jump table index", MI);
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    if (!DstTy.isPointer())
+      report("G_JUMP_TABLE dest operand must have a pointer type", MI);
+    break;
+  }
+  case TargetOpcode::G_BRJT: {
+    if (!MRI->getType(MI->getOperand(0).getReg()).isPointer())
+      report("G_BRJT src operand 0 must be a pointer type", MI);
+
+    if (!MI->getOperand(1).isJTI())
+      report("G_BRJT src operand 1 must be a jump table index", MI);
+
+    const auto &IdxOp = MI->getOperand(2);
+    if (!IdxOp.isReg() || MRI->getType(IdxOp.getReg()).isPointer())
+      report("G_BRJT src operand 2 must be a scalar reg type", MI);
+    break;
+  }
   default:
     break;
   }

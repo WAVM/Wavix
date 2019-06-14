@@ -54,7 +54,7 @@ struct PGOOptions {
     // a profile.
     assert(this->CSAction != CSIRUse || this->Action == IRUse);
 
-    // If neither CSAction nor CSAction, SamplePGOSupport needs to be true.
+    // If neither Action nor CSAction, SamplePGOSupport needs to be true.
     assert(this->Action != NoAction || this->CSAction != NoCSAction ||
            this->SamplePGOSupport);
   }
@@ -80,6 +80,17 @@ public:
   /// Tuning option to enable/disable loop vectorization. Its default value is
   /// that of the flag: `-vectorize-loops`.
   bool LoopVectorization;
+
+  /// Tuning option to enable/disable slp loop vectorization. Its default value
+  /// is that of the flag: `vectorize-slp`.
+  bool SLPVectorization;
+
+  /// Tuning option to enable/disable loop unrolling. Its default value is true.
+  bool LoopUnrolling;
+
+  /// Tuning option to forget all SCEV loops in LoopUnroll. Its default value
+  /// is that of the flag: `-forget-scev-loop-unroll`.
+  bool ForgetAllSCEVInLoopUnroll;
 
   /// Tuning option to cap the number of calls to retrive clobbering accesses in
   /// MemorySSA, in LICM.
@@ -122,9 +133,9 @@ public:
   enum class ThinLTOPhase {
     /// No ThinLTO behavior needed.
     None,
-    // ThinLTO prelink (summary) phase.
+    /// ThinLTO prelink (summary) phase.
     PreLink,
-    // ThinLTO postlink (backend compile) phase.
+    /// ThinLTO postlink (backend compile) phase.
     PostLink
   };
 
@@ -223,7 +234,7 @@ public:
   /// Cross register the analysis managers through their proxies.
   ///
   /// This is an interface that can be used to cross register each
-  // AnalysisManager with all the others analysis managers.
+  /// AnalysisManager with all the others analysis managers.
   void crossRegisterProxies(LoopAnalysisManager &LAM,
                             FunctionAnalysisManager &FAM,
                             CGSCCAnalysisManager &CGAM,
@@ -432,7 +443,7 @@ public:
   /// {{@ Parse a textual pass pipeline description into a specific PassManager
   ///
   /// Automatic deduction of an appropriate pass manager stack is not supported.
-  /// For example, to insert a loop pass 'lpass' into a FunctinoPassManager,
+  /// For example, to insert a loop pass 'lpass' into a FunctionPassManager,
   /// this is the valid pipeline text:
   ///
   ///   function(lpass)

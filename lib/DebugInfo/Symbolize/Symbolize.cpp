@@ -53,10 +53,9 @@ namespace symbolize {
 
 Expected<DILineInfo>
 LLVMSymbolizer::symbolizeCode(const std::string &ModuleName,
-                              object::SectionedAddress ModuleOffset,
-                              StringRef DWPName) {
+                              object::SectionedAddress ModuleOffset) {
   SymbolizableModule *Info;
-  if (auto InfoOrErr = getOrCreateModuleInfo(ModuleName, DWPName))
+  if (auto InfoOrErr = getOrCreateModuleInfo(ModuleName))
     Info = InfoOrErr.get();
   else
     return InfoOrErr.takeError();
@@ -80,10 +79,9 @@ LLVMSymbolizer::symbolizeCode(const std::string &ModuleName,
 
 Expected<DIInliningInfo>
 LLVMSymbolizer::symbolizeInlinedCode(const std::string &ModuleName,
-                                     object::SectionedAddress ModuleOffset,
-                                     StringRef DWPName) {
+                                     object::SectionedAddress ModuleOffset) {
   SymbolizableModule *Info;
-  if (auto InfoOrErr = getOrCreateModuleInfo(ModuleName, DWPName))
+  if (auto InfoOrErr = getOrCreateModuleInfo(ModuleName))
     Info = InfoOrErr.get();
   else
     return InfoOrErr.takeError();
@@ -221,9 +219,12 @@ bool getGNUDebuglinkContents(const ObjectFile *Obj, std::string &DebugName,
     Section.getName(Name);
     Name = Name.substr(Name.find_first_not_of("._"));
     if (Name == "gnu_debuglink") {
-      StringRef Data;
-      Section.getContents(Data);
-      DataExtractor DE(Data, Obj->isLittleEndian(), 0);
+      Expected<StringRef> ContentsOrErr = Section.getContents();
+      if (!ContentsOrErr) {
+        consumeError(ContentsOrErr.takeError());
+        return false;
+      }
+      DataExtractor DE(*ContentsOrErr, Obj->isLittleEndian(), 0);
       uint32_t Offset = 0;
       if (const char *DebugNameStr = DE.getCStr(&Offset)) {
         // 4-byte align the offset.
@@ -375,8 +376,7 @@ LLVMSymbolizer::getOrCreateObject(const std::string &Path,
 }
 
 Expected<SymbolizableModule *>
-LLVMSymbolizer::getOrCreateModuleInfo(const std::string &ModuleName,
-                                      StringRef DWPName) {
+LLVMSymbolizer::getOrCreateModuleInfo(const std::string &ModuleName) {
   const auto &I = Modules.find(ModuleName);
   if (I != Modules.end()) {
     return I->second.get();
@@ -422,9 +422,9 @@ LLVMSymbolizer::getOrCreateModuleInfo(const std::string &ModuleName,
     }
   }
   if (!Context)
-    Context = DWARFContext::create(*Objects.second, nullptr,
-                                   DWARFContext::defaultErrorHandler, DWPName);
-  assert(Context);
+    Context =
+        DWARFContext::create(*Objects.second, nullptr,
+                             DWARFContext::defaultErrorHandler, Opts.DWPName);
   auto InfoOrErr =
       SymbolizableObjectFile::create(Objects.first, std::move(Context));
   std::unique_ptr<SymbolizableModule> SymMod;

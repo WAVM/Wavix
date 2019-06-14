@@ -125,10 +125,10 @@ private:
   bool SelectMUBUF(SDValue Addr, SDValue &SRsrc, SDValue &VAddr,
                    SDValue &SOffset, SDValue &Offset, SDValue &Offen,
                    SDValue &Idxen, SDValue &Addr64, SDValue &GLC, SDValue &SLC,
-                   SDValue &TFE) const;
+                   SDValue &TFE, SDValue &DLC) const;
   bool SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc, SDValue &VAddr,
                          SDValue &SOffset, SDValue &Offset, SDValue &GLC,
-                         SDValue &SLC, SDValue &TFE) const;
+                         SDValue &SLC, SDValue &TFE, SDValue &DLC) const;
   bool SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc,
                          SDValue &VAddr, SDValue &SOffset, SDValue &Offset,
                          SDValue &SLC) const;
@@ -141,19 +141,19 @@ private:
 
   bool SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc, SDValue &SOffset,
                          SDValue &Offset, SDValue &GLC, SDValue &SLC,
-                         SDValue &TFE) const;
+                         SDValue &TFE, SDValue &DLC) const;
   bool SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc, SDValue &Soffset,
                          SDValue &Offset, SDValue &SLC) const;
   bool SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc, SDValue &Soffset,
                          SDValue &Offset) const;
 
-  bool SelectFlatAtomic(SDValue Addr, SDValue &VAddr,
+  bool SelectFlatAtomic(SDNode *N, SDValue Addr, SDValue &VAddr,
                         SDValue &Offset, SDValue &SLC) const;
-  bool SelectFlatAtomicSigned(SDValue Addr, SDValue &VAddr,
+  bool SelectFlatAtomicSigned(SDNode *N, SDValue Addr, SDValue &VAddr,
                               SDValue &Offset, SDValue &SLC) const;
 
   template <bool IsSigned>
-  bool SelectFlatOffset(SDValue Addr, SDValue &VAddr,
+  bool SelectFlatOffset(SDNode *N, SDValue Addr, SDValue &VAddr,
                         SDValue &Offset, SDValue &SLC) const;
 
   bool SelectSMRDOffset(SDValue ByteOffsetNode, SDValue &Offset,
@@ -217,6 +217,7 @@ private:
   void SelectBRCOND(SDNode *N);
   void SelectFMAD_FMA(SDNode *N);
   void SelectATOMIC_CMP_SWAP(SDNode *N);
+  void SelectDSAppendConsume(SDNode *N, unsigned IntrID);
   void SelectINTRINSIC_W_CHAIN(SDNode *N);
 
 protected:
@@ -500,13 +501,16 @@ SDNode *AMDGPUDAGToDAGISel::glueCopyToM0(SDNode *N, SDValue Val) const {
 
   // Write max value to m0 before each load operation
 
-  SDValue M0 = Lowering.copyToM0(*CurDAG, CurDAG->getEntryNode(), SDLoc(N),
+  assert(N->getOperand(0).getValueType() == MVT::Other && "Expected chain");
+
+  SDValue M0 = Lowering.copyToM0(*CurDAG, N->getOperand(0), SDLoc(N),
                                  Val);
 
   SDValue Glue = M0.getValue(1);
 
   SmallVector <SDValue, 8> Ops;
-  for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i)
+  Ops.push_back(M0); // Replace the chain.
+  for (unsigned i = 1, e = N->getNumOperands(); i != e; ++i)
     Ops.push_back(N->getOperand(i));
 
   Ops.push_back(Glue);
@@ -1221,7 +1225,7 @@ bool AMDGPUDAGToDAGISel::SelectMUBUF(SDValue Addr, SDValue &Ptr,
                                      SDValue &Offset, SDValue &Offen,
                                      SDValue &Idxen, SDValue &Addr64,
                                      SDValue &GLC, SDValue &SLC,
-                                     SDValue &TFE) const {
+                                     SDValue &TFE, SDValue &DLC) const {
   // Subtarget prefers to use flat instruction
   if (Subtarget->useFlatForGlobal())
     return false;
@@ -1233,6 +1237,7 @@ bool AMDGPUDAGToDAGISel::SelectMUBUF(SDValue Addr, SDValue &Ptr,
   if (!SLC.getNode())
     SLC = CurDAG->getTargetConstant(0, DL, MVT::i1);
   TFE = CurDAG->getTargetConstant(0, DL, MVT::i1);
+  DLC = CurDAG->getTargetConstant(0, DL, MVT::i1);
 
   Idxen = CurDAG->getTargetConstant(0, DL, MVT::i1);
   Offen = CurDAG->getTargetConstant(0, DL, MVT::i1);
@@ -1311,7 +1316,8 @@ bool AMDGPUDAGToDAGISel::SelectMUBUF(SDValue Addr, SDValue &Ptr,
 bool AMDGPUDAGToDAGISel::SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc,
                                            SDValue &VAddr, SDValue &SOffset,
                                            SDValue &Offset, SDValue &GLC,
-                                           SDValue &SLC, SDValue &TFE) const {
+                                           SDValue &SLC, SDValue &TFE,
+                                           SDValue &DLC) const {
   SDValue Ptr, Offen, Idxen, Addr64;
 
   // addr64 bit was removed for volcanic islands.
@@ -1319,7 +1325,7 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc,
     return false;
 
   if (!SelectMUBUF(Addr, Ptr, VAddr, SOffset, Offset, Offen, Idxen, Addr64,
-              GLC, SLC, TFE))
+              GLC, SLC, TFE, DLC))
     return false;
 
   ConstantSDNode *C = cast<ConstantSDNode>(Addr64);
@@ -1341,9 +1347,9 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc,
                                            SDValue &Offset,
                                            SDValue &SLC) const {
   SLC = CurDAG->getTargetConstant(0, SDLoc(Addr), MVT::i1);
-  SDValue GLC, TFE;
+  SDValue GLC, TFE, DLC;
 
-  return SelectMUBUFAddr64(Addr, SRsrc, VAddr, SOffset, Offset, GLC, SLC, TFE);
+  return SelectMUBUFAddr64(Addr, SRsrc, VAddr, SOffset, Offset, GLC, SLC, TFE, DLC);
 }
 
 static bool isStackPtrRelative(const MachinePointerInfo &PtrInfo) {
@@ -1359,10 +1365,10 @@ std::pair<SDValue, SDValue> AMDGPUDAGToDAGISel::foldFrameIndex(SDValue N) const 
     SDValue TFI = CurDAG->getTargetFrameIndex(FI->getIndex(),
                                               FI->getValueType(0));
 
-    // If we can resolve this to a frame index access, this is relative to the
-    // frame pointer SGPR.
-    return std::make_pair(TFI, CurDAG->getRegister(Info->getFrameOffsetReg(),
-                                                   MVT::i32));
+    // If we can resolve this to a frame index access, this will be relative to
+    // either the stack or frame pointer SGPR.
+    return std::make_pair(
+        TFI, CurDAG->getRegister(Info->getStackPtrOffsetReg(), MVT::i32));
   }
 
   // If we don't know this private access is a local stack object, it needs to
@@ -1468,13 +1474,13 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFScratchOffset(SDNode *Parent,
 bool AMDGPUDAGToDAGISel::SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc,
                                            SDValue &SOffset, SDValue &Offset,
                                            SDValue &GLC, SDValue &SLC,
-                                           SDValue &TFE) const {
+                                           SDValue &TFE, SDValue &DLC) const {
   SDValue Ptr, VAddr, Offen, Idxen, Addr64;
   const SIInstrInfo *TII =
     static_cast<const SIInstrInfo *>(Subtarget->getInstrInfo());
 
   if (!SelectMUBUF(Addr, Ptr, VAddr, SOffset, Offset, Offen, Idxen, Addr64,
-              GLC, SLC, TFE))
+              GLC, SLC, TFE, DLC))
     return false;
 
   if (!cast<ConstantSDNode>(Offen)->getSExtValue() &&
@@ -1496,57 +1502,42 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc,
 bool AMDGPUDAGToDAGISel::SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc,
                                            SDValue &Soffset, SDValue &Offset
                                            ) const {
-  SDValue GLC, SLC, TFE;
+  SDValue GLC, SLC, TFE, DLC;
 
-  return SelectMUBUFOffset(Addr, SRsrc, Soffset, Offset, GLC, SLC, TFE);
+  return SelectMUBUFOffset(Addr, SRsrc, Soffset, Offset, GLC, SLC, TFE, DLC);
 }
 bool AMDGPUDAGToDAGISel::SelectMUBUFOffset(SDValue Addr, SDValue &SRsrc,
                                            SDValue &Soffset, SDValue &Offset,
                                            SDValue &SLC) const {
-  SDValue GLC, TFE;
+  SDValue GLC, TFE, DLC;
 
-  return SelectMUBUFOffset(Addr, SRsrc, Soffset, Offset, GLC, SLC, TFE);
+  return SelectMUBUFOffset(Addr, SRsrc, Soffset, Offset, GLC, SLC, TFE, DLC);
 }
 
 template <bool IsSigned>
-bool AMDGPUDAGToDAGISel::SelectFlatOffset(SDValue Addr,
+bool AMDGPUDAGToDAGISel::SelectFlatOffset(SDNode *N,
+                                          SDValue Addr,
                                           SDValue &VAddr,
                                           SDValue &Offset,
                                           SDValue &SLC) const {
-  int64_t OffsetVal = 0;
-
-  if (Subtarget->hasFlatInstOffsets() &&
-      CurDAG->isBaseWithConstantOffset(Addr)) {
-    SDValue N0 = Addr.getOperand(0);
-    SDValue N1 = Addr.getOperand(1);
-    int64_t COffsetVal = cast<ConstantSDNode>(N1)->getSExtValue();
-
-    if ((IsSigned && isInt<13>(COffsetVal)) ||
-        (!IsSigned && isUInt<12>(COffsetVal))) {
-      Addr = N0;
-      OffsetVal = COffsetVal;
-    }
-  }
-
-  VAddr = Addr;
-  Offset = CurDAG->getTargetConstant(OffsetVal, SDLoc(), MVT::i16);
-  SLC = CurDAG->getTargetConstant(0, SDLoc(), MVT::i1);
-
-  return true;
+  return static_cast<const SITargetLowering*>(getTargetLowering())->
+    SelectFlatOffset(IsSigned, *CurDAG, N, Addr, VAddr, Offset, SLC);
 }
 
-bool AMDGPUDAGToDAGISel::SelectFlatAtomic(SDValue Addr,
+bool AMDGPUDAGToDAGISel::SelectFlatAtomic(SDNode *N,
+                                          SDValue Addr,
                                           SDValue &VAddr,
                                           SDValue &Offset,
                                           SDValue &SLC) const {
-  return SelectFlatOffset<false>(Addr, VAddr, Offset, SLC);
+  return SelectFlatOffset<false>(N, Addr, VAddr, Offset, SLC);
 }
 
-bool AMDGPUDAGToDAGISel::SelectFlatAtomicSigned(SDValue Addr,
+bool AMDGPUDAGToDAGISel::SelectFlatAtomicSigned(SDNode *N,
+                                          SDValue Addr,
                                           SDValue &VAddr,
                                           SDValue &Offset,
                                           SDValue &SLC) const {
-  return SelectFlatOffset<true>(Addr, VAddr, Offset, SLC);
+  return SelectFlatOffset<true>(N, Addr, VAddr, Offset, SLC);
 }
 
 bool AMDGPUDAGToDAGISel::SelectSMRDOffset(SDValue ByteOffsetNode,
@@ -1993,15 +1984,7 @@ void AMDGPUDAGToDAGISel::SelectATOMIC_CMP_SWAP(SDNode *N) {
   CurDAG->RemoveDeadNode(N);
 }
 
-void AMDGPUDAGToDAGISel::SelectINTRINSIC_W_CHAIN(SDNode *N) {
-  unsigned IntrID = cast<ConstantSDNode>(N->getOperand(1))->getZExtValue();
-  if ((IntrID != Intrinsic::amdgcn_ds_append &&
-       IntrID != Intrinsic::amdgcn_ds_consume) ||
-      N->getValueType(0) != MVT::i32) {
-    SelectCode(N);
-    return;
-  }
-
+void AMDGPUDAGToDAGISel::SelectDSAppendConsume(SDNode *N, unsigned IntrID) {
   // The address is assumed to be uniform, so if it ends up in a VGPR, it will
   // be copied to an SGPR with readfirstlane.
   unsigned Opc = IntrID == Intrinsic::amdgcn_ds_append ?
@@ -2037,6 +2020,23 @@ void AMDGPUDAGToDAGISel::SelectINTRINSIC_W_CHAIN(SDNode *N) {
   };
 
   CurDAG->SelectNodeTo(N, Opc, N->getVTList(), Ops);
+}
+
+void AMDGPUDAGToDAGISel::SelectINTRINSIC_W_CHAIN(SDNode *N) {
+  unsigned IntrID = cast<ConstantSDNode>(N->getOperand(1))->getZExtValue();
+  switch (IntrID) {
+  case Intrinsic::amdgcn_ds_append:
+  case Intrinsic::amdgcn_ds_consume: {
+    if (N->getValueType(0) != MVT::i32)
+      break;
+    SelectDSAppendConsume(N, IntrID);
+    return;
+  }
+  default:
+    break;
+  }
+
+  SelectCode(N);
 }
 
 bool AMDGPUDAGToDAGISel::SelectVOP3ModsImpl(SDValue In, SDValue &Src,

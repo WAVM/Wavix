@@ -1418,6 +1418,18 @@ define float @test_fabs_intrin(float %a) {
   ret float %res
 }
 
+declare float @llvm.copysign.f32(float, float)
+define float @test_fcopysign_intrin(float %a, float %b) {
+; CHECK-LABEL: name: test_fcopysign_intrin
+; CHECK: [[A:%[0-9]+]]:_(s32) = COPY $s0
+; CHECK: [[B:%[0-9]+]]:_(s32) = COPY $s1
+; CHECK: [[RES:%[0-9]+]]:_(s32) = nnan ninf nsz arcp contract afn reassoc G_FCOPYSIGN [[A]], [[B]]
+; CHECK: $s0 = COPY [[RES]]
+
+  %res = call nnan ninf nsz arcp contract afn reassoc float @llvm.copysign.f32(float %a, float %b)
+  ret float %res
+}
+
 declare float @llvm.canonicalize.f32(float)
 define float @test_fcanonicalize_intrin(float %a) {
 ; CHECK-LABEL: name: test_fcanonicalize_intrin
@@ -2377,4 +2389,31 @@ define float @test_rint_f32(float %x) {
   ; CHECK: %{{[0-9]+}}:_(s32) = G_FRINT %{{[0-9]+}}
   %y = call float @llvm.rint.f32(float %x)
   ret float %y
+}
+
+declare void @llvm.assume(i1)
+define void @test_assume(i1 %x) {
+  ; CHECK-LABEL: name:            test_assume
+  ; CHECK-NOT: llvm.assume
+  ; CHECK: RET_ReallyLR
+  call void @llvm.assume(i1 %x)
+  ret void
+}
+
+declare void @llvm.sideeffect()
+define void @test_sideeffect() {
+  ; CHECK-LABEL: name:            test_sideeffect
+  ; CHECK-NOT: llvm.sideeffect
+  ; CHECK: RET_ReallyLR
+  call void @llvm.sideeffect()
+  ret void
+}
+
+declare void @llvm.var.annotation(i8*, i8*, i8*, i32)
+define void @test_var_annotation(i8*, i8*, i8*, i32) {
+  ; CHECK-LABEL: name:            test_var_annotation
+  ; CHECK-NOT: llvm.var.annotation
+  ; CHECK: RET_ReallyLR
+  call void @llvm.var.annotation(i8* %0, i8* %1, i8* %2, i32 %3)
+  ret void
 }

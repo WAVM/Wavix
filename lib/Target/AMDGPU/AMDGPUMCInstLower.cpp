@@ -15,7 +15,7 @@
 #include "AMDGPUAsmPrinter.h"
 #include "AMDGPUSubtarget.h"
 #include "AMDGPUTargetMachine.h"
-#include "InstPrinter/AMDGPUInstPrinter.h"
+#include "MCTargetDesc/AMDGPUInstPrinter.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "R600AsmPrinter.h"
 #include "SIInstrInfo.h"
@@ -112,10 +112,10 @@ const MCExpr *AMDGPUMCInstLower::getLongBranchBlockExpr(
   const MCConstantExpr *One = MCConstantExpr::create(4, Ctx);
   SrcBBSym = MCBinaryExpr::createAdd(SrcBBSym, One, Ctx);
 
-  if (MO.getTargetFlags() == AMDGPU::TF_LONG_BRANCH_FORWARD)
+  if (MO.getTargetFlags() == SIInstrInfo::MO_LONG_BRANCH_FORWARD)
     return MCBinaryExpr::createSub(DestBBSym, SrcBBSym, Ctx);
 
-  assert(MO.getTargetFlags() == AMDGPU::TF_LONG_BRANCH_BACKWARD);
+  assert(MO.getTargetFlags() == SIInstrInfo::MO_LONG_BRANCH_BACKWARD);
   return MCBinaryExpr::createSub(SrcBBSym, DestBBSym, Ctx);
 }
 
@@ -325,14 +325,13 @@ void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     }
 #endif
 
-    if (STI.dumpCode()) {
-      // Disassemble instruction/operands to text.
+    if (DumpCodeInstEmitter) {
+      // Disassemble instruction/operands to text
       DisasmLines.resize(DisasmLines.size() + 1);
       std::string &DisasmLine = DisasmLines.back();
       raw_string_ostream DisasmStream(DisasmLine);
 
-      AMDGPUInstPrinter InstPrinter(*TM.getMCAsmInfo(),
-                                    *STI.getInstrInfo(),
+      AMDGPUInstPrinter InstPrinter(*TM.getMCAsmInfo(), *STI.getInstrInfo(),
                                     *STI.getRegisterInfo());
       InstPrinter.printInst(&TmpInst, DisasmStream, StringRef(), STI);
 
@@ -341,10 +340,8 @@ void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       SmallVector<char, 16> CodeBytes;
       raw_svector_ostream CodeStream(CodeBytes);
 
-      auto &ObjStreamer = static_cast<MCObjectStreamer&>(*OutStreamer);
-      MCCodeEmitter &InstEmitter = ObjStreamer.getAssembler().getEmitter();
-      InstEmitter.encodeInstruction(TmpInst, CodeStream, Fixups,
-                                    MF->getSubtarget<MCSubtargetInfo>());
+      DumpCodeInstEmitter->encodeInstruction(
+          TmpInst, CodeStream, Fixups, MF->getSubtarget<MCSubtargetInfo>());
       HexLines.resize(HexLines.size() + 1);
       std::string &HexLine = HexLines.back();
       raw_string_ostream HexStream(HexLine);

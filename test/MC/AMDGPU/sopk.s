@@ -88,8 +88,12 @@ s_mulk_i32 s2, 0xFFFF
 // VI9:  s_mulk_i32 s2, 0xffff ; encoding: [0xff,0xff,0x82,0xb7]
 
 s_cbranch_i_fork s[2:3], 0x6
-// SICI: s_cbranch_i_fork s[2:3], 0x6 ; encoding: [0x06,0x00,0x82,0xb8]
-// VI9:  s_cbranch_i_fork s[2:3], 0x6 ; encoding: [0x06,0x00,0x02,0xb8]
+// SICI: s_cbranch_i_fork s[2:3], 6 ; encoding: [0x06,0x00,0x82,0xb8]
+// VI9:  s_cbranch_i_fork s[2:3], 6 ; encoding: [0x06,0x00,0x02,0xb8]
+
+//===----------------------------------------------------------------------===//
+// getreg/setreg and hwreg macro
+//===----------------------------------------------------------------------===//
 
 // raw number mapped to known HW register
 s_getreg_b32 s2, 0x6
@@ -277,18 +281,52 @@ s_setreg_imm32_b32 hwreg(HW_REG_GPR_ALLOC, 1, 31), 0xff
 // SICI: s_setreg_imm32_b32 hwreg(HW_REG_GPR_ALLOC, 1, 31), 0xff ; encoding: [0x45,0xf0,0x80,0xba,0xff,0x00,0x00,0x00]
 // VI9:  s_setreg_imm32_b32 hwreg(HW_REG_GPR_ALLOC, 1, 31), 0xff ; encoding: [0x45,0xf0,0x00,0xba,0xff,0x00,0x00,0x00]
 
+//===----------------------------------------------------------------------===//
+// expressions and hwreg macro
+//===----------------------------------------------------------------------===//
+
+hwreg=6
+s_getreg_b32 s2, hwreg
+// SICI: s_getreg_b32 s2, hwreg(HW_REG_LDS_ALLOC, 0, 1) ; encoding: [0x06,0x00,0x02,0xb9]
+// VI9:  s_getreg_b32 s2, hwreg(HW_REG_LDS_ALLOC, 0, 1) ; encoding: [0x06,0x00,0x82,0xb8]
+
+x=5
+s_getreg_b32 s2, x+1
+// SICI: s_getreg_b32 s2, hwreg(HW_REG_LDS_ALLOC, 0, 1) ; encoding: [0x06,0x00,0x02,0xb9]
+// VI9:  s_getreg_b32 s2, hwreg(HW_REG_LDS_ALLOC, 0, 1) ; encoding: [0x06,0x00,0x82,0xb8]
+
+x=5
+s_getreg_b32 s2, 1+x
+// SICI: s_getreg_b32 s2, hwreg(HW_REG_LDS_ALLOC, 0, 1) ; encoding: [0x06,0x00,0x02,0xb9]
+// VI9:  s_getreg_b32 s2, hwreg(HW_REG_LDS_ALLOC, 0, 1) ; encoding: [0x06,0x00,0x82,0xb8]
+
+reg=50
+offset=2
+width=30
+s_getreg_b32 s2, hwreg(reg + 1, offset - 1, width + 1)
+// SICI: s_getreg_b32 s2, hwreg(51, 1, 31) ; encoding: [0x73,0xf0,0x02,0xb9]
+// VI9:  s_getreg_b32 s2, hwreg(51, 1, 31) ; encoding: [0x73,0xf0,0x82,0xb8]
+
+s_getreg_b32 s2, hwreg(1 + reg, -1 + offset, 1 + width)
+// SICI: s_getreg_b32 s2, hwreg(51, 1, 31) ; encoding: [0x73,0xf0,0x02,0xb9]
+// VI9:  s_getreg_b32 s2, hwreg(51, 1, 31) ; encoding: [0x73,0xf0,0x82,0xb8]
+
+//===----------------------------------------------------------------------===//
+// Instructions
+//===----------------------------------------------------------------------===//
+
 s_endpgm_ordered_ps_done
 // GFX9:     s_endpgm_ordered_ps_done ; encoding: [0x00,0x00,0x9e,0xbf]
 // NOSICIVI: error: instruction not supported on this GPU
 
 s_call_b64 s[12:13], 12609
-// GFX9:     s_call_b64 s[12:13], 0x3141 ; encoding: [0x41,0x31,0x8c,0xba]
+// GFX9:     s_call_b64 s[12:13], 12609 ; encoding: [0x41,0x31,0x8c,0xba]
 // NOSICIVI: error: instruction not supported on this GPU
 
 s_call_b64 s[100:101], 12609
-// GFX9:     s_call_b64 s[100:101], 0x3141 ; encoding: [0x41,0x31,0xe4,0xba]
+// GFX9:     s_call_b64 s[100:101], 12609 ; encoding: [0x41,0x31,0xe4,0xba]
 // NOSICIVI: error: instruction not supported on this GPU
 
 s_call_b64 s[10:11], 49617
-// GFX9:     s_call_b64 s[10:11], 0xc1d1 ; encoding: [0xd1,0xc1,0x8a,0xba]
+// GFX9:     s_call_b64 s[10:11], 49617 ; encoding: [0xd1,0xc1,0x8a,0xba]
 // NOSICIVI: error: instruction not supported on this GPU

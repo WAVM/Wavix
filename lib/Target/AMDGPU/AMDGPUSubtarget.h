@@ -294,11 +294,11 @@ protected:
   bool UnalignedBufferAccess;
   bool HasApertureRegs;
   bool EnableXNACK;
+  bool DoesNotSupportXNACK;
   bool EnableCuMode;
   bool TrapHandler;
 
   // Used as options.
-  bool EnableHugePrivateBuffer;
   bool EnableLoadStoreOpt;
   bool EnableUnsafeDSOffsetFolding;
   bool EnableSIScheduler;
@@ -331,11 +331,14 @@ protected:
   bool HasSDWAMac;
   bool HasSDWAOutModsVOPC;
   bool HasDPP;
+  bool HasDPP8;
   bool HasR128A16;
   bool HasNSAEncoding;
   bool HasDLInsts;
   bool HasDot1Insts;
   bool HasDot2Insts;
+  bool HasDot5Insts;
+  bool HasDot6Insts;
   bool EnableSRAMECC;
   bool DoesNotSupportSRAMECC;
   bool HasNoSdstCMPX;
@@ -375,6 +378,9 @@ private:
   SIInstrInfo InstrInfo;
   SITargetLowering TLInfo;
   SIFrameLowering FrameLowering;
+
+  // See COMPUTE_TMPRING_SIZE.WAVESIZE, 13-bit field in units of 256-dword.
+  static const unsigned MaxWaveScratchSize = (256 * 4) * ((1 << 13) - 1);
 
 public:
   GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
@@ -435,6 +441,11 @@ public:
     return Log2_32(WavefrontSize);
   }
 
+  /// Return the number of high bits known to be zero fror a frame index.
+  unsigned getKnownHighZeroBitsForFrameIndex() const {
+    return countLeadingZeros(MaxWaveScratchSize) + getWavefrontSizeLog2();
+  }
+
   int getLDSBankCount() const {
     return LDSBankCount;
   }
@@ -442,6 +453,8 @@ public:
   unsigned getMaxPrivateElementSize() const {
     return MaxPrivateElementSize;
   }
+
+  unsigned getConstantBusLimit(unsigned Opcode) const;
 
   bool hasIntClamp() const {
     return HasIntClamp;
@@ -521,10 +534,6 @@ public:
 
   TrapHandlerAbi getTrapHandlerAbi() const {
     return isAmdHsaOS() ? TrapHandlerAbiHsa : TrapHandlerAbiNone;
-  }
-
-  bool enableHugePrivateBuffer() const {
-    return EnableHugePrivateBuffer;
   }
 
   bool unsafeDSOffsetFoldingEnabled() const {
@@ -698,6 +707,14 @@ public:
     return HasDot2Insts;
   }
 
+  bool hasDot5Insts() const {
+    return HasDot5Insts;
+  }
+
+  bool hasDot6Insts() const {
+    return HasDot6Insts;
+  }
+
   bool isSRAMECCEnabled() const {
     return EnableSRAMECC;
   }
@@ -828,6 +845,10 @@ public:
 
   bool hasDPP() const {
     return HasDPP;
+  }
+
+  bool hasDPP8() const {
+    return HasDPP8;
   }
 
   bool hasR128A16() const {
@@ -1016,6 +1037,10 @@ public:
   void getPostRAMutations(
       std::vector<std::unique_ptr<ScheduleDAGMutation>> &Mutations)
       const override;
+
+  bool isWave32() const {
+    return WavefrontSize == 32;
+  }
 
   /// \returns Maximum number of work groups per compute unit supported by the
   /// subtarget and limited by given \p FlatWorkGroupSize.

@@ -95,12 +95,20 @@ TEST(CommandLineTest, ModifyExisitingOption) {
   cl::Option *Retrieved = Map["test-option"];
   ASSERT_EQ(&TestOption, Retrieved) << "Retrieved wrong option.";
 
-  ASSERT_EQ(&cl::GeneralCategory,Retrieved->Category) <<
-    "Incorrect default option category.";
+  ASSERT_NE(Retrieved->Categories.end(),
+            find_if(Retrieved->Categories,
+                    [&](const llvm::cl::OptionCategory *Cat) {
+                      return Cat == &cl::GeneralCategory;
+                    }))
+      << "Incorrect default option category.";
 
-  Retrieved->setCategory(TestCategory);
-  ASSERT_EQ(&TestCategory,Retrieved->Category) <<
-    "Failed to modify option's option category.";
+  Retrieved->addCategory(TestCategory);
+  ASSERT_NE(Retrieved->Categories.end(),
+            find_if(Retrieved->Categories,
+                    [&](const llvm::cl::OptionCategory *Cat) {
+                      return Cat == &TestCategory;
+                    }))
+      << "Failed to modify option's option category.";
 
   Retrieved->setDescription(Description);
   ASSERT_STREQ(Retrieved->HelpStr.data(), Description)
@@ -152,8 +160,56 @@ TEST(CommandLineTest, ParseEnvironmentToLocalVar) {
 TEST(CommandLineTest, UseOptionCategory) {
   StackOption<int> TestOption2("test-option", cl::cat(TestCategory));
 
-  ASSERT_EQ(&TestCategory,TestOption2.Category) << "Failed to assign Option "
-                                                  "Category.";
+  ASSERT_NE(TestOption2.Categories.end(),
+            find_if(TestOption2.Categories,
+                         [&](const llvm::cl::OptionCategory *Cat) {
+                           return Cat == &TestCategory;
+                         }))
+      << "Failed to assign Option Category.";
+}
+
+TEST(CommandLineTest, UseMultipleCategories) {
+  StackOption<int> TestOption2("test-option2", cl::cat(TestCategory),
+                               cl::cat(cl::GeneralCategory),
+                               cl::cat(cl::GeneralCategory));
+
+  // Make sure cl::GeneralCategory wasn't added twice.
+  ASSERT_EQ(TestOption2.Categories.size(), 2U);
+
+  ASSERT_NE(TestOption2.Categories.end(),
+            find_if(TestOption2.Categories,
+                         [&](const llvm::cl::OptionCategory *Cat) {
+                           return Cat == &TestCategory;
+                         }))
+      << "Failed to assign Option Category.";
+  ASSERT_NE(TestOption2.Categories.end(),
+            find_if(TestOption2.Categories,
+                         [&](const llvm::cl::OptionCategory *Cat) {
+                           return Cat == &cl::GeneralCategory;
+                         }))
+      << "Failed to assign General Category.";
+
+  cl::OptionCategory AnotherCategory("Additional test Options", "Description");
+  StackOption<int> TestOption("test-option", cl::cat(TestCategory),
+                              cl::cat(AnotherCategory));
+  ASSERT_EQ(TestOption.Categories.end(),
+            find_if(TestOption.Categories,
+                         [&](const llvm::cl::OptionCategory *Cat) {
+                           return Cat == &cl::GeneralCategory;
+                         }))
+      << "Failed to remove General Category.";
+  ASSERT_NE(TestOption.Categories.end(),
+            find_if(TestOption.Categories,
+                         [&](const llvm::cl::OptionCategory *Cat) {
+                           return Cat == &TestCategory;
+                         }))
+      << "Failed to assign Option Category.";
+  ASSERT_NE(TestOption.Categories.end(),
+            find_if(TestOption.Categories,
+                         [&](const llvm::cl::OptionCategory *Cat) {
+                           return Cat == &AnotherCategory;
+                         }))
+      << "Failed to assign Another Category.";
 }
 
 typedef void ParserFunction(StringRef Source, StringSaver &Saver,
@@ -734,7 +790,9 @@ TEST(CommandLineTest, ResponseFiles) {
   EXPECT_TRUE(IncludedFile.is_open());
   IncludedFile << "-option_1 -option_2\n"
                   "@incdir/resp2\n"
-                  "-option_3=abcd\n";
+                  "-option_3=abcd\n"
+                  "@incdir/resp3\n"
+                  "-option_4=efjk\n";
   IncludedFile.close();
 
   // Directory for included file.
@@ -752,6 +810,15 @@ TEST(CommandLineTest, ResponseFiles) {
   IncludedFile2 << "-option_23=abcd\n";
   IncludedFile2.close();
 
+  // Create second included response file of second level.
+  llvm::SmallString<128> IncludedFileName3;
+  llvm::sys::path::append(IncludedFileName3, IncDir, "resp3");
+  std::ofstream IncludedFile3(IncludedFileName3.c_str());
+  EXPECT_TRUE(IncludedFile3.is_open());
+  IncludedFile3 << "-option_31 -option_32\n";
+  IncludedFile3 << "-option_33=abcd\n";
+  IncludedFile3.close();
+
   // Prepare 'file' with reference to response file.
   SmallString<128> IncRef;
   IncRef.append(1, '@');
@@ -765,7 +832,7 @@ TEST(CommandLineTest, ResponseFiles) {
   bool Res = llvm::cl::ExpandResponseFiles(
                     Saver, llvm::cl::TokenizeGNUCommandLine, Argv, false, true);
   EXPECT_TRUE(Res);
-  EXPECT_EQ(Argv.size(), 9U);
+  EXPECT_EQ(Argv.size(), 13U);
   EXPECT_STREQ(Argv[0], "test/test");
   EXPECT_STREQ(Argv[1], "-flag_1");
   EXPECT_STREQ(Argv[2], "-option_1");
@@ -774,8 +841,13 @@ TEST(CommandLineTest, ResponseFiles) {
   EXPECT_STREQ(Argv[5], "-option_22");
   EXPECT_STREQ(Argv[6], "-option_23=abcd");
   EXPECT_STREQ(Argv[7], "-option_3=abcd");
-  EXPECT_STREQ(Argv[8], "-flag_2");
+  EXPECT_STREQ(Argv[8], "-option_31");
+  EXPECT_STREQ(Argv[9], "-option_32");
+  EXPECT_STREQ(Argv[10], "-option_33=abcd");
+  EXPECT_STREQ(Argv[11], "-option_4=efjk");
+  EXPECT_STREQ(Argv[12], "-flag_2");
 
+  llvm::sys::fs::remove(IncludedFileName3);
   llvm::sys::fs::remove(IncludedFileName2);
   llvm::sys::fs::remove(IncDir);
   llvm::sys::fs::remove(IncludedFileName);
@@ -787,18 +859,45 @@ TEST(CommandLineTest, RecursiveResponseFiles) {
   std::error_code EC = sys::fs::createUniqueDirectory("unittest", TestDir);
   EXPECT_TRUE(!EC);
 
-  SmallString<128> ResponseFilePath;
-  sys::path::append(ResponseFilePath, TestDir, "recursive.rsp");
-  std::string ResponseFileRef = std::string("@") + ResponseFilePath.c_str();
+  SmallString<128> SelfFilePath;
+  sys::path::append(SelfFilePath, TestDir, "self.rsp");
+  std::string SelfFileRef = std::string("@") + SelfFilePath.c_str();
 
-  std::ofstream ResponseFile(ResponseFilePath.str());
-  EXPECT_TRUE(ResponseFile.is_open());
-  ResponseFile << ResponseFileRef << "\n";
-  ResponseFile << ResponseFileRef << "\n";
-  ResponseFile.close();
+  SmallString<128> NestedFilePath;
+  sys::path::append(NestedFilePath, TestDir, "nested.rsp");
+  std::string NestedFileRef = std::string("@") + NestedFilePath.c_str();
 
-  // Ensure the recursive expansion terminates.
-  SmallVector<const char *, 4> Argv = {"test/test", ResponseFileRef.c_str()};
+  SmallString<128> FlagFilePath;
+  sys::path::append(FlagFilePath, TestDir, "flag.rsp");
+  std::string FlagFileRef = std::string("@") + FlagFilePath.c_str();
+
+  std::ofstream SelfFile(SelfFilePath.str());
+  EXPECT_TRUE(SelfFile.is_open());
+  SelfFile << "-option_1\n";
+  SelfFile << FlagFileRef << "\n";
+  SelfFile << NestedFileRef << "\n";
+  SelfFile << SelfFileRef << "\n";
+  SelfFile.close();
+
+  std::ofstream NestedFile(NestedFilePath.str());
+  EXPECT_TRUE(NestedFile.is_open());
+  NestedFile << "-option_2\n";
+  NestedFile << FlagFileRef << "\n";
+  NestedFile << SelfFileRef << "\n";
+  NestedFile << NestedFileRef << "\n";
+  NestedFile.close();
+
+  std::ofstream FlagFile(FlagFilePath.str());
+  EXPECT_TRUE(FlagFile.is_open());
+  FlagFile << "-option_x\n";
+  FlagFile.close();
+
+  // Ensure:
+  // Recursive expansion terminates
+  // Recursive files never expand
+  // Non-recursive repeats are allowed
+  SmallVector<const char *, 4> Argv = {"test/test", SelfFileRef.c_str(),
+                                       "-option_3"};
   BumpPtrAllocator A;
   StringSaver Saver(A);
 #ifdef _WIN32
@@ -809,11 +908,16 @@ TEST(CommandLineTest, RecursiveResponseFiles) {
   bool Res = cl::ExpandResponseFiles(Saver, Tokenizer, Argv, false, false);
   EXPECT_FALSE(Res);
 
-  // Ensure some expansion took place.
-  EXPECT_GT(Argv.size(), 2U);
+  EXPECT_EQ(Argv.size(), 9U);
   EXPECT_STREQ(Argv[0], "test/test");
-  for (size_t i = 1; i < Argv.size(); ++i)
-    EXPECT_STREQ(Argv[i], ResponseFileRef.c_str());
+  EXPECT_STREQ(Argv[1], "-option_1");
+  EXPECT_STREQ(Argv[2], "-option_x");
+  EXPECT_STREQ(Argv[3], "-option_2");
+  EXPECT_STREQ(Argv[4], "-option_x");
+  EXPECT_STREQ(Argv[5], SelfFileRef.c_str());
+  EXPECT_STREQ(Argv[6], NestedFileRef.c_str());
+  EXPECT_STREQ(Argv[7], SelfFileRef.c_str());
+  EXPECT_STREQ(Argv[8], "-option_3");
 }
 
 TEST(CommandLineTest, ResponseFilesAtArguments) {
@@ -1033,6 +1137,7 @@ public:
   // Return std::string because the output of a failing EXPECT check is
   // unreadable for StringRef. It also avoids any lifetime issues.
   template <typename... Ts> std::string runTest(Ts... OptionAttributes) {
+    outs().flush();  // flush any output from previous tests
     AutoDeleteFile File;
     {
       OutputRedirector Stdout(fileno(stdout));
@@ -1042,7 +1147,7 @@ public:
 
       StackOption<OptionValue> TestOption(Opt, cl::desc(HelpText),
                                           OptionAttributes...);
-      printOptionInfo(TestOption, 25);
+      printOptionInfo(TestOption, 26);
       outs().flush();
     }
     auto Buffer = MemoryBuffer::getFile(File.FilePath);
@@ -1069,8 +1174,8 @@ TEST_F(PrintOptionInfoTest, PrintOptionInfoValueOptionalWithoutSentinel) {
               cl::values(clEnumValN(OptionValue::Val, "v1", "desc1")));
 
   // clang-format off
-  EXPECT_EQ(Output, ("  -" + Opt + "=<value> - " + HelpText + "\n"
-                     "    =v1                -   desc1\n")
+  EXPECT_EQ(Output, ("  --" + Opt + "=<value> - " + HelpText + "\n"
+                     "    =v1                 -   desc1\n")
                         .str());
   // clang-format on
 }
@@ -1082,9 +1187,9 @@ TEST_F(PrintOptionInfoTest, PrintOptionInfoValueOptionalWithSentinel) {
 
   // clang-format off
   EXPECT_EQ(Output,
-            ("  -" + Opt + "         - " + HelpText + "\n"
-             "  -" + Opt + "=<value> - " + HelpText + "\n"
-             "    =v1                -   desc1\n")
+            ("  --" + Opt + "         - " + HelpText + "\n"
+             "  --" + Opt + "=<value> - " + HelpText + "\n"
+             "    =v1                 -   desc1\n")
                 .str());
   // clang-format on
 }
@@ -1095,10 +1200,10 @@ TEST_F(PrintOptionInfoTest, PrintOptionInfoValueOptionalWithSentinelWithHelp) {
                                     clEnumValN(OptionValue::Val, "", "desc2")));
 
   // clang-format off
-  EXPECT_EQ(Output, ("  -" + Opt + "         - " + HelpText + "\n"
-                     "  -" + Opt + "=<value> - " + HelpText + "\n"
-                     "    =v1                -   desc1\n"
-                     "    =<empty>           -   desc2\n")
+  EXPECT_EQ(Output, ("  --" + Opt + "         - " + HelpText + "\n"
+                     "  --" + Opt + "=<value> - " + HelpText + "\n"
+                     "    =v1                 -   desc1\n"
+                     "    =<empty>            -   desc2\n")
                         .str());
   // clang-format on
 }
@@ -1109,8 +1214,8 @@ TEST_F(PrintOptionInfoTest, PrintOptionInfoValueRequiredWithEmptyValueName) {
                                     clEnumValN(OptionValue::Val, "", "")));
 
   // clang-format off
-  EXPECT_EQ(Output, ("  -" + Opt + "=<value> - " + HelpText + "\n"
-                     "    =v1                -   desc1\n"
+  EXPECT_EQ(Output, ("  --" + Opt + "=<value> - " + HelpText + "\n"
+                     "    =v1                 -   desc1\n"
                      "    =<empty>\n")
                         .str());
   // clang-format on
@@ -1122,7 +1227,7 @@ TEST_F(PrintOptionInfoTest, PrintOptionInfoEmptyValueDescription) {
 
   // clang-format off
   EXPECT_EQ(Output,
-            ("  -" + Opt + "=<value> - " + HelpText + "\n"
+            ("  --" + Opt + "=<value> - " + HelpText + "\n"
              "    =v1\n").str());
   // clang-format on
 }
@@ -1147,7 +1252,7 @@ private:
 
 TEST_F(GetOptionWidthTest, GetOptionWidthArgNameLonger) {
   StringRef ArgName("a-long-argument-name");
-  size_t ExpectedStrSize = ("  -" + ArgName + "=<value> - ").str().size();
+  size_t ExpectedStrSize = ("  --" + ArgName + "=<value> - ").str().size();
   EXPECT_EQ(
       runTest(ArgName, cl::values(clEnumValN(OptionValue::Val, "v", "help"))),
       ExpectedStrSize);
@@ -1475,4 +1580,77 @@ TEST(CommandLineTest, GroupingAndPrefix) {
   cl::ResetAllOptionOccurrences();
 }
 
+TEST(CommandLineTest, LongOptions) {
+  cl::ResetCommandLineParser();
+
+  StackOption<bool> OptA("a", cl::desc("Some flag"));
+  StackOption<bool> OptBLong("long-flag", cl::desc("Some long flag"));
+  StackOption<bool, cl::alias> OptB("b", cl::desc("Alias to --long-flag"),
+                                    cl::aliasopt(OptBLong));
+  StackOption<std::string> OptAB("ab", cl::desc("Another long option"));
+
+  std::string Errs;
+  raw_string_ostream OS(Errs);
+
+  const char *args1[] = {"prog", "-a", "-ab", "val1"};
+  const char *args2[] = {"prog", "-a", "--ab", "val1"};
+  const char *args3[] = {"prog", "-ab", "--ab", "val1"};
+
+  //
+  // The following tests treat `-` and `--` the same, and always match the
+  // longest string.
+  //
+
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(4, args1, StringRef(), &OS)); OS.flush();
+  EXPECT_TRUE(OptA);
+  EXPECT_FALSE(OptBLong);
+  EXPECT_STREQ("val1", OptAB.c_str());
+  EXPECT_TRUE(Errs.empty()); Errs.clear();
+  cl::ResetAllOptionOccurrences();
+
+  EXPECT_TRUE(
+      cl::ParseCommandLineOptions(4, args2, StringRef(), &OS)); OS.flush();
+  EXPECT_TRUE(OptA);
+  EXPECT_FALSE(OptBLong);
+  EXPECT_STREQ("val1", OptAB.c_str());
+  EXPECT_TRUE(Errs.empty()); Errs.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Fails because `-ab` and `--ab` are treated the same and appear more than
+  // once.  Also, `val1` is unexpected.
+  EXPECT_FALSE(
+      cl::ParseCommandLineOptions(4, args3, StringRef(), &OS)); OS.flush();
+  outs()<< Errs << "\n";
+  EXPECT_FALSE(Errs.empty()); Errs.clear();
+  cl::ResetAllOptionOccurrences();
+
+  //
+  // The following tests treat `-` and `--` differently, with `-` for short, and
+  // `--` for long options.
+  //
+
+  // Fails because `-ab` is treated as `-a -b`, so `-a` is seen twice, and
+  // `val1` is unexpected.
+  EXPECT_FALSE(cl::ParseCommandLineOptions(4, args1, StringRef(),
+                                           &OS, nullptr, true)); OS.flush();
+  EXPECT_FALSE(Errs.empty()); Errs.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Works because `-a` is treated differently than `--ab`.
+  EXPECT_TRUE(cl::ParseCommandLineOptions(4, args2, StringRef(),
+                                           &OS, nullptr, true)); OS.flush();
+  EXPECT_TRUE(Errs.empty()); Errs.clear();
+  cl::ResetAllOptionOccurrences();
+
+  // Works because `-ab` is treated as `-a -b`, and `--ab` is a long option.
+  EXPECT_TRUE(cl::ParseCommandLineOptions(4, args3, StringRef(),
+                                           &OS, nullptr, true));
+  EXPECT_TRUE(OptA);
+  EXPECT_TRUE(OptBLong);
+  EXPECT_STREQ("val1", OptAB.c_str());
+  OS.flush();
+  EXPECT_TRUE(Errs.empty()); Errs.clear();
+  cl::ResetAllOptionOccurrences();
+}
 }  // anonymous namespace

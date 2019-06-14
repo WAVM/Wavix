@@ -578,6 +578,7 @@ TEST_F(FileSystemTest, TempFileKeepDiscard) {
   auto TempFileOrError = fs::TempFile::create(TestDirectory + "/test-%%%%");
   ASSERT_TRUE((bool)TempFileOrError);
   fs::TempFile File = std::move(*TempFileOrError);
+  ASSERT_EQ(-1, TempFileOrError->FD);
   ASSERT_FALSE((bool)File.keep(TestDirectory + "/keep"));
   ASSERT_FALSE((bool)File.discard());
   ASSERT_TRUE(fs::exists(TestDirectory + "/keep"));
@@ -589,6 +590,7 @@ TEST_F(FileSystemTest, TempFileDiscardDiscard) {
   auto TempFileOrError = fs::TempFile::create(TestDirectory + "/test-%%%%");
   ASSERT_TRUE((bool)TempFileOrError);
   fs::TempFile File = std::move(*TempFileOrError);
+  ASSERT_EQ(-1, TempFileOrError->FD);
   ASSERT_FALSE((bool)File.discard());
   ASSERT_FALSE((bool)File.discard());
   ASSERT_FALSE(fs::exists(TestDirectory + "/keep"));
@@ -1517,6 +1519,7 @@ TEST_F(FileSystemTest, is_local) {
   bool TempFileIsLocal;
   ASSERT_NO_ERROR(fs::is_local(FD, TempFileIsLocal));
   EXPECT_EQ(TempFileIsLocal, fs::is_local(FD));
+  ::close(FD);
 
   // Expect that the file and its parent directory are equally local or equally
   // remote.

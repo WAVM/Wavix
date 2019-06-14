@@ -13,6 +13,7 @@ llvm_canonicalize_cmake_booleans(
   LLVM_TOOL_LTO_BUILD
   LLVM_USE_INTEL_JITEVENTS
   LLVM_BUILD_EXAMPLES
+  LLVM_ENABLE_PLUGINS
   )
 
 configure_lit_site_cfg(
@@ -71,6 +72,7 @@ set(LLVM_TEST_DEPENDS
           llvm-jitlink
           llvm-lib
           llvm-link
+          llvm-lipo
           llvm-lto2
           llvm-mc
           llvm-mca

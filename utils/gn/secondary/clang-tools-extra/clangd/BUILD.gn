@@ -82,6 +82,8 @@ static_library("clangd") {
     "FSProvider.cpp",
     "FileDistance.cpp",
     "FindSymbols.cpp",
+    "Format.cpp",
+    "FormattedString.cpp",
     "FuzzyMatch.cpp",
     "GlobalCompilationDatabase.cpp",
     "Headers.cpp",
@@ -107,6 +109,7 @@ static_library("clangd") {
     "index/MemIndex.cpp",
     "index/Merge.cpp",
     "index/Ref.cpp",
+    "index/Relation.cpp",
     "index/Serialization.cpp",
     "index/Symbol.cpp",
     "index/SymbolCollector.cpp",
@@ -118,6 +121,7 @@ static_library("clangd") {
     "index/dex/Iterator.cpp",
     "index/dex/PostingList.cpp",
     "index/dex/Trigram.cpp",
+    "refactor/Rename.cpp",
     "refactor/Tweak.cpp",
   ]
 }

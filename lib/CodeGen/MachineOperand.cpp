@@ -181,6 +181,19 @@ void MachineOperand::ChangeToES(const char *SymName,
   setTargetFlags(TargetFlags);
 }
 
+void MachineOperand::ChangeToGA(const GlobalValue *GV, int64_t Offset,
+                                unsigned char TargetFlags) {
+  assert((!isReg() || !isTied()) &&
+         "Cannot change a tied operand into a global address");
+
+  removeRegFromUses();
+
+  OpKind = MO_GlobalAddress;
+  Contents.OffsetedInfo.Val.GV = GV;
+  setOffset(Offset);
+  setTargetFlags(TargetFlags);
+}
+
 void MachineOperand::ChangeToMCSymbol(MCSymbol *Sym) {
   assert((!isReg() || !isTied()) &&
          "Cannot change a tied operand into an MCSymbol");
@@ -348,7 +361,7 @@ hash_code llvm::hash_value(const MachineOperand &MO) {
     return hash_combine(MO.getType(), MO.getTargetFlags(), MO.getIndex());
   case MachineOperand::MO_ExternalSymbol:
     return hash_combine(MO.getType(), MO.getTargetFlags(), MO.getOffset(),
-                        MO.getSymbolName());
+                        StringRef(MO.getSymbolName()));
   case MachineOperand::MO_GlobalAddress:
     return hash_combine(MO.getType(), MO.getTargetFlags(), MO.getGlobal(),
                         MO.getOffset());
@@ -1125,7 +1138,7 @@ void MachineMemOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
       printLLVMNameWithoutPrefix(
           OS, cast<ExternalSymbolPseudoSourceValue>(PVal)->getSymbol());
       break;
-    case PseudoSourceValue::TargetCustom:
+    default:
       // FIXME: This is not necessarily the correct MIR serialization format for
       // a custom pseudo source value, but at least it allows
       // -print-machineinstrs to work on a target with custom pseudo source

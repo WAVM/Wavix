@@ -169,6 +169,12 @@ def G_BLOCK_ADDR : GenericInstruction {
   let hasSideEffects = 0;
 }
 
+def G_JUMP_TABLE : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins unknown:$jti);
+  let hasSideEffects = 0;
+}
+
 //------------------------------------------------------------------------------
 // Binary ops.
 //------------------------------------------------------------------------------
@@ -306,6 +312,38 @@ def G_PTR_MASK : GenericInstruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins type0:$src, unknown:$bits);
   let hasSideEffects = 0;
+}
+
+// Generic signed integer minimum.
+def G_SMIN : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = 0;
+  let isCommutable = 1;
+}
+
+// Generic signed integer maximum.
+def G_SMAX : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = 0;
+  let isCommutable = 1;
+}
+
+// Generic unsigned integer minimum.
+def G_UMIN : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = 0;
+  let isCommutable = 1;
+}
+
+// Generic unsigned integer maximum.
+def G_UMAX : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src1, type0:$src2);
+  let hasSideEffects = 0;
+  let isCommutable = 1;
 }
 
 //------------------------------------------------------------------------------
@@ -452,6 +490,12 @@ def G_UITOFP : GenericInstruction {
 def G_FABS : GenericInstruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins type0:$src);
+  let hasSideEffects = 0;
+}
+
+def G_FCOPYSIGN : GenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type0:$src0, type1:$src1);
   let hasSideEffects = 0;
 }
 
@@ -808,6 +852,15 @@ def G_BRCOND : GenericInstruction {
 def G_BRINDIRECT : GenericInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins type0:$src1);
+  let hasSideEffects = 0;
+  let isBranch = 1;
+  let isTerminator = 1;
+}
+
+// Generic branch to jump table entry
+def G_BRJT : GenericInstruction {
+  let OutOperandList = (outs);
+  let InOperandList = (ins ptype0:$tbl, unknown:$jti, type1:$idx);
   let hasSideEffects = 0;
   let isBranch = 1;
   let isTerminator = 1;

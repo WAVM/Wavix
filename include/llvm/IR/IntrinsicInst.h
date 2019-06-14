@@ -238,6 +238,8 @@ namespace llvm {
       case Intrinsic::experimental_constrained_fdiv:
       case Intrinsic::experimental_constrained_frem:
       case Intrinsic::experimental_constrained_fma:
+      case Intrinsic::experimental_constrained_fptrunc:
+      case Intrinsic::experimental_constrained_fpext:
       case Intrinsic::experimental_constrained_sqrt:
       case Intrinsic::experimental_constrained_pow:
       case Intrinsic::experimental_constrained_powi:
@@ -265,8 +267,9 @@ namespace llvm {
     }
   };
 
-  /// This class represents a op.with.overflow intrinsic.
-  class WithOverflowInst : public IntrinsicInst {
+  /// This class represents an intrinsic that is based on a binary operation.
+  /// This includes op.with.overflow and saturating add/sub intrinsics.
+  class BinaryOpIntrinsic : public IntrinsicInst {
   public:
     static bool classof(const IntrinsicInst *I) {
       switch (I->getIntrinsicID()) {
@@ -276,6 +279,10 @@ namespace llvm {
       case Intrinsic::ssub_with_overflow:
       case Intrinsic::umul_with_overflow:
       case Intrinsic::smul_with_overflow:
+      case Intrinsic::uadd_sat:
+      case Intrinsic::sadd_sat:
+      case Intrinsic::usub_sat:
+      case Intrinsic::ssub_sat:
         return true;
       default:
         return false;
@@ -296,6 +303,46 @@ namespace llvm {
 
     /// Returns one of OBO::NoSignedWrap or OBO::NoUnsignedWrap.
     unsigned getNoWrapKind() const;
+  };
+
+  /// Represents an op.with.overflow intrinsic.
+  class WithOverflowInst : public BinaryOpIntrinsic {
+  public:
+    static bool classof(const IntrinsicInst *I) {
+      switch (I->getIntrinsicID()) {
+      case Intrinsic::uadd_with_overflow:
+      case Intrinsic::sadd_with_overflow:
+      case Intrinsic::usub_with_overflow:
+      case Intrinsic::ssub_with_overflow:
+      case Intrinsic::umul_with_overflow:
+      case Intrinsic::smul_with_overflow:
+        return true;
+      default:
+        return false;
+      }
+    }
+    static bool classof(const Value *V) {
+      return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
+    }
+  };
+
+  /// Represents a saturating add/sub intrinsic.
+  class SaturatingInst : public BinaryOpIntrinsic {
+  public:
+    static bool classof(const IntrinsicInst *I) {
+      switch (I->getIntrinsicID()) {
+      case Intrinsic::uadd_sat:
+      case Intrinsic::sadd_sat:
+      case Intrinsic::usub_sat:
+      case Intrinsic::ssub_sat:
+        return true;
+      default:
+        return false;
+      }
+    }
+    static bool classof(const Value *V) {
+      return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
+    }
   };
 
   /// Common base class for all memory intrinsics. Simply provides

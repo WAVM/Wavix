@@ -12,6 +12,7 @@
 
 #include "X86TargetMachine.h"
 #include "MCTargetDesc/X86MCTargetDesc.h"
+#include "TargetInfo/X86TargetInfo.h"
 #include "X86.h"
 #include "X86CallLowering.h"
 #include "X86LegalizerInfo.h"
@@ -70,6 +71,7 @@ extern "C" void LLVMInitializeX86Target() {
   initializeFixupBWInstPassPass(PR);
   initializeEvexToVexInstPassPass(PR);
   initializeFixupLEAPassPass(PR);
+  initializeFPSPass(PR);
   initializeX86CallFrameOptimizationPass(PR);
   initializeX86CmovConverterPassPass(PR);
   initializeX86ExpandPseudoPass(PR);
@@ -194,7 +196,7 @@ static CodeModel::Model getEffectiveX86CodeModel(Optional<CodeModel::Model> CM,
                                                  bool JIT, bool Is64Bit) {
   if (CM) {
     if (*CM == CodeModel::Tiny)
-      report_fatal_error("Target does not support the tiny CodeModel");
+      report_fatal_error("Target does not support the tiny CodeModel", false);
     return *CM;
   }
   if (JIT)
