@@ -573,8 +573,12 @@ TSAN_INTERCEPTOR(int, sigsetjmp, void *env);
 #endif
 
 #define TSAN_INTERCEPTOR_SETJMP_(x) __interceptor_ ## x
-#define TSAN_INTERCEPTOR_SETJMP TSAN_INTERCEPTOR_SETJMP_(setjmp_symname)
-#define TSAN_INTERCEPTOR_SIGSETJMP TSAN_INTERCEPTOR_SETJMP_(sigsetjmp_symname)
+#define TSAN_INTERCEPTOR_SETJMP__(x) TSAN_INTERCEPTOR_SETJMP_(x)
+#define TSAN_INTERCEPTOR_SETJMP TSAN_INTERCEPTOR_SETJMP__(setjmp_symname)
+#define TSAN_INTERCEPTOR_SIGSETJMP TSAN_INTERCEPTOR_SETJMP__(sigsetjmp_symname)
+
+#define TSAN_STRING_SETJMP SANITIZER_STRINGIFY(setjmp_symname)
+#define TSAN_STRING_SIGSETJMP SANITIZER_STRINGIFY(sigsetjmp_symname)
 
 // Not called.  Merely to satisfy TSAN_INTERCEPT().
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE
@@ -697,6 +701,19 @@ TSAN_INTERCEPTOR(void*, realloc, void *p, uptr size) {
   {
     SCOPED_INTERCEPTOR_RAW(realloc, p, size);
     p = user_realloc(thr, pc, p, size);
+  }
+  invoke_malloc_hook(p, size);
+  return p;
+}
+
+TSAN_INTERCEPTOR(void*, reallocarray, void *p, uptr size, uptr n) {
+  if (in_symbolizer())
+    return InternalReallocArray(p, size, n);
+  if (p)
+    invoke_free_hook(p);
+  {
+    SCOPED_INTERCEPTOR_RAW(reallocarray, p, size, n);
+    p = user_reallocarray(thr, pc, p, size, n);
   }
   invoke_malloc_hook(p, size);
   return p;
@@ -2639,12 +2656,17 @@ void InitializeInterceptors() {
   InitializeSignalInterceptors();
   InitializeLibdispatchInterceptors();
 
-  TSAN_INTERCEPT(setjmp_symname);
-  TSAN_INTERCEPT(_setjmp);
-  TSAN_INTERCEPT(sigsetjmp_symname);
-
+#if !SANITIZER_MAC
+  // We can not use TSAN_INTERCEPT to get setjmp addr,
+  // because it does &setjmp and setjmp is not present in some versions of libc.
+  using __interception::InterceptFunction;
+  InterceptFunction(TSAN_STRING_SETJMP, (uptr*)&REAL(setjmp_symname), 0, 0);
+  InterceptFunction("_setjmp", (uptr*)&REAL(_setjmp), 0, 0);
+  InterceptFunction(TSAN_STRING_SIGSETJMP, (uptr*)&REAL(sigsetjmp_symname), 0,
+                    0);
 #if !SANITIZER_NETBSD
-  TSAN_INTERCEPT(__sigsetjmp);
+  InterceptFunction("__sigsetjmp", (uptr*)&REAL(__sigsetjmp), 0, 0);
+#endif
 #endif
 
   TSAN_INTERCEPT(longjmp_symname);
@@ -2657,6 +2679,7 @@ void InitializeInterceptors() {
   TSAN_INTERCEPT(__libc_memalign);
   TSAN_INTERCEPT(calloc);
   TSAN_INTERCEPT(realloc);
+  TSAN_INTERCEPT(reallocarray);
   TSAN_INTERCEPT(free);
   TSAN_INTERCEPT(cfree);
   TSAN_INTERCEPT(munmap);

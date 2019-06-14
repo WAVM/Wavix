@@ -22,18 +22,27 @@
 #define INTERCEPTION_LINUX_H
 
 namespace __interception {
-void *GetFuncAddr(const char *name);
-void *GetFuncAddrVer(const char *name, const char *ver);
+bool InterceptFunction(const char *name, uptr *ptr_to_real, uptr func,
+                       uptr wrapper);
+bool InterceptFunction(const char *name, const char *ver, uptr *ptr_to_real,
+                       uptr func, uptr wrapper);
 }  // namespace __interception
 
-#define INTERCEPT_FUNCTION_LINUX_OR_FREEBSD(func)                          \
-  (REAL(func) = (FUNC_TYPE(func)) ::__interception::GetFuncAddr(#func))
+#define INTERCEPT_FUNCTION_LINUX_OR_FREEBSD(func) \
+  ::__interception::InterceptFunction(            \
+      #func,                                      \
+      (::__interception::uptr *) & REAL(func),    \
+      (::__interception::uptr) & (func),          \
+      (::__interception::uptr) & WRAP(func))
 
 // Android,  Solaris and OpenBSD do not have dlvsym
 #if !SANITIZER_ANDROID && !SANITIZER_SOLARIS && !SANITIZER_OPENBSD
-#define INTERCEPT_FUNCTION_VER_LINUX_OR_FREEBSD(func, symver)              \
-  (REAL(func) =                                                            \
-      (FUNC_TYPE(func)) ::__interception::GetFuncAddrVer(#func, symver))
+#define INTERCEPT_FUNCTION_VER_LINUX_OR_FREEBSD(func, symver) \
+  ::__interception::InterceptFunction(                        \
+      #func, symver,                                          \
+      (::__interception::uptr *) & REAL(func),                \
+      (::__interception::uptr) & (func),                      \
+      (::__interception::uptr) & WRAP(func))
 #else
 #define INTERCEPT_FUNCTION_VER_LINUX_OR_FREEBSD(func, symver) \
   INTERCEPT_FUNCTION_LINUX_OR_FREEBSD(func)

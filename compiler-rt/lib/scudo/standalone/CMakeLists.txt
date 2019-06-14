@@ -60,6 +60,7 @@ set(SCUDO_HEADERS
   atomic_helpers.h
   bytemap.h
   checksum.h
+  chunk.h
   flags.h
   flags_parser.h
   fuchsia.h
@@ -67,13 +68,21 @@ set(SCUDO_HEADERS
   internal_defs.h
   linux.h
   list.h
+  local_cache.h
   mutex.h
   platform.h
+  primary32.h
+  primary64.h
+  quarantine.h
+  release.h
   report.h
   secondary.h
   size_class_map.h
   stats.h
   string_utils.h
+  tsd.h
+  tsd_exclusive.h
+  tsd_shared.h
   vector.h)
 
 if(COMPILER_RT_HAS_SCUDO_STANDALONE)
