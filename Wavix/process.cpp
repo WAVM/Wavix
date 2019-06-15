@@ -24,6 +24,7 @@
 #include "WAVM/Runtime/Intrinsics.h"
 #include "WAVM/Runtime/Linker.h"
 #include "WAVM/Runtime/RuntimeData.h"
+#include "WAVM/VFS/VFS.h"
 #include "WAVM/WASM/WASM.h"
 #include "errno.h"
 #include "process.h"
@@ -130,23 +131,22 @@ inline bool loadBinaryModuleFromFile(const char* wasmFilename, IR::Module& outMo
 {
 	try
 	{
-		Platform::File* file = Platform::openFile(wasmFilename,
-												  Platform::FileAccessMode::readOnly,
-												  Platform::FileCreateMode::openExisting);
-		if(!file) { return false; }
+		VFS::FD* vfd = Platform::openHostFile(
+			wasmFilename, VFS::FileAccessMode::readOnly, VFS::FileCreateMode::openExisting);
+		if(!vfd) { return false; }
 
 		U64 numFileBytes = 0;
-		errorUnless(Platform::seekFile(file, 0, Platform::FileSeekOrigin::end, &numFileBytes));
+		errorUnless(vfd->seek(0, VFS::SeekOrigin::end, &numFileBytes) == VFS::SeekResult::success);
 		if(numFileBytes > UINTPTR_MAX)
 		{
-			errorUnless(Platform::closeFile(file));
+			errorUnless(vfd->close() == VFS::CloseResult::success);
 			return false;
 		}
 
 		std::unique_ptr<U8[]> fileContents{new U8[numFileBytes]};
-		errorUnless(Platform::seekFile(file, 0, Platform::FileSeekOrigin::begin));
-		errorUnless(Platform::readFile(file, fileContents.get(), numFileBytes));
-		errorUnless(Platform::closeFile(file));
+		errorUnless(vfd->seek(0, VFS::SeekOrigin::begin) == VFS::SeekResult::success);
+		errorUnless(vfd->read(fileContents.get(), numFileBytes) == VFS::ReadResult::success);
+		errorUnless(vfd->close() == VFS::CloseResult::success);
 
 		Serialization::MemoryInputStream stream(fileContents.get(), numFileBytes);
 		WASM::serialize(stream, outModule);
@@ -269,9 +269,9 @@ Process* Wavix::spawnProcess(Process* parent,
 	}
 
 	// Initialize the process's standard IO file descriptors.
-	process->files.insertOrFail(0, Platform::getStdFile(Platform::StdDevice::in));
-	process->files.insertOrFail(1, Platform::getStdFile(Platform::StdDevice::out));
-	process->files.insertOrFail(2, Platform::getStdFile(Platform::StdDevice::err));
+	process->files.insertOrFail(0, Platform::getStdFD(VFS::StdDevice::in));
+	process->files.insertOrFail(1, Platform::getStdFD(VFS::StdDevice::out));
+	process->files.insertOrFail(2, Platform::getStdFD(VFS::StdDevice::err));
 
 	// Allocate a PID for the process.
 	{

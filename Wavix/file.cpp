@@ -159,53 +159,51 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	pathString = sysroot + resolvePath(cwd, "/home", path);
 
 	// Validate and interpret the access mode.
-	Platform::FileAccessMode platformAccessMode;
+	VFS::FileAccessMode platformAccessMode;
 	const U32 accessMode = flags & OpenFlags::accessModeMask;
 	switch(accessMode)
 	{
-	case OpenFlags::readOnly: platformAccessMode = Platform::FileAccessMode::readOnly; break;
-	case OpenFlags::writeOnly: platformAccessMode = Platform::FileAccessMode::writeOnly; break;
-	case OpenFlags::readWrite: platformAccessMode = Platform::FileAccessMode::readWrite; break;
+	case OpenFlags::readOnly: platformAccessMode = VFS::FileAccessMode::readOnly; break;
+	case OpenFlags::writeOnly: platformAccessMode = VFS::FileAccessMode::writeOnly; break;
+	case OpenFlags::readWrite: platformAccessMode = VFS::FileAccessMode::readWrite; break;
 	default: traceSyscallReturnf("open", "EINVAL (invalid flags)"); return -ErrNo::einval;
 	};
 
-	Platform::FileCreateMode platformCreateMode;
+	VFS::FileCreateMode platformCreateMode;
 	if(flags & OpenFlags::create)
 	{
-		if(flags & OpenFlags::exclusive)
-		{ platformCreateMode = Platform::FileCreateMode::createNew; }
+		if(flags & OpenFlags::exclusive) { platformCreateMode = VFS::FileCreateMode::createNew; }
 		else if(flags & OpenFlags::truncate)
 		{
-			platformCreateMode = Platform::FileCreateMode::createAlways;
+			platformCreateMode = VFS::FileCreateMode::createAlways;
 		}
 		else
 		{
-			platformCreateMode = Platform::FileCreateMode::openAlways;
+			platformCreateMode = VFS::FileCreateMode::openAlways;
 		}
 	}
 	else
 	{
 		if(flags & OpenFlags::truncate)
-		{ platformCreateMode = Platform::FileCreateMode::truncateExisting; }
+		{ platformCreateMode = VFS::FileCreateMode::truncateExisting; }
 		else
 		{
-			platformCreateMode = Platform::FileCreateMode::openExisting;
+			platformCreateMode = VFS::FileCreateMode::openExisting;
 		}
 	}
 
-	Platform::File* platformFile
-		= Platform::openFile(pathString, platformAccessMode, platformCreateMode);
-	if(!platformFile)
+	VFS::FD* vfd = Platform::openHostFile(pathString, platformAccessMode, platformCreateMode);
+	if(!vfd)
 	{
 		traceSyscallReturnf("open", "EACCESS (Platform::openFile failed)");
 		return -ErrNo::eacces;
 	}
 
 	Lock<Platform::Mutex> fileLock(currentProcess->filesMutex);
-	I32 fd = currentProcess->files.add(-1, platformFile);
+	I32 fd = currentProcess->files.add(-1, vfd);
 	if(fd == -1)
 	{
-		Platform::closeFile(platformFile);
+		errorUnless(vfd->close() == VFS::CloseResult::success);
 		traceSyscallReturnf("open", "EMFILE (exhausted fd index space)");
 		return -ErrNo::emfile;
 	}
@@ -240,10 +238,10 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_close", I32, __syscall_close, I32 fd
 
 	if(!validateFD(fd)) { return -1; }
 
-	Platform::File* platformFile = currentProcess->files[fd];
+	VFS::FD* vfd = currentProcess->files[fd];
 	currentProcess->files.removeOrFail(fd);
 
-	if(Platform::closeFile(platformFile)) { return 0; }
+	if(vfd->close() == VFS::CloseResult::success) { return 0; }
 	else
 	{
 		return -1;
@@ -266,19 +264,23 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	const I64 offset = I64(U64(offsetHigh) << 32) | I64(offsetLow);
 
-	if(whence < 0 || whence > 2) { return -1; }
+	VFS::SeekOrigin seekOrigin;
+	switch(whence)
+	{
+	case 0: seekOrigin = VFS::SeekOrigin::begin; break;
+	case 1: seekOrigin = VFS::SeekOrigin::cur; break;
+	case 2: seekOrigin = VFS::SeekOrigin::end; break;
+	default: return -1;
+	};
 
 	Lock<Platform::Mutex> fileLock(currentProcess->filesMutex);
 
 	if(!validateFD(fd)) { return -1; }
 
-	Platform::File* platformFile = currentProcess->files[fd];
+	VFS::FD* vfd = currentProcess->files[fd];
 
-	if(!Platform::seekFile(platformFile,
-						   offset,
-						   (Platform::FileSeekOrigin)whence,
-						   &memoryRef<U64>(memory, resultAddress)))
-	{ return -1; }
+	VFS::SeekResult result = vfd->seek(offset, seekOrigin, &memoryRef<U64>(memory, resultAddress));
+	if(result != VFS::SeekResult::success) { return -1; }
 
 	return 0;
 }
@@ -299,14 +301,14 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	if(!validateFD(fd)) { return -ErrNo::ebadf; }
 
-	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { return -ErrNo::ebadf; }
+	VFS::FD* vfd = currentProcess->files[fd];
+	if(!vfd) { return -ErrNo::ebadf; }
 
 	U8* buffer = memoryArrayPtr<U8>(memory, bufferAddress, numBytes);
 
 	Uptr numReadBytes = 0;
-	const bool result = Platform::readFile(platformFile, buffer, numBytes, &numReadBytes);
-	if(!result) { return -1; }
+	VFS::ReadResult result = vfd->read(buffer, numBytes, &numReadBytes);
+	if(result != VFS::ReadResult::success) { return -1; }
 
 	return coerce32bitAddressSigned(numReadBytes);
 }
@@ -327,14 +329,14 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	if(!validateFD(fd)) { return -ErrNo::ebadf; }
 
-	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { return -ErrNo::ebadf; }
+	VFS::FD* vfd = currentProcess->files[fd];
+	if(!vfd) { return -ErrNo::ebadf; }
 
 	U8* buffer = memoryArrayPtr<U8>(memory, bufferAddress, numBytes);
 
 	Uptr numWrittenBytes = 0;
-	const bool result = Platform::writeFile(platformFile, buffer, numBytes, &numWrittenBytes);
-	if(!result) { return -ErrNo::einval; }
+	VFS::WriteResult result = vfd->write(buffer, numBytes, &numWrittenBytes);
+	if(result != VFS::WriteResult::success) { return -ErrNo::einval; }
 
 	return coerce32bitAddressSigned(numWrittenBytes);
 }
@@ -361,8 +363,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	if(!validateFD(fd)) { return -1; }
 
-	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { throwException(ExceptionTypes::calledUnimplementedIntrinsic); }
+	VFS::FD* vfd = currentProcess->files[fd];
+	if(!vfd) { return -ErrNo::ebadf; }
 
 	if(isTracingSyscalls) { Log::printf(Log::debug, "IOVs:\n"); }
 
@@ -379,10 +381,9 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 		{
 			U8* ioData = memoryArrayPtr<U8>(memory, io.address, io.numBytes);
 			Uptr ioNumReadBytes = 0;
-			const bool ioResult
-				= Platform::readFile(platformFile, ioData, io.numBytes, &ioNumReadBytes);
+			VFS::ReadResult readResult = vfd->read(ioData, io.numBytes, &ioNumReadBytes);
 			numReadBytes += ioNumReadBytes;
-			if(!ioResult || ioNumReadBytes != io.numBytes) { break; }
+			if(readResult != VFS::ReadResult::success || ioNumReadBytes != io.numBytes) { break; }
 		}
 	}
 
@@ -411,8 +412,8 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 
 	if(!validateFD(fd)) { return -1; }
 
-	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { throwException(ExceptionTypes::calledUnimplementedIntrinsic); }
+	VFS::FD* vfd = currentProcess->files[fd];
+	if(!vfd) { return -ErrNo::ebadf; }
 
 	if(isTracingSyscalls) { Log::printf(Log::debug, "IOVs:\n"); }
 
@@ -429,10 +430,10 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 		{
 			const U8* ioData = memoryArrayPtr<U8>(memory, io.address, io.numBytes);
 			Uptr ioNumWrittenBytes = 0;
-			const bool ioResult
-				= Platform::writeFile(platformFile, ioData, io.numBytes, &ioNumWrittenBytes);
+			VFS::WriteResult writeResult = vfd->write(ioData, io.numBytes, &ioNumWrittenBytes);
 			numWrittenBytes += ioNumWrittenBytes;
-			if(!ioResult || ioNumWrittenBytes != io.numBytes) { break; }
+			if(writeResult != VFS::WriteResult::success || ioNumWrittenBytes != io.numBytes)
+			{ break; }
 		}
 	}
 
@@ -447,10 +448,11 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_fsync", I32, __syscall_fsync, I32 fd
 
 	if(!validateFD(fd)) { return -1; }
 
-	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { throwException(ExceptionTypes::calledUnimplementedIntrinsic); }
+	VFS::FD* vfd = currentProcess->files[fd];
+	if(!vfd) { return -ErrNo::ebadf; }
 
-	Platform::flushFileWrites(platformFile);
+	VFS::SyncResult result = vfd->sync(VFS::SyncType::contentsAndMetadata);
+	if(result != VFS::SyncResult::success) { return -1; }
 
 	return 0;
 }
@@ -463,10 +465,11 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_fdatasync", I32, __syscall_fdatasync
 
 	if(!validateFD(fd)) { return -1; }
 
-	Platform::File* platformFile = currentProcess->files[fd];
-	if(!platformFile) { throwException(ExceptionTypes::calledUnimplementedIntrinsic); }
+	VFS::FD* vfd = currentProcess->files[fd];
+	if(!vfd) { return -ErrNo::ebadf; }
 
-	Platform::flushFileWrites(platformFile);
+	VFS::SyncResult result = vfd->sync(VFS::SyncType::contents);
+	if(result != VFS::SyncResult::success) { return -1; }
 
 	return 0;
 }

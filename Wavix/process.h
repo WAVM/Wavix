@@ -8,7 +8,7 @@
 #include "WAVM/Inline/IndexMap.h"
 #include "WAVM/Platform/Mutex.h"
 #include "WAVM/Runtime/Runtime.h"
-#include "file.h"
+#include "WAVM/VFS/VFS.h"
 
 namespace WAVM { namespace Platform {
 	struct File;
@@ -31,7 +31,7 @@ namespace Wavix {
 		std::string cwd;
 
 		Platform::Mutex filesMutex;
-		IndexMap<I32, Platform::File*> files;
+		IndexMap<I32, VFS::FD*> files;
 
 		Platform::Mutex childrenMutex;
 		std::vector<Process*> children;
