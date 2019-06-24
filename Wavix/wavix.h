@@ -54,6 +54,9 @@ namespace Wavix {
 	};
 
 	DECLARE_INTRINSIC_MODULE(wavix);
+	DECLARE_INTRINSIC_MODULE(wavixFile);
+	DECLARE_INTRINSIC_MODULE(wavixMemory);
+	DECLARE_INTRINSIC_MODULE(wavixProcess);
 
 	extern thread_local Thread* currentThread;
 	extern thread_local Process* currentProcess;

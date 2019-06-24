@@ -38,7 +38,7 @@ namespace Wavix {
 	thread_local Thread* currentThread = nullptr;
 	thread_local Process* currentProcess = nullptr;
 
-	void staticInitializeProcess() {}
+	DEFINE_INTRINSIC_MODULE(wavixProcess);
 }
 
 static ConcurrentHashMap<I32, Process*> pidToProcessMap;
@@ -186,8 +186,13 @@ ModuleInstance* loadModule(Process* process, const char* hostFilename)
 
 	// Link the module with the Wavix intrinsics.
 	RootResolver rootResolver;
-	ModuleInstance* wavixIntrinsicModuleInstance = Intrinsics::instantiateModule(
-		process->compartment, INTRINSIC_MODULE_REF(wavix), "WavixIntrinsics");
+	ModuleInstance* wavixIntrinsicModuleInstance
+		= Intrinsics::instantiateModule(process->compartment,
+										{INTRINSIC_MODULE_REF(wavix),
+										 INTRINSIC_MODULE_REF(wavixFile),
+										 INTRINSIC_MODULE_REF(wavixProcess),
+										 INTRINSIC_MODULE_REF(wavixMemory)},
+										"WavixIntrinsics");
 	rootResolver.moduleNameToInstanceMap.set("env", wavixIntrinsicModuleInstance);
 
 	LinkResult linkResult = linkModule(module, rootResolver);
@@ -305,14 +310,18 @@ Process* Wavix::spawnProcess(Process* parent,
 	return process;
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_exit", I32, __syscall_exit, I32 exitCode)
+DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_exit", I32, __syscall_exit, I32 exitCode)
 {
 	traceSyscallf("exit", "(%i)", exitCode);
 
 	throw ExitThreadException{exitCode};
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_exit_group", I32, __syscall_exit_group, I32 exitCode)
+DEFINE_INTRINSIC_FUNCTION(wavixProcess,
+						  "__syscall_exit_group",
+						  I32,
+						  __syscall_exit_group,
+						  I32 exitCode)
 {
 	traceSyscallf("exit_group", "(%i)", exitCode);
 
@@ -404,7 +413,7 @@ DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix,
+DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_execve",
 						  I32,
 						  __syscall_execve,
@@ -486,19 +495,19 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	Errors::unreachable();
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_kill", I32, __syscall_kill, I32 a, I32 b)
+DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_kill", I32, __syscall_kill, I32 a, I32 b)
 {
 	traceSyscallf("kill", "(%i,%i)", a, b);
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_getpid", I32, __syscall_getpid, I32 dummy)
+DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_getpid", I32, __syscall_getpid, I32 dummy)
 {
 	traceSyscallf("getpid", "");
 	return currentProcess->id;
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_getppid", I32, __syscall_getppid, I32 dummy)
+DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_getppid", I32, __syscall_getppid, I32 dummy)
 {
 	traceSyscallf("getppid", "");
 	if(currentProcess->parent) { return currentProcess->parent->id; }
@@ -508,7 +517,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_getppid", I32, __syscall_getppid, I3
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix,
+DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_sched_getaffinity",
 						  I32,
 						  __syscall_sched_getaffinity,
@@ -528,7 +537,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 #define WAVIX_WCONTINUED 8
 #define WAVIX_WNOWAIT 0x1000000
 
-DEFINE_INTRINSIC_FUNCTION(wavix,
+DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_wait4",
 						  I32,
 						  __syscall_wait4,
@@ -593,14 +602,14 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_gettid", I32, __syscall_gettid, I32)
+DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_gettid", I32, __syscall_gettid, I32)
 {
 	traceSyscallf("gettid", "()");
 	// throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 	return 1;
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix,
+DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_tkill",
 						  I32,
 						  __syscall_tkill,
@@ -612,7 +621,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	throw ExitThreadException{-1};
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix,
+DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_rt_sigprocmask",
 						  I32,
 						  __syscall_rt_sigprocmask,

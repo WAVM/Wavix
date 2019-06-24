@@ -12,10 +12,10 @@ using namespace WAVM::Runtime;
 using namespace Wavix;
 
 namespace Wavix {
-	void staticInitializeMemory() {}
+	DEFINE_INTRINSIC_MODULE(wavixMemory);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix,
+DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 						  "__syscall_mmap",
 						  I32,
 						  __syscall_mmap,
@@ -46,7 +46,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	return coerce32bitAddressSigned(Uptr(basePageIndex) * IR::numBytesPerPage);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix,
+DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 						  "__syscall_munmap",
 						  I32,
 						  __syscall_munmap,
@@ -75,7 +75,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 #define WAVIX_MREMAP_MAYMOVE 1
 #define WAVIX_MREMAP_FIXED 2
 
-DEFINE_INTRINSIC_FUNCTION(wavix,
+DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 						  "__syscall_mremap",
 						  I32,
 						  __syscall_mremap,
@@ -127,7 +127,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 #define WAVIX_MADV_WILLNEED 3
 #define WAVIX_MADV_DONTNEED 4
 
-DEFINE_INTRINSIC_FUNCTION(wavix,
+DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 						  "__syscall_madvise",
 						  I32,
 						  __syscall_madvise,
@@ -155,7 +155,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavix, "__syscall_brk", I32, __syscall_brk, U32 address)
+DEFINE_INTRINSIC_FUNCTION(wavixMemory, "__syscall_brk", I32, __syscall_brk, U32 address)
 {
 	Memory* memory = currentThread->process->memory;
 

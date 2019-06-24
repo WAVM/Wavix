@@ -26,10 +26,6 @@ namespace Wavix {
 	bool isTracingSyscalls = false;
 
 	DEFINE_INTRINSIC_MODULE(wavix);
-
-	extern void staticInitializeFile();
-	extern void staticInitializeMemory();
-	extern void staticInitializeProcess();
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavix,
@@ -366,10 +362,6 @@ void showHelp()
 
 int main(int argc, const char** argv)
 {
-	Wavix::staticInitializeFile();
-	Wavix::staticInitializeMemory();
-	Wavix::staticInitializeProcess();
-
 	Wavix::sysroot = Platform::getCurrentWorkingDirectory();
 
 	const char* filename = nullptr;
