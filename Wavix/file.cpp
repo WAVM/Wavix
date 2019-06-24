@@ -192,8 +192,10 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 		}
 	}
 
-	VFS::FD* vfd = Platform::openHostFile(pathString, platformAccessMode, platformCreateMode);
-	if(!vfd)
+	VFS::FD* vfd = nullptr;
+	VFS::OpenResult openResult
+		= Platform::openHostFile(pathString, platformAccessMode, platformCreateMode, vfd);
+	if(openResult != VFS::OpenResult::success)
 	{
 		traceSyscallReturnf("open", "EACCESS (Platform::openFile failed)");
 		return -ErrNo::eacces;

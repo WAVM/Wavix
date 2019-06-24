@@ -131,9 +131,11 @@ inline bool loadBinaryModuleFromFile(const char* wasmFilename, IR::Module& outMo
 {
 	try
 	{
-		VFS::FD* vfd = Platform::openHostFile(
-			wasmFilename, VFS::FileAccessMode::readOnly, VFS::FileCreateMode::openExisting);
-		if(!vfd) { return false; }
+		VFS::FD* vfd = nullptr;
+		if(Platform::openHostFile(
+			   wasmFilename, VFS::FileAccessMode::readOnly, VFS::FileCreateMode::openExisting, vfd)
+		   != VFS::OpenResult::success)
+		{ return false; }
 
 		U64 numFileBytes = 0;
 		errorUnless(vfd->seek(0, VFS::SeekOrigin::end, &numFileBytes) == VFS::SeekResult::success);
@@ -269,9 +271,9 @@ Process* Wavix::spawnProcess(Process* parent,
 	}
 
 	// Initialize the process's standard IO file descriptors.
-	process->files.insertOrFail(0, Platform::getStdFD(VFS::StdDevice::in));
-	process->files.insertOrFail(1, Platform::getStdFD(VFS::StdDevice::out));
-	process->files.insertOrFail(2, Platform::getStdFD(VFS::StdDevice::err));
+	process->files.insertOrFail(0, Platform::getStdFD(Platform::StdDevice::in));
+	process->files.insertOrFail(1, Platform::getStdFD(Platform::StdDevice::out));
+	process->files.insertOrFail(2, Platform::getStdFD(Platform::StdDevice::err));
 
 	// Allocate a PID for the process.
 	{
