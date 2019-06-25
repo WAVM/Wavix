@@ -92,7 +92,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	if(argIndex < currentProcess->args.size())
 	{
 		const Uptr safeArgIndex
-			= Platform::saturateToBounds((Uptr)argIndex, currentProcess->args.size());
+			= Platform::branchlessMin((Uptr)argIndex, currentProcess->args.size() - 1);
 		return coerce32bitAddress(currentProcess->args[safeArgIndex].size() + 1);
 	}
 	else
@@ -113,7 +113,7 @@ DEFINE_INTRINSIC_FUNCTION(wavix,
 	if(argIndex < currentProcess->args.size())
 	{
 		const Uptr safeArgIndex
-			= Platform::saturateToBounds((Uptr)argIndex, currentProcess->args.size());
+			= Platform::branchlessMin((Uptr)argIndex, currentProcess->args.size() - 1);
 		const Uptr numChars = currentProcess->args[safeArgIndex].size();
 		if(numChars + 1 <= Uptr(numCharsInBuffer))
 		{
