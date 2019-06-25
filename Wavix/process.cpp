@@ -492,7 +492,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 	// Exit the calling thread.
 	throw ExitThreadException{-1};
 
-	Errors::unreachable();
+	WAVM_UNREACHABLE();
 }
 
 DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_kill", I32, __syscall_kill, I32 a, I32 b)
