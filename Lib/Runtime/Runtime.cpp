@@ -32,16 +32,70 @@ using namespace WAVM::Runtime;
 	Object* Runtime::asObject(Runtime::Type* object) { return (Object*)object; }                   \
 	const Object* Runtime::asObject(const Runtime::Type* object) { return (const Object*)object; }
 
-DEFINE_OBJECT_TYPE(ObjectKind::function, Function, Function);
-DEFINE_OBJECT_TYPE(ObjectKind::table, Table, Table);
-DEFINE_OBJECT_TYPE(ObjectKind::memory, Memory, Memory);
-DEFINE_OBJECT_TYPE(ObjectKind::global, Global, Global);
-DEFINE_OBJECT_TYPE(ObjectKind::exceptionType, ExceptionType, ExceptionType);
-DEFINE_OBJECT_TYPE(ObjectKind::moduleInstance, ModuleInstance, ModuleInstance);
-DEFINE_OBJECT_TYPE(ObjectKind::context, Context, Context);
-DEFINE_OBJECT_TYPE(ObjectKind::compartment, Compartment, Compartment);
+#define DEFINE_GCOBJECT_TYPE(kindId, kindName, Type)                                               \
+	DEFINE_OBJECT_TYPE(kindId, kindName, Type)                                                     \
+	void Runtime::setUserData(Runtime::Type* object, void* userData, void (*finalizer)(void*))     \
+	{                                                                                              \
+		object->userData = userData;                                                               \
+		object->finalizeUserData = finalizer;                                                      \
+	}                                                                                              \
+	void* Runtime::getUserData(const Runtime::Type* object) { return object->userData; }
 
-bool Runtime::isA(Object* object, const ExternType& type)
+DEFINE_GCOBJECT_TYPE(ObjectKind::table, Table, Table);
+DEFINE_GCOBJECT_TYPE(ObjectKind::memory, Memory, Memory);
+DEFINE_GCOBJECT_TYPE(ObjectKind::global, Global, Global);
+DEFINE_GCOBJECT_TYPE(ObjectKind::exceptionType, ExceptionType, ExceptionType);
+DEFINE_GCOBJECT_TYPE(ObjectKind::moduleInstance, ModuleInstance, ModuleInstance);
+DEFINE_GCOBJECT_TYPE(ObjectKind::context, Context, Context);
+DEFINE_GCOBJECT_TYPE(ObjectKind::compartment, Compartment, Compartment);
+DEFINE_GCOBJECT_TYPE(ObjectKind::foreign, Foreign, Foreign);
+
+DEFINE_OBJECT_TYPE(ObjectKind::function, Function, Function);
+void Runtime::setUserData(Runtime::Function* function, void* userData, void (*finalizer)(void*))
+{
+	function->mutableData->userData = userData;
+	function->mutableData->finalizeUserData = finalizer;
+}
+void* Runtime::getUserData(const Runtime::Function* function)
+{
+	return function->mutableData->userData;
+}
+
+void Runtime::setUserData(Runtime::Object* object, void* userData, void (*finalizer)(void*))
+{
+	if(object->kind == ObjectKind::function)
+	{ setUserData(asFunction(object), userData, finalizer); }
+	else
+	{
+		auto gcObject = (GCObject*)object;
+		gcObject->userData = userData;
+		gcObject->finalizeUserData = finalizer;
+	}
+}
+
+void* Runtime::getUserData(const Runtime::Object* object)
+{
+	if(object->kind == ObjectKind::function) { return getUserData(asFunction(object)); }
+	else
+	{
+		auto gcObject = (GCObject*)object;
+		return gcObject->userData;
+	}
+}
+
+Runtime::GCObject::~GCObject()
+{
+	wavmAssert(numRootReferences.load(std::memory_order_acquire) == 0);
+	if(finalizeUserData) { (*finalizeUserData)(userData); }
+}
+
+Runtime::FunctionMutableData::~FunctionMutableData()
+{
+	wavmAssert(numRootReferences.load(std::memory_order_acquire) == 0);
+	if(finalizeUserData) { (*finalizeUserData)(userData); }
+}
+
+bool Runtime::isA(const Object* object, const ExternType& type)
 {
 	if(ObjectKind(type.kind) != object->kind) { return false; }
 
@@ -53,11 +107,13 @@ bool Runtime::isA(Object* object, const ExternType& type)
 	case ExternKind::memory: return isSubtype(asMemory(object)->type, asMemoryType(type));
 	case ExternKind::exceptionType:
 		return isSubtype(asExceptionType(type).params, asExceptionType(object)->sig.params);
-	default: Errors::unreachable();
+
+	case ExternKind::invalid:
+	default: WAVM_UNREACHABLE();
 	}
 }
 
-ExternType Runtime::getObjectType(Object* object)
+ExternType Runtime::getExternType(const Object* object)
 {
 	switch(object->kind)
 	{
@@ -66,11 +122,17 @@ ExternType Runtime::getObjectType(Object* object)
 	case ObjectKind::table: return asTable(object)->type;
 	case ObjectKind::memory: return asMemory(object)->type;
 	case ObjectKind::exceptionType: return asExceptionType(object)->sig;
-	default: Errors::unreachable();
+
+	case ObjectKind::moduleInstance:
+	case ObjectKind::context:
+	case ObjectKind::compartment:
+	case ObjectKind::foreign:
+	case ObjectKind::invalid:
+	default: WAVM_UNREACHABLE();
 	};
 }
 
-FunctionType Runtime::getFunctionType(Function* function) { return function->encodedType; }
+FunctionType Runtime::getFunctionType(const Function* function) { return function->encodedType; }
 
 Context* Runtime::getContextFromRuntimeData(ContextRuntimeData* contextRuntimeData)
 {
@@ -79,6 +141,14 @@ Context* Runtime::getContextFromRuntimeData(ContextRuntimeData* contextRuntimeDa
 	const Uptr contextId = contextRuntimeData - compartmentRuntimeData->contexts;
 	Lock<Platform::Mutex> compartmentLock(compartmentRuntimeData->compartment->mutex);
 	return compartmentRuntimeData->compartment->contexts[contextId];
+}
+
+Compartment* Runtime::getCompartmentFromContextRuntimeData(
+	struct ContextRuntimeData* contextRuntimeData)
+{
+	const CompartmentRuntimeData* compartmentRuntimeData
+		= getCompartmentRuntimeData(contextRuntimeData);
+	return compartmentRuntimeData->compartment;
 }
 
 ContextRuntimeData* Runtime::getContextRuntimeData(const Context* context)
@@ -108,4 +178,11 @@ Memory* Runtime::getMemoryFromRuntimeData(ContextRuntimeData* contextRuntimeData
 	Compartment* compartment = getCompartmentRuntimeData(contextRuntimeData)->compartment;
 	Lock<Platform::Mutex> compartmentLock(compartment->mutex);
 	return compartment->memories[memoryId];
+}
+
+Foreign* Runtime::createForeign(Compartment* compartment, void* userData, void (*finalizer)(void*))
+{
+	Foreign* foreign = new Foreign(compartment);
+	setUserData(foreign, userData, finalizer);
+	return foreign;
 }

@@ -23,14 +23,31 @@ namespace WAVM { namespace IR {
 	{
 		Uptr memoryIndex;
 	};
+	struct MemoryCopyImm
+	{
+		Uptr sourceMemoryIndex;
+		Uptr destMemoryIndex;
+	};
 	struct TableImm
 	{
 		Uptr tableIndex;
+	};
+	struct TableCopyImm
+	{
+		Uptr sourceTableIndex;
+		Uptr destTableIndex;
 	};
 
 	struct ControlStructureImm
 	{
 		IndexedBlockType type;
+	};
+
+	struct SelectImm
+	{
+		// ValueType::any represents a legacy select with the type inferred from the first operand
+		// following the condition.
+		ValueType type;
 	};
 
 	struct BranchImm
@@ -126,8 +143,11 @@ namespace WAVM { namespace IR {
 		ENUM_OPERATORS(VISIT_OPCODE)
 #undef VISIT_OPCODE
 
-			maxSingleByteOpcode
-		= 0xdf,
+	};
+
+	enum : U16
+	{
+		maxSingleByteOpcode = 0xdf,
 	};
 
 	PACKED_STRUCT(template<typename Imm> struct OpcodeAndImm {
@@ -173,7 +193,7 @@ namespace WAVM { namespace IR {
 	}
 				ENUM_OPERATORS(VISIT_OPCODE)
 #undef VISIT_OPCODE
-			default: nextByte += sizeof(Opcode); return visitor.unknown(opcode);
+			default: WAVM_UNREACHABLE();
 			}
 		}
 

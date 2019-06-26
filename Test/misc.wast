@@ -204,7 +204,7 @@
       local.tee $2
       f64.ceil
       local.get $10
-      f32x4.convert_i32_sx4
+      f32x4.convert_i32x4_s
       local.get $5
       global.get $10
       i64.rotr
@@ -370,3 +370,73 @@
 		)
 	"expected '('"
 	)
+
+;; Test for the bug fixed by https://reviews.llvm.org/D57871
+(module
+	(func (export "testLLVM-D57871") (param $a v128) (result v128)
+		(i16x8.eq (f32x4.convert_i32x4_s (local.get $a))
+		          (v128.const i16x8 0 0 0 0 0 0 0 0))
+	)
+)
+(assert_return (invoke "testLLVM-D57871" (v128.const i32x4 0 0 0 0))     (v128.const i16x8 -1 -1 -1 -1 -1 -1 -1 -1))
+(assert_return (invoke "testLLVM-D57871" (v128.const i32x4 1 1 1 1))     (v128.const i16x8 -1 0 -1 0 -1 0 -1 0))
+
+
+;; Test for the bug fixed by https://reviews.llvm.org/D58049
+(module $m (func (export "f")))
+(register "m" $m)
+(module
+	(func $f (import "m" "f"))
+	(func (export "testLLVM-D58049") (param $x i32) (result i32)
+		(i32.or
+			(i32.shr_u (ref.is_null (ref.func $f)) (local.get $x))
+			(i32.shl   (ref.is_null (ref.func $f)) (i32.const 1))
+			)
+	)
+)
+(assert_return (invoke "testLLVM-D58049" (i32.const 0)) (i32.const 0))
+
+
+;; Test for the bug reported here: https://bugs.llvm.org/show_bug.cgi?id=40793
+(module
+	(type $2 (func (param funcref v128)))
+	(memory $4  1024 65536 shared)
+	;;(global $11  (mut v128) (v128.const i32x4 0xb3ce8331 0x45c113c5 0xe339424d 0x743a15f1))
+	(global $11 (mut i32) (i32.const 0xb3ce))
+
+	(func $15 (type $2)
+		(param $0 funcref)
+		(param $1 v128)
+		v128.const i32x4 0xc6046244 0xbdc49765 0x7fddc966 0x48629ec2
+		global.get $11
+		i16x8.shr_u
+		f64x2.abs
+		i16x8.extract_lane_s 5
+		i64.load8_u
+		br 0
+	)
+)
+
+;; Test for the bug reported here: https://bugs.llvm.org/show_bug.cgi?id=41066
+(module
+	(memory 1024 65536 shared)
+
+	(func
+		(param $0 v128)
+		
+		(i32.load8_u
+			(i32x4.extract_lane 2
+				(f64x2.min
+					(f64x2.convert_i64x2_s		
+						(i16x8.gt_s
+							(local.get $0)
+							(local.get $0)
+							)
+						)
+					(local.get $0)
+					)
+				)
+			)
+		br 0
+	)
+)

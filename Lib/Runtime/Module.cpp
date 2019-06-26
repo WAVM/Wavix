@@ -43,7 +43,13 @@ static Value evaluateInitializer(const std::vector<Global*>& moduleGlobals,
 		return IR::Value(global->type.valueType, global->initialValue);
 	}
 	case InitializerExpression::Type::ref_null: return nullptr;
-	default: Errors::unreachable();
+
+	case InitializerExpression::Type::ref_func:
+		// instantiateModule delays evaluating ref.func initializers until the module is loaded and
+		// we have addresses for its functions.
+
+	case InitializerExpression::Type::invalid:
+	default: WAVM_UNREACHABLE();
 	};
 }
 
@@ -61,6 +67,8 @@ ModuleRef Runtime::loadPrecompiledModule(const IR::Module& irModule,
 	return std::make_shared<Module>(IR::Module(irModule), std::vector<U8>(objectCode));
 }
 
+const IR::Module& Runtime::getModuleIR(ModuleConstRefParam module) { return module->ir; }
+
 ModuleInstance::~ModuleInstance()
 {
 	if(id != UINTPTR_MAX)
@@ -75,9 +83,6 @@ ModuleInstance* Runtime::instantiateModule(Compartment* compartment,
 										   ImportBindings&& imports,
 										   std::string&& moduleDebugName)
 {
-	dummyReferenceAtomics();
-	dummyReferenceWAVMIntrinsics();
-
 	Uptr id = UINTPTR_MAX;
 	{
 		Lock<Platform::Mutex> compartmentLock(compartment->mutex);
@@ -85,52 +90,73 @@ ModuleInstance* Runtime::instantiateModule(Compartment* compartment,
 	}
 	if(id == UINTPTR_MAX) { return nullptr; }
 
-	// Check the type of the ModuleInstance's imports.
-	std::vector<Function*> functions = std::move(imports.functions);
-	errorUnless(functions.size() == module->ir.functions.imports.size());
-	for(Uptr importIndex = 0; importIndex < module->ir.functions.imports.size(); ++importIndex)
+	std::vector<Function*> functions;
+	std::vector<Table*> tables;
+	std::vector<Memory*> memories;
+	std::vector<Global*> globals;
+	std::vector<ExceptionType*> exceptionTypes;
+
+	// Check the types of the ModuleInstance's imports.
+	errorUnless(imports.size() == module->ir.imports.size());
+	for(Uptr importIndex = 0; importIndex < imports.size(); ++importIndex)
 	{
-		Object* importObject = asObject(functions[importIndex]);
-		errorUnless(
-			isA(importObject, module->ir.types[module->ir.functions.getType(importIndex).index]));
+		const auto& kindIndex = module->ir.imports[importIndex];
+		Object* importObject = imports[importIndex];
+
 		errorUnless(isInCompartment(importObject, compartment));
+		errorUnless(importObject->kind == ObjectKind(kindIndex.kind));
+
+		switch(kindIndex.kind)
+		{
+		case ExternKind::function:
+		{
+			Function* function = asFunction(importObject);
+			const auto& importType
+				= module->ir.types[module->ir.functions.getType(kindIndex.index).index];
+			errorUnless(function->encodedType == importType);
+			functions.push_back(function);
+			break;
+		}
+		case ExternKind::table:
+		{
+			Table* table = asTable(importObject);
+			errorUnless(isSubtype(table->type, module->ir.tables.getType(kindIndex.index)));
+			tables.push_back(table);
+			break;
+		}
+		case ExternKind::memory:
+		{
+			Memory* memory = asMemory(importObject);
+			errorUnless(isSubtype(memory->type, module->ir.memories.getType(kindIndex.index)));
+			memories.push_back(memory);
+			break;
+		}
+		case ExternKind::global:
+		{
+			Global* global = asGlobal(importObject);
+			errorUnless(isSubtype(global->type, module->ir.globals.getType(kindIndex.index)));
+			globals.push_back(global);
+			break;
+		}
+		case ExternKind::exceptionType:
+		{
+			ExceptionType* exceptionType = asExceptionType(importObject);
+			errorUnless(isSubtype(exceptionType->sig.params,
+								  module->ir.exceptionTypes.getType(kindIndex.index).params));
+			exceptionTypes.push_back(exceptionType);
+			break;
+		}
+
+		case ExternKind::invalid:
+		default: WAVM_UNREACHABLE();
+		};
 	}
 
-	std::vector<Table*> tables = std::move(imports.tables);
-	errorUnless(tables.size() == module->ir.tables.imports.size());
-	for(Uptr importIndex = 0; importIndex < module->ir.tables.imports.size(); ++importIndex)
-	{
-		Object* importObject = asObject(tables[importIndex]);
-		errorUnless(isA(importObject, module->ir.tables.getType(importIndex)));
-		errorUnless(isInCompartment(importObject, compartment));
-	}
-
-	std::vector<Memory*> memories = std::move(imports.memories);
-	errorUnless(memories.size() == module->ir.memories.imports.size());
-	for(Uptr importIndex = 0; importIndex < module->ir.memories.imports.size(); ++importIndex)
-	{
-		Object* importObject = asObject(memories[importIndex]);
-		errorUnless(isA(importObject, module->ir.memories.getType(importIndex)));
-		errorUnless(isInCompartment(importObject, compartment));
-	}
-
-	std::vector<Global*> globals = std::move(imports.globals);
-	errorUnless(globals.size() == module->ir.globals.imports.size());
-	for(Uptr importIndex = 0; importIndex < module->ir.globals.imports.size(); ++importIndex)
-	{
-		Object* importObject = asObject(globals[importIndex]);
-		errorUnless(isA(importObject, module->ir.globals.getType(importIndex)));
-		errorUnless(isInCompartment(importObject, compartment));
-	}
-
-	std::vector<ExceptionType*> exceptionTypes = std::move(imports.exceptionTypes);
-	errorUnless(exceptionTypes.size() == module->ir.exceptionTypes.imports.size());
-	for(Uptr importIndex = 0; importIndex < module->ir.exceptionTypes.imports.size(); ++importIndex)
-	{
-		Object* importObject = asObject(exceptionTypes[importIndex]);
-		errorUnless(isA(importObject, module->ir.exceptionTypes.getType(importIndex)));
-		errorUnless(isInCompartment(importObject, compartment));
-	}
+	wavmAssert(functions.size() == module->ir.functions.imports.size());
+	wavmAssert(tables.size() == module->ir.tables.imports.size());
+	wavmAssert(memories.size() == module->ir.memories.imports.size());
+	wavmAssert(globals.size() == module->ir.globals.imports.size());
+	wavmAssert(exceptionTypes.size() == module->ir.exceptionTypes.imports.size());
 
 	// Deserialize the disassembly names.
 	DisassemblyNames disassemblyNames;
@@ -142,7 +168,7 @@ ModuleInstance* Runtime::instantiateModule(Compartment* compartment,
 		std::string debugName
 			= disassemblyNames.tables[module->ir.tables.imports.size() + tableDefIndex];
 		auto table = createTable(
-			compartment, module->ir.tables.defs[tableDefIndex].type, std::move(debugName));
+			compartment, module->ir.tables.defs[tableDefIndex].type, nullptr, std::move(debugName));
 		if(!table) { throwException(ExceptionTypes::outOfMemory); }
 		tables.push_back(table);
 	}
@@ -189,7 +215,11 @@ ModuleInstance* Runtime::instantiateModule(Compartment* compartment,
 	// Set up the values to bind to the symbols in the LLVMJIT object code.
 	HashMap<std::string, LLVMJIT::FunctionBinding> wavmIntrinsicsExportMap;
 	for(const HashMapPair<std::string, Intrinsics::Function*>& intrinsicFunctionPair :
-		Intrinsics::getUninstantiatedFunctions(INTRINSIC_MODULE_REF(wavmIntrinsics)))
+		Intrinsics::getUninstantiatedFunctions({INTRINSIC_MODULE_REF(wavmIntrinsics),
+												INTRINSIC_MODULE_REF(wavmIntrinsicsAtomics),
+												INTRINSIC_MODULE_REF(wavmIntrinsicsException),
+												INTRINSIC_MODULE_REF(wavmIntrinsicsMemory),
+												INTRINSIC_MODULE_REF(wavmIntrinsicsTable)}))
 	{
 		LLVMJIT::FunctionBinding functionBinding{
 			intrinsicFunctionPair.value->getCallingConvention(),
@@ -266,6 +296,7 @@ ModuleInstance* Runtime::instantiateModule(Compartment* compartment,
 
 	// Set up the instance's exports.
 	HashMap<std::string, Object*> exportMap;
+	std::vector<Object*> exports;
 	for(const Export& exportIt : module->ir.exports)
 	{
 		Object* exportedObject = nullptr;
@@ -276,34 +307,21 @@ ModuleInstance* Runtime::instantiateModule(Compartment* compartment,
 		case IR::ExternKind::memory: exportedObject = memories[exportIt.index]; break;
 		case IR::ExternKind::global: exportedObject = globals[exportIt.index]; break;
 		case IR::ExternKind::exceptionType: exportedObject = exceptionTypes[exportIt.index]; break;
-		default: Errors::unreachable();
+
+		case IR::ExternKind::invalid:
+		default: WAVM_UNREACHABLE();
 		}
 		exportMap.addOrFail(exportIt.name, exportedObject);
+		exports.push_back(exportedObject);
 	}
 
-	// Copy the module's passive data and table segments into the ModuleInstance for later use.
-	PassiveDataSegmentMap passiveDataSegments;
-	PassiveElemSegmentMap passiveElemSegments;
-	for(Uptr segmentIndex = 0; segmentIndex < module->ir.dataSegments.size(); ++segmentIndex)
-	{
-		const DataSegment& dataSegment = module->ir.dataSegments[segmentIndex];
-		if(!dataSegment.isActive)
-		{
-			passiveDataSegments.add(segmentIndex,
-									std::make_shared<std::vector<U8>>(dataSegment.data));
-		}
-	}
-	for(Uptr segmentIndex = 0; segmentIndex < module->ir.elemSegments.size(); ++segmentIndex)
-	{
-		const ElemSegment& elemSegment = module->ir.elemSegments[segmentIndex];
-		if(!elemSegment.isActive)
-		{
-			auto passiveElemSegmentObjects = std::make_shared<std::vector<Object*>>();
-			for(Uptr functionIndex : elemSegment.indices)
-			{ passiveElemSegmentObjects->push_back(asObject(functions[functionIndex])); }
-			passiveElemSegments.add(segmentIndex, passiveElemSegmentObjects);
-		}
-	}
+	// Copy the module's data and elem segments into the ModuleInstance for later use.
+	DataSegmentVector dataSegments;
+	ElemSegmentVector elemSegments;
+	for(const DataSegment& dataSegment : module->ir.dataSegments)
+	{ dataSegments.push_back(dataSegment.isActive ? nullptr : dataSegment.data); }
+	for(const ElemSegment& elemSegment : module->ir.elemSegments)
+	{ elemSegments.push_back(elemSegment.isActive ? nullptr : elemSegment.elems); }
 
 	// Look up the module's start function.
 	Function* startFunction = nullptr;
@@ -317,14 +335,15 @@ ModuleInstance* Runtime::instantiateModule(Compartment* compartment,
 	ModuleInstance* moduleInstance = new ModuleInstance(compartment,
 														id,
 														std::move(exportMap),
+														std::move(exports),
 														std::move(functions),
 														std::move(tables),
 														std::move(memories),
 														std::move(globals),
 														std::move(exceptionTypes),
 														startFunction,
-														std::move(passiveDataSegments),
-														std::move(passiveElemSegments),
+														std::move(dataSegments),
+														std::move(elemSegments),
 														std::move(jitModule),
 														std::move(moduleDebugName));
 	{
@@ -346,70 +365,49 @@ ModuleInstance* Runtime::instantiateModule(Compartment* compartment,
 	}
 
 	// Copy the module's data segments into their designated memory instances.
-	for(const DataSegment& dataSegment : module->ir.dataSegments)
+	for(Uptr segmentIndex = 0; segmentIndex < module->ir.dataSegments.size(); ++segmentIndex)
 	{
+		const DataSegment& dataSegment = module->ir.dataSegments[segmentIndex];
 		if(dataSegment.isActive)
 		{
-			Memory* memory = moduleInstance->memories[dataSegment.memoryIndex];
+			wavmAssert(moduleInstance->dataSegments[segmentIndex] == nullptr);
 
 			const Value baseOffsetValue
 				= evaluateInitializer(moduleInstance->globals, dataSegment.baseOffset);
 			errorUnless(baseOffsetValue.type == ValueType::i32);
 			const U32 baseOffset = baseOffsetValue.i32;
 
-			if(dataSegment.data.size())
-			{
-				Runtime::unwindSignalsAsExceptions([=] {
-					Platform::bytewiseMemCopy(memory->baseAddress + baseOffset,
-											  dataSegment.data.data(),
-											  dataSegment.data.size());
-				});
-			}
-			else
-			{
-				// WebAssembly still expects out-of-bounds errors if the segment base offset is
-				// out-of-bounds, even if the segment is empty.
-				if(baseOffset > memory->numPages * IR::numBytesPerPage)
-				{
-					throwException(Runtime::ExceptionTypes::outOfBoundsMemoryAccess,
-								   {memory, U64(baseOffset)});
-				}
-			}
+			initDataSegment(moduleInstance,
+							segmentIndex,
+							dataSegment.data.get(),
+							moduleInstance->memories[dataSegment.memoryIndex],
+							baseOffset,
+							0,
+							dataSegment.data->size());
 		}
 	}
 
 	// Copy the module's elem segments into their designated table instances.
-	for(const ElemSegment& elemSegment : module->ir.elemSegments)
+	for(Uptr segmentIndex = 0; segmentIndex < module->ir.elemSegments.size(); ++segmentIndex)
 	{
+		const ElemSegment& elemSegment = module->ir.elemSegments[segmentIndex];
 		if(elemSegment.isActive)
 		{
-			Table* table = moduleInstance->tables[elemSegment.tableIndex];
+			wavmAssert(moduleInstance->elemSegments[segmentIndex] == nullptr);
 
 			const Value baseOffsetValue
 				= evaluateInitializer(moduleInstance->globals, elemSegment.baseOffset);
 			errorUnless(baseOffsetValue.type == ValueType::i32);
 			const U32 baseOffset = baseOffsetValue.i32;
 
-			if(elemSegment.indices.size())
-			{
-				for(Uptr index = 0; index < elemSegment.indices.size(); ++index)
-				{
-					const Uptr functionIndex = elemSegment.indices[index];
-					wavmAssert(functionIndex < moduleInstance->functions.size());
-					Function* function = moduleInstance->functions[functionIndex];
-					setTableElement(table, baseOffset + index, asObject(function));
-				}
-			}
-			else
-			{
-				// WebAssembly still expects out-of-bounds errors if the segment base offset is
-				// out-of-bounds, even if the segment is empty.
-				if(baseOffset > getTableNumElements(table))
-				{
-					throwException(Runtime::ExceptionTypes::outOfBoundsTableAccess,
-								   {table, U64(baseOffset)});
-				}
-			}
+			Table* table = moduleInstance->tables[elemSegment.tableIndex];
+			initElemSegment(moduleInstance,
+							segmentIndex,
+							elemSegment.elems.get(),
+							table,
+							baseOffset,
+							0,
+							elemSegment.elems->size());
 		}
 	}
 
@@ -423,6 +421,9 @@ ModuleInstance* Runtime::cloneModuleInstance(ModuleInstance* moduleInstance,
 	HashMap<std::string, Object*> newExportMap;
 	for(const auto& pair : moduleInstance->exportMap)
 	{ newExportMap.add(pair.key, remapToClonedCompartment(pair.value, newCompartment)); }
+	std::vector<Object*> newExports;
+	for(Object* exportObject : moduleInstance->exports)
+	{ newExports.push_back(remapToClonedCompartment(exportObject, newCompartment)); }
 
 	std::vector<Function*> newFunctions = moduleInstance->functions;
 
@@ -445,21 +446,16 @@ ModuleInstance* Runtime::cloneModuleInstance(ModuleInstance* moduleInstance,
 	Function* newStartFunction
 		= remapToClonedCompartment(moduleInstance->startFunction, newCompartment);
 
-	PassiveDataSegmentMap newPassiveDataSegments;
+	DataSegmentVector newDataSegments;
 	{
-		Lock<Platform::Mutex> passiveDataSegmentsLock(moduleInstance->passiveDataSegmentsMutex);
-		newPassiveDataSegments = moduleInstance->passiveDataSegments;
+		Lock<Platform::Mutex> passiveDataSegmentsLock(moduleInstance->dataSegmentsMutex);
+		newDataSegments = moduleInstance->dataSegments;
 	}
 
-	PassiveElemSegmentMap newPassiveElemSegments;
+	ElemSegmentVector newElemSegments;
 	{
-		Lock<Platform::Mutex> passiveDataSegmentsLock(moduleInstance->passiveDataSegmentsMutex);
-		newPassiveDataSegments = moduleInstance->passiveDataSegments;
-	}
-	for(const auto& pair : newPassiveElemSegments)
-	{
-		for(Uptr index = 0; index < pair.value->size(); ++index)
-		{ (*pair.value)[index] = remapToClonedCompartment((*pair.value)[index], newCompartment); }
+		Lock<Platform::Mutex> passiveElemSegmentsLock(moduleInstance->elemSegmentsMutex);
+		newElemSegments = moduleInstance->elemSegments;
 	}
 
 	// Create the new ModuleInstance in the cloned compartment, but with the same ID as the old one.
@@ -467,14 +463,15 @@ ModuleInstance* Runtime::cloneModuleInstance(ModuleInstance* moduleInstance,
 	ModuleInstance* newModuleInstance = new ModuleInstance(newCompartment,
 														   moduleInstance->id,
 														   std::move(newExportMap),
+														   std::move(newExports),
 														   std::move(newFunctions),
 														   std::move(newTables),
 														   std::move(newMemories),
 														   std::move(newGlobals),
 														   std::move(newExceptionTypes),
 														   std::move(newStartFunction),
-														   std::move(newPassiveDataSegments),
-														   std::move(newPassiveElemSegments),
+														   std::move(newDataSegments),
+														   std::move(newElemSegments),
 														   std::move(jitModuleCopy),
 														   std::string(moduleInstance->debugName));
 	{
@@ -485,23 +482,28 @@ ModuleInstance* Runtime::cloneModuleInstance(ModuleInstance* moduleInstance,
 	return newModuleInstance;
 }
 
-Function* Runtime::getStartFunction(ModuleInstance* moduleInstance)
+Function* Runtime::getStartFunction(const ModuleInstance* moduleInstance)
 {
 	return moduleInstance->startFunction;
 }
 
-Memory* Runtime::getDefaultMemory(ModuleInstance* moduleInstance)
+Memory* Runtime::getDefaultMemory(const ModuleInstance* moduleInstance)
 {
 	return moduleInstance->memories.size() ? moduleInstance->memories[0] : nullptr;
 }
-Table* Runtime::getDefaultTable(ModuleInstance* moduleInstance)
+Table* Runtime::getDefaultTable(const ModuleInstance* moduleInstance)
 {
 	return moduleInstance->tables.size() ? moduleInstance->tables[0] : nullptr;
 }
 
-Object* Runtime::getInstanceExport(ModuleInstance* moduleInstance, const std::string& name)
+Object* Runtime::getInstanceExport(const ModuleInstance* moduleInstance, const std::string& name)
 {
 	wavmAssert(moduleInstance);
 	Object* const* exportedObjectPtr = moduleInstance->exportMap.get(name);
 	return exportedObjectPtr ? *exportedObjectPtr : nullptr;
+}
+
+const std::vector<Object*>& Runtime::getInstanceExports(const ModuleInstance* moduleInstance)
+{
+	return moduleInstance->exports;
 }

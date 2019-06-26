@@ -27,6 +27,17 @@ using namespace WAVM::IR;
 using namespace WAVM::LLVMJIT;
 
 static HashMap<std::string, const char*> runtimeSymbolMap = {
+	// LLVM usually won't use these, but may generate a call to them if the target doesn't have
+	// anything better.
+	{"ceilf", "ceilf"},
+	{"ceil", "ceil"},
+	{"floorf", "floorf"},
+	{"floor", "floor"},
+	{"truncf", "truncf"},
+	{"trunc", "trunc"},
+	{"rintf", "rintf"},
+	{"rint", "rint"},
+
 #ifdef _WIN32
 	// the LLVM X86 code generator calls __chkstk when allocating more than 4KB of stack space
 	{"__chkstk", "__chkstk"},
@@ -94,7 +105,7 @@ LLVMContext::LLVMContext()
 	{
 	case 4: iptrType = i32Type; break;
 	case 8: iptrType = i64Type; break;
-	default: Errors::unreachable();
+	default: WAVM_UNREACHABLE();
 	}
 
 	anyrefType = llvm::StructType::create("Object", i8Type)->getPointerTo();

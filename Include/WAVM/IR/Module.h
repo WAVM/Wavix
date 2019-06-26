@@ -29,7 +29,7 @@ namespace WAVM { namespace IR {
 			global_get = 0x0023,
 			ref_null = 0x00d0,
 			ref_func = 0x00d2,
-			error = 0xffff
+			invalid = 0xffff
 		};
 		union
 		{
@@ -45,7 +45,7 @@ namespace WAVM { namespace IR {
 			V128 v128;
 			Ref ref;
 		};
-		InitializerExpressionBase() : type(Type::error) {}
+		InitializerExpressionBase() : type(Type::invalid) {}
 		InitializerExpressionBase(I32 inI32) : type(Type::i32_const), i32(inI32) {}
 		InitializerExpressionBase(I64 inI64) : type(Type::i64_const), i64(inI64) {}
 		InitializerExpressionBase(F32 inF32) : type(Type::f32_const), f32(inF32) {}
@@ -69,12 +69,13 @@ namespace WAVM { namespace IR {
 			// comparison can't distinguish when NaNs are identical.
 			case Type::f32_const: return a.i32 == b.i32;
 			case Type::f64_const: return a.i64 == b.i64;
-			case Type::v128_const: return a.v128 == b.v128;
+			case Type::v128_const:
+				return a.v128.u64[0] == b.v128.u64[0] && a.v128.u64[1] == b.v128.u64[1];
 			case Type::global_get: return a.ref == b.ref;
 			case Type::ref_null: return true;
 			case Type::ref_func: return a.ref == b.ref;
-			case Type::error: return true;
-			default: Errors::unreachable();
+			case Type::invalid: return true;
+			default: WAVM_UNREACHABLE();
 			};
 		}
 
@@ -135,10 +136,20 @@ namespace WAVM { namespace IR {
 	typedef Import<GlobalType> GlobalImport;
 	typedef Import<ExceptionType> ExceptionTypeImport;
 
-	// Describes an export from a module. The interpretation of index depends on kind
+	// Describes an export from a module.
 	struct Export
 	{
 		std::string name;
+
+		ExternKind kind;
+
+		// An index into the module's kind-specific IndexSpace.
+		Uptr index;
+	};
+
+	// Identifies an element of a kind-specific IndexSpace in a module.
+	struct KindAndIndex
+	{
 		ExternKind kind;
 		Uptr index;
 	};
@@ -150,17 +161,57 @@ namespace WAVM { namespace IR {
 		bool isActive;
 		Uptr memoryIndex;
 		InitializerExpression baseOffset;
-		std::vector<U8> data;
+		std::shared_ptr<std::vector<U8>> data;
 	};
 
-	// An elem segment: a literal sequence of function indices that is copied into a Runtime::Table
-	// when instantiating a module
+	// An elem: a literal reference used to initialize a table element.
+	struct Elem
+	{
+		enum class Type
+		{
+			// These must match the corresponding Opcode members.
+			ref_null = 0xd0,
+			ref_func = 0xd2
+		};
+		union
+		{
+			Type type;
+			Opcode typeOpcode;
+		};
+		Uptr index;
+
+		friend bool operator==(const Elem& a, const Elem& b)
+		{
+			if(a.type != b.type) { return false; }
+			switch(a.type)
+			{
+			case Elem::Type::ref_func: return a.index == b.index;
+			case Elem::Type::ref_null:
+			default: return true;
+			}
+		}
+
+		friend bool operator!=(const Elem& a, const Elem& b)
+		{
+			if(a.type != b.type) { return true; }
+			switch(a.type)
+			{
+			case Elem::Type::ref_func: return a.index != b.index;
+			case Elem::Type::ref_null:
+			default: return false;
+			}
+		}
+	};
+
+	// An elem segment: a literal sequence of elems that is copied into a Runtime::Table when
+	// instantiating a module
 	struct ElemSegment
 	{
 		bool isActive;
 		Uptr tableIndex;
 		InitializerExpression baseOffset;
-		std::vector<Uptr> indices;
+		ReferenceType elemType;
+		std::shared_ptr<std::vector<Elem>> elems;
 	};
 
 	// A user-defined module section as an array of bytes
@@ -215,6 +266,7 @@ namespace WAVM { namespace IR {
 		IndexSpace<GlobalDef, GlobalType> globals;
 		IndexSpace<ExceptionTypeDef, ExceptionType> exceptionTypes;
 
+		std::vector<KindAndIndex> imports;
 		std::vector<Export> exports;
 		std::vector<DataSegment> dataSegments;
 		std::vector<ElemSegment> elemSegments;
@@ -254,7 +306,7 @@ namespace WAVM { namespace IR {
 		case IndexedBlockType::noParametersOrResult: return FunctionType();
 		case IndexedBlockType::oneResult: return FunctionType(TypeTuple(indexedType.resultType));
 		case IndexedBlockType::functionType: return module.types[indexedType.index];
-		default: Errors::unreachable();
+		default: WAVM_UNREACHABLE();
 		};
 	}
 
@@ -274,6 +326,8 @@ namespace WAVM { namespace IR {
 		std::vector<std::string> tables;
 		std::vector<std::string> memories;
 		std::vector<std::string> globals;
+		std::vector<std::string> elemSegments;
+		std::vector<std::string> dataSegments;
 		std::vector<std::string> exceptionTypes;
 	};
 

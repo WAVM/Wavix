@@ -37,6 +37,12 @@
 	__pragma(warning(disable : 4702));
 
 #define POP_DISABLE_WARNINGS_FOR_LLVM_HEADERS __pragma(warning(pop));
+#elif __GNUC__
+#define PUSH_DISABLE_WARNINGS_FOR_LLVM_HEADERS                                                     \
+	_Pragma("GCC diagnostic push");                                                                \
+	_Pragma("GCC diagnostic ignored \"-Wswitch-enum\"");                                           \
+	_Pragma("GCC diagnostic ignored \"-Wswitch-default\"");
+#define POP_DISABLE_WARNINGS_FOR_LLVM_HEADERS _Pragma("GCC diagnostic pop");
 #else
 #define PUSH_DISABLE_WARNINGS_FOR_LLVM_HEADERS
 #define POP_DISABLE_WARNINGS_FOR_LLVM_HEADERS
@@ -95,10 +101,10 @@ namespace WAVM { namespace LLVMJIT {
 		llvm::Type* anyrefType;
 
 		// Zero constants of each type.
-		llvm::Constant* typedZeroConstants[(Uptr)IR::ValueType::num];
+		llvm::Constant* typedZeroConstants[IR::numValueTypes];
 
 		// Maps a type ID to the corresponding LLVM type.
-		llvm::Type* valueTypes[Uptr(IR::ValueType::num)];
+		llvm::Type* valueTypes[IR::numValueTypes];
 
 		LLVMContext();
 	};
@@ -147,7 +153,7 @@ namespace WAVM { namespace LLVMJIT {
 	// Converts a WebAssembly type to a LLVM type.
 	inline llvm::Type* asLLVMType(LLVMContext& llvmContext, IR::ValueType type)
 	{
-		wavmAssert(type < IR::ValueType::num);
+		wavmAssert(type < (IR::ValueType)IR::numValueTypes);
 		return llvmContext.valueTypes[Uptr(type)];
 	}
 
@@ -199,15 +205,29 @@ namespace WAVM { namespace LLVMJIT {
 										  IR::FunctionType functionType,
 										  IR::CallingConvention callingConvention)
 	{
-		const Uptr numImplicitParameters = callingConvention == IR::CallingConvention::c ? 0 : 1;
-		const Uptr numParameters = numImplicitParameters + functionType.params().size();
-		auto llvmArgTypes = (llvm::Type**)alloca(sizeof(llvm::Type*) * numParameters);
-		if(callingConvention != IR::CallingConvention::c)
-		{ llvmArgTypes[0] = llvmContext.i8PtrType; }
-		for(Uptr argIndex = 0; argIndex < functionType.params().size(); ++argIndex)
+		Uptr numParameters;
+		llvm::Type** llvmArgTypes;
+		if(callingConvention == IR::CallingConvention::cAPICallback)
 		{
-			llvmArgTypes[argIndex + numImplicitParameters]
-				= asLLVMType(llvmContext, functionType.params()[argIndex]);
+			numParameters = 2;
+			llvmArgTypes = (llvm::Type**)alloca(sizeof(llvm::Type*) * numParameters);
+			llvmArgTypes[0] = llvmContext.i8PtrType;
+			llvmArgTypes[1] = llvmContext.i8PtrType;
+		}
+		else
+		{
+			const Uptr numImplicitParameters
+				= callingConvention == IR::CallingConvention::c ? 0 : 1;
+			numParameters = numImplicitParameters + functionType.params().size();
+			llvmArgTypes = (llvm::Type**)alloca(sizeof(llvm::Type*) * numParameters);
+			if(callingConvention != IR::CallingConvention::c)
+			{ llvmArgTypes[0] = llvmContext.i8PtrType; }
+
+			for(Uptr argIndex = 0; argIndex < functionType.params().size(); ++argIndex)
+			{
+				llvmArgTypes[argIndex + numImplicitParameters]
+					= asLLVMType(llvmContext, functionType.params()[argIndex]);
+			}
 		}
 
 		llvm::Type* llvmReturnType;
@@ -217,6 +237,7 @@ namespace WAVM { namespace LLVMJIT {
 			llvmReturnType = getLLVMReturnStructType(llvmContext, functionType.results());
 			break;
 
+		case IR::CallingConvention::cAPICallback:
 		case IR::CallingConvention::intrinsicWithContextSwitch:
 			llvmReturnType = llvmContext.i8PtrType;
 			break;
@@ -231,7 +252,7 @@ namespace WAVM { namespace LLVMJIT {
 			}
 			break;
 
-		default: Errors::unreachable();
+		default: WAVM_UNREACHABLE();
 		};
 		return llvm::FunctionType::get(
 			llvmReturnType, llvm::ArrayRef<llvm::Type*>(llvmArgTypes, numParameters), false);
@@ -245,9 +266,10 @@ namespace WAVM { namespace LLVMJIT {
 
 		case IR::CallingConvention::intrinsic:
 		case IR::CallingConvention::intrinsicWithContextSwitch:
+		case IR::CallingConvention::cAPICallback:
 		case IR::CallingConvention::c: return llvm::CallingConv::C;
 
-		default: Errors::unreachable();
+		default: WAVM_UNREACHABLE();
 		}
 	}
 
@@ -295,6 +317,20 @@ namespace WAVM { namespace LLVMJIT {
 					  "Function prefix must match Runtime::Function layout");
 		static_assert(offsetof(Runtime::Function, code) == sizeof(Uptr) * 4,
 					  "Function prefix must match Runtime::Function layout");
+	}
+
+	inline void setFramePointerAttribute(llvm::Function* function)
+	{
+#ifndef _WIN32
+		auto attrs = function->getAttributes();
+		// LLVM 9+ has a more general purpose frame-pointer=(all|non-leaf|none) attribute that WAVM
+		// should use once we can depend on it.
+		attrs = attrs.addAttribute(function->getContext(),
+								   llvm::AttributeList::FunctionIndex,
+								   "no-frame-pointer-elim",
+								   "true");
+		function->setAttributes(attrs);
+#endif
 	}
 
 	// Functions that map between the symbols used for externally visible functions and the function

@@ -19,6 +19,8 @@
 #include "WAVM/Inline/Serialization.h"
 #include "WAVM/Inline/Timing.h"
 #include "WAVM/Logging/Logging.h"
+#include "WAVM/Platform/File.h"
+#include "WAVM/Platform/Memory.h"
 #include "WAVM/Runtime/Linker.h"
 #include "WAVM/Runtime/Runtime.h"
 #include "WAVM/ThreadTest/ThreadTest.h"
@@ -54,7 +56,7 @@ struct RootResolver : Resolver
 								"Resolved import %s.%s to a %s, but was expecting %s\n",
 								moduleName.c_str(),
 								exportName.c_str(),
-								asString(getObjectType(outObject)).c_str(),
+								asString(getExternType(outObject)).c_str(),
 								asString(type).c_str());
 					return false;
 				}
@@ -106,8 +108,8 @@ struct RootResolver : Resolver
 		}
 		case IR::ExternKind::table:
 		{
-			return asObject(
-				Runtime::createTable(compartment, asTableType(type), std::string(exportName)));
+			return asObject(Runtime::createTable(
+				compartment, asTableType(type), nullptr, std::string(exportName)));
 		}
 		case IR::ExternKind::global:
 		{
@@ -118,7 +120,9 @@ struct RootResolver : Resolver
 			return asObject(
 				Runtime::createExceptionType(compartment, asExceptionType(type), "importStub"));
 		}
-		default: Errors::unreachable();
+
+		case IR::ExternKind::invalid:
+		default: WAVM_UNREACHABLE();
 		};
 	}
 };
@@ -212,6 +216,10 @@ static int run(const CommandLineOptions& options)
 			rootResolver.moduleNameToInstanceMap.set("env", emscriptenInstance->env);
 			rootResolver.moduleNameToInstanceMap.set("asm2wasm", emscriptenInstance->asm2wasm);
 			rootResolver.moduleNameToInstanceMap.set("global", emscriptenInstance->global);
+
+			emscriptenInstance->stdIn = Platform::getStdFD(Platform::StdDevice::in);
+			emscriptenInstance->stdOut = Platform::getStdFD(Platform::StdDevice::out);
+			emscriptenInstance->stdErr = Platform::getStdFD(Platform::StdDevice::err);
 		}
 	}
 
@@ -245,10 +253,10 @@ static int run(const CommandLineOptions& options)
 	Function* startFunction = getStartFunction(moduleInstance);
 	if(startFunction) { invokeFunctionChecked(context, startFunction, {}); }
 
-	if(options.enableEmscripten)
+	if(emscriptenInstance)
 	{
 		// Call the Emscripten global initalizers.
-		Emscripten::initializeGlobals(context, irModule, moduleInstance);
+		Emscripten::initializeGlobals(emscriptenInstance, context, irModule, moduleInstance);
 	}
 
 	// Look up the function export to call.
@@ -323,7 +331,11 @@ static int run(const CommandLineOptions& options)
 			case ValueType::funcref:
 				Errors::fatalf("Cannot parse command-line argument for %s function parameter",
 							   asString(functionType.params()[i]));
-			default: Errors::unreachable();
+
+			case ValueType::none:
+			case ValueType::any:
+			case ValueType::nullref:
+			default: WAVM_UNREACHABLE();
 			}
 			invokeArgs.push_back(value);
 		}
@@ -440,5 +452,10 @@ int main(int argc, char** argv)
 										Errors::fatalf("Runtime exception: %s",
 													   describeException(exception).c_str());
 									});
+
+	// Log the peak memory usage.
+	Uptr peakMemoryUsage = Platform::getPeakMemoryUsageBytes();
+	Log::printf(Log::metrics, "Peak memory usage: %" PRIuPTR "KB\n", peakMemoryUsage / 1024);
+
 	return result;
 }

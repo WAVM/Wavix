@@ -1,6 +1,5 @@
 #pragma once
 
-#include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/Config.h"
 
 #define SUPPRESS_UNUSED(variable) (void)(variable);
@@ -61,4 +60,22 @@
 #define WAVM_DEBUG 0
 #else
 #define WAVM_DEBUG 1
+#endif
+
+// Define a macro to align a struct that is valid in C99: don't use C++ alignas or C11 _Alignas.
+#if defined(__GNUC__)
+#define ALIGNED_STRUCT(alignment, def) def __attribute__((aligned(alignment)));
+#elif defined(_MSC_VER)
+#define ALIGNED_STRUCT(alignment, def) __declspec(align(alignment)) def;
+#else
+#error Please add a definition of ALIGNED_STRUCT for your toolchain.
+#endif
+
+// Provide a macro to wrap calls to the C standard library functions that disables the MSVC error
+// that they should be replaced by the safer but unportable MSVC secure CRT functions.
+#ifdef _MSC_VER
+#define SCOPED_DISABLE_SECURE_CRT_WARNINGS(code)                                                   \
+	__pragma(warning(push)) __pragma(warning(disable : 4996)) code __pragma(warning(pop))
+#else
+#define SCOPED_DISABLE_SECURE_CRT_WARNINGS(code) code
 #endif

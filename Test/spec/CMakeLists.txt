@@ -7,6 +7,7 @@ set(WASTTests
 	br.wast
 	br_if.wast
 	br_table.wast
+	bulk.wast
 	call.wast
 	call_indirect.wast
 	comments.wast
@@ -48,8 +49,12 @@ set(WASTTests
 	local_tee.wast
 	loop.wast
 	memory.wast
+	memory_copy.wast
+	memory_fill.wast
 	memory_grow.wast
+	memory_init.wast
 	memory_redundancy.wast
+	memory_size.wast
 	memory_trap.wast
 	names.wast
 	nop.wast
@@ -63,12 +68,16 @@ set(WASTTests
 	stack.wast
 	store.wast
 	switch.wast
+	table_copy.wast
+	table_fill.wast
 	table_get.wast
+	table_grow.wast
+	table_init.wast
 	table_set.wast
+	table_size.wast
 	token.wast
 	traps.wast
 	type.wast
-	typecheck.wast
 	unreachable.wast
 	unreached-invalid.wast
 	unwind.wast

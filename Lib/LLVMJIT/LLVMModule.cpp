@@ -56,6 +56,7 @@ namespace WAVM { namespace Runtime {
 using namespace WAVM;
 using namespace WAVM::LLVMJIT;
 
+static Platform::Mutex gdbRegistrationListenerMutex;
 static llvm::JITEventListener* gdbRegistrationListener = nullptr;
 
 // A map from address to loaded JIT symbols.
@@ -195,6 +196,9 @@ struct LLVMJIT::ModuleMemoryManager : llvm::RTDyldMemoryManager
 													   readWriteSection.numPages,
 													   Platform::MemoryAccess::readWrite));
 		}
+
+		// Invalidate the instruction cache.
+		invalidateInstructionCache();
 	}
 	virtual void invalidateInstructionCache()
 	{
@@ -394,9 +398,16 @@ Module::Module(const std::vector<U8>& objectBytes,
 			llvm::StringRef sectionName;
 			if(!section.getName(sectionName))
 			{
+#if LLVM_VERSION_MAJOR >= 9
+				llvm::Expected<llvm::StringRef> sectionContentsOrError = section.getContents();
+				if(sectionContentsOrError)
+				{
+					const llvm::StringRef& sectionContents = sectionContentsOrError.get();
+#else
 				llvm::StringRef sectionContents;
 				if(!section.getContents(sectionContents))
 				{
+#endif
 					const U8* loadedSection = (const U8*)sectionContents.data();
 					if(sectionName == ".pdata")
 					{
@@ -468,14 +479,17 @@ Module::Module(const std::vector<U8>& objectBytes,
 	memoryManager->reallyFinalizeMemory();
 
 	// Notify GDB of the new object.
-	if(!gdbRegistrationListener)
-	{ gdbRegistrationListener = llvm::JITEventListener::createGDBRegistrationListener(); }
+	{
+		Lock<Platform::Mutex> gdbRegistrationListenerLock(gdbRegistrationListenerMutex);
+		if(!gdbRegistrationListener)
+		{ gdbRegistrationListener = llvm::JITEventListener::createGDBRegistrationListener(); }
 #if LLVM_VERSION_MAJOR >= 8
-	gdbRegistrationListener->notifyObjectLoaded(
-		reinterpret_cast<Uptr>(this), *object, *loadedObject);
+		gdbRegistrationListener->notifyObjectLoaded(
+			reinterpret_cast<Uptr>(this), *object, *loadedObject);
 #else
-	gdbRegistrationListener->NotifyObjectEmitted(*object, *loadedObject);
+		gdbRegistrationListener->NotifyObjectEmitted(*object, *loadedObject);
 #endif
+	}
 
 	// Create a DWARF context to interpret the debug information in this compilation unit.
 	auto dwarfContext = llvm::DWARFContext::create(*object, &*loadedObject);
@@ -506,8 +520,16 @@ Module::Module(const std::vector<U8>& objectBytes,
 
 		// Get the DWARF line info for this symbol, which maps machine code addresses to
 		// WebAssembly op indices.
+#if LLVM_VERSION_MAJOR >= 9
+		llvm::Expected<llvm::object::section_iterator> section = symbol.getSection();
+		if(!section) { continue; }
+		llvm::DILineInfoTable lineInfoTable = dwarfContext->getLineInfoForAddressRange(
+			llvm::object::SectionedAddress{loadedAddress, section.get()->getIndex()},
+			symbolSizePair.second);
+#else
 		llvm::DILineInfoTable lineInfoTable
 			= dwarfContext->getLineInfoForAddressRange(loadedAddress, symbolSizePair.second);
+#endif
 		std::map<U32, U32> offsetToOpIndexMap;
 		for(auto lineInfo : lineInfoTable)
 		{ offsetToOpIndexMap.emplace(U32(lineInfo.first - loadedAddress), lineInfo.second.Line); }
@@ -550,11 +572,14 @@ Module::Module(const std::vector<U8>& objectBytes,
 Module::~Module()
 {
 	// Notify GDB that the object is being unloaded.
+	{
+		Lock<Platform::Mutex> gdbRegistrationListenerLock(gdbRegistrationListenerMutex);
 #if LLVM_VERSION_MAJOR >= 8
-	gdbRegistrationListener->notifyFreeingObject(reinterpret_cast<Uptr>(this));
+		gdbRegistrationListener->notifyFreeingObject(reinterpret_cast<Uptr>(this));
 #else
-	gdbRegistrationListener->NotifyFreeingObject(*object);
+		gdbRegistrationListener->NotifyFreeingObject(*object);
 #endif
+	}
 
 	// Remove the module from the global address to module map.
 	Lock<Platform::Mutex> addressToModuleMapLock(addressToModuleMapMutex);

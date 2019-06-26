@@ -7,6 +7,7 @@
 #include <atomic>
 #include <map>
 
+#include "WAVM/IR/Types.h"
 #include "WAVM/IR/Value.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Platform/Diagnostics.h"
@@ -29,16 +30,17 @@ namespace WAVM { namespace Runtime {
 	enum class ObjectKind : U8
 	{
 		// Standard object kinds that may be imported/exported from WebAssembly modules.
-		function = 0,
-		table = 1,
-		memory = 2,
-		global = 3,
-		exceptionType = 4,
+		function = (U8)IR::ExternKind::function,
+		table = (U8)IR::ExternKind::table,
+		memory = (U8)IR::ExternKind::memory,
+		global = (U8)IR::ExternKind::global,
+		exceptionType = (U8)IR::ExternKind::exceptionType,
 
 		// Runtime-specific object kinds that are only used by transient runtime objects.
 		moduleInstance = 5,
 		context = 6,
 		compartment = 7,
+		foreign = 8,
 
 		invalid = 0xff,
 	};
@@ -53,7 +55,7 @@ namespace WAVM { namespace Runtime {
 	static_assert(Uptr(IR::ExternKind::exceptionType) == Uptr(ObjectKind::exceptionType),
 				  "IR::ExternKind::exceptionType != ObjectKind::exceptionType");
 
-#define compartmentReservedBytes (4ull * 1024 * 1024 * 1024)
+#define compartmentReservedBytes (2ull * 1024 * 1024 * 1024)
 
 	enum
 	{
@@ -61,8 +63,8 @@ namespace WAVM { namespace Runtime {
 		maxGlobalBytes = 4096 - maxThunkArgAndReturnBytes,
 		maxMutableGlobals = maxGlobalBytes / sizeof(IR::UntaggedValue),
 		maxMemories = 255,
-		maxTables = (4096 - maxMemories * sizeof(void*) - sizeof(Compartment*)) / sizeof(void*),
-		compartmentRuntimeDataAlignmentLog2 = 32,
+		maxTables = 128 * 1024 - maxMemories - 1,
+		compartmentRuntimeDataAlignmentLog2 = 31,
 		contextRuntimeDataAlignment = 4096
 	};
 
@@ -90,7 +92,7 @@ namespace WAVM { namespace Runtime {
 	enum
 	{
 		maxContexts
-		= 1024 * 1024 - offsetof(CompartmentRuntimeData, contexts) / sizeof(ContextRuntimeData)
+		= 512 * 1024 - offsetof(CompartmentRuntimeData, contexts) / sizeof(ContextRuntimeData)
 	};
 
 	static_assert(offsetof(CompartmentRuntimeData, contexts) % 4096 == 0,
@@ -106,7 +108,24 @@ namespace WAVM { namespace Runtime {
 		ExceptionType* type;
 		U8 isUserException;
 		Platform::CallStack callStack;
+		void* userData;
+		void (*finalizeUserData)(void*);
 		IR::UntaggedValue arguments[1];
+
+		Exception(Uptr inTypeId,
+				  ExceptionType* inType,
+				  bool inIsUserException,
+				  Platform::CallStack&& inCallStack)
+		: typeId(inTypeId)
+		, type(inType)
+		, isUserException(inIsUserException ? 1 : 0)
+		, callStack(std::move(inCallStack))
+		, userData(nullptr)
+		, finalizeUserData(nullptr)
+		{
+		}
+
+		~Exception();
 
 		static Uptr calcNumBytes(Uptr numArguments)
 		{
@@ -120,6 +139,9 @@ namespace WAVM { namespace Runtime {
 		const ObjectKind kind;
 	};
 
+	typedef Runtime::ContextRuntimeData* (*InvokeThunkPointer)(const Runtime::Function*,
+															   Runtime::ContextRuntimeData*);
+
 	// Metadata about a function, used to hold data that can't be emitted directly in an object
 	// file, or must be mutable.
 	struct FunctionMutableData
@@ -130,8 +152,16 @@ namespace WAVM { namespace Runtime {
 		std::atomic<Uptr> numRootReferences{0};
 		std::map<U32, U32> offsetToOpIndexMap;
 		std::string debugName;
+		std::atomic<InvokeThunkPointer> invokeThunk{nullptr};
+		void* userData{nullptr};
+		void (*finalizeUserData)(void*);
 
-		FunctionMutableData(std::string&& inDebugName) : debugName(inDebugName) {}
+		FunctionMutableData(std::string&& inDebugName)
+		: debugName(inDebugName), userData(nullptr), finalizeUserData(nullptr)
+		{
+		}
+
+		~FunctionMutableData();
 	};
 
 	struct Function
@@ -156,7 +186,8 @@ namespace WAVM { namespace Runtime {
 
 	inline CompartmentRuntimeData* getCompartmentRuntimeData(ContextRuntimeData* contextRuntimeData)
 	{
-		return reinterpret_cast<CompartmentRuntimeData*>(reinterpret_cast<Uptr>(contextRuntimeData)
-														 & 0xffffffff00000000);
+		return reinterpret_cast<CompartmentRuntimeData*>(
+			reinterpret_cast<Uptr>(contextRuntimeData)
+			& -(Iptr(1) << compartmentRuntimeDataAlignmentLog2));
 	}
 }}

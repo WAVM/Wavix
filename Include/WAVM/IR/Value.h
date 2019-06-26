@@ -60,7 +60,7 @@ namespace WAVM { namespace IR {
 		{
 		}
 		Value(ValueType inType, UntaggedValue inValue) : UntaggedValue(inValue), type(inType) {}
-		Value() : type(ValueType::any) {}
+		Value() : type(ValueType::none) {}
 
 		friend std::string asString(const Value& value)
 		{
@@ -85,7 +85,10 @@ namespace WAVM { namespace IR {
 				return std::string(buffer);
 			}
 			case ValueType::nullref: return "ref.null";
-			default: Errors::unreachable();
+
+			case ValueType::none:
+			case ValueType::any:
+			default: WAVM_UNREACHABLE();
 			}
 		}
 
@@ -98,15 +101,19 @@ namespace WAVM { namespace IR {
 			}
 			switch(left.type)
 			{
+			case ValueType::none: return true;
 			case ValueType::i32:
 			case ValueType::f32: return left.i32 == right.i32;
 			case ValueType::i64:
 			case ValueType::f64: return left.i64 == right.i64;
-			case ValueType::v128: return left.v128 == right.v128;
+			case ValueType::v128:
+				return left.v128.u64[0] == right.v128.u64[0]
+					   && left.v128.u64[1] == right.v128.u64[1];
 			case ValueType::anyref:
 			case ValueType::funcref: return left.object == right.object;
 			case ValueType::nullref: return true;
-			default: Errors::unreachable();
+			case ValueType::any:
+			default: WAVM_UNREACHABLE();
 			};
 		}
 

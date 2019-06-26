@@ -27,10 +27,12 @@ namespace WAVM { namespace Runtime {
 	struct GCObject : Object
 	{
 		Compartment* const compartment;
-		std::atomic<Uptr> numRootReferences;
+		mutable std::atomic<Uptr> numRootReferences{0};
+		void* userData{nullptr};
+		void (*finalizeUserData)(void*);
 
 		GCObject(ObjectKind inKind, Compartment* inCompartment);
-		virtual ~GCObject() { wavmAssert(numRootReferences.load(std::memory_order_acquire) == 0); }
+		virtual ~GCObject();
 	};
 
 	// An instance of a WebAssembly Table.
@@ -132,6 +134,9 @@ namespace WAVM { namespace Runtime {
 		~ExceptionType() override;
 	};
 
+	typedef std::vector<std::shared_ptr<std::vector<U8>>> DataSegmentVector;
+	typedef std::vector<std::shared_ptr<std::vector<IR::Elem>>> ElemSegmentVector;
+
 	// A compiled WebAssembly module.
 	struct Module
 	{
@@ -144,9 +149,6 @@ namespace WAVM { namespace Runtime {
 		}
 	};
 
-	typedef HashMap<Uptr, std::shared_ptr<std::vector<U8>>> PassiveDataSegmentMap;
-	typedef HashMap<Uptr, std::shared_ptr<std::vector<Object*>>> PassiveElemSegmentMap;
-
 	// An instance of a WebAssembly module.
 	struct ModuleInstance : GCObject
 	{
@@ -154,6 +156,7 @@ namespace WAVM { namespace Runtime {
 		const std::string debugName;
 
 		const HashMap<std::string, Object*> exportMap;
+		const std::vector<Object*> exports;
 
 		const std::vector<Function*> functions;
 		const std::vector<Table*> tables;
@@ -163,39 +166,41 @@ namespace WAVM { namespace Runtime {
 
 		Function* const startFunction;
 
-		mutable Platform::Mutex passiveDataSegmentsMutex;
-		PassiveDataSegmentMap passiveDataSegments;
+		mutable Platform::Mutex dataSegmentsMutex;
+		DataSegmentVector dataSegments;
 
-		mutable Platform::Mutex passiveElemSegmentsMutex;
-		PassiveElemSegmentMap passiveElemSegments;
+		mutable Platform::Mutex elemSegmentsMutex;
+		ElemSegmentVector elemSegments;
 
 		const std::shared_ptr<LLVMJIT::Module> jitModule;
 
 		ModuleInstance(Compartment* inCompartment,
 					   Uptr inID,
 					   HashMap<std::string, Object*>&& inExportMap,
+					   std::vector<Object*>&& inExports,
 					   std::vector<Function*>&& inFunctions,
 					   std::vector<Table*>&& inTables,
 					   std::vector<Memory*>&& inMemories,
 					   std::vector<Global*>&& inGlobals,
 					   std::vector<ExceptionType*>&& inExceptionTypes,
 					   Function* inStartFunction,
-					   PassiveDataSegmentMap&& inPassiveDataSegments,
-					   PassiveElemSegmentMap&& inPassiveElemSegments,
+					   DataSegmentVector&& inPassiveDataSegments,
+					   ElemSegmentVector&& inPassiveElemSegments,
 					   std::shared_ptr<LLVMJIT::Module>&& inJITModule,
 					   std::string&& inDebugName)
 		: GCObject(ObjectKind::moduleInstance, inCompartment)
 		, id(inID)
 		, debugName(std::move(inDebugName))
 		, exportMap(std::move(inExportMap))
+		, exports(std::move(inExports))
 		, functions(std::move(inFunctions))
 		, tables(std::move(inTables))
 		, memories(std::move(inMemories))
 		, globals(std::move(inGlobals))
 		, exceptionTypes(std::move(inExceptionTypes))
 		, startFunction(inStartFunction)
-		, passiveDataSegments(std::move(inPassiveDataSegments))
-		, passiveElemSegments(std::move(inPassiveElemSegments))
+		, dataSegments(std::move(inPassiveDataSegments))
+		, elemSegments(std::move(inPassiveElemSegments))
 		, jitModule(std::move(inJITModule))
 		{
 		}
@@ -233,13 +238,16 @@ namespace WAVM { namespace Runtime {
 		~Compartment();
 	};
 
+	struct Foreign : GCObject
+	{
+		Foreign(Compartment* inCompartment) : GCObject(ObjectKind::foreign, inCompartment) {}
+	};
+
 	DECLARE_INTRINSIC_MODULE(wavmIntrinsics);
-
-	void dummyReferenceAtomics();
-	void dummyReferenceWAVMIntrinsics();
-
-	// Initializes global state used by the WAVM intrinsics.
-	Runtime::ModuleInstance* instantiateWAVMIntrinsics(Compartment* compartment);
+	DECLARE_INTRINSIC_MODULE(wavmIntrinsicsAtomics);
+	DECLARE_INTRINSIC_MODULE(wavmIntrinsicsException);
+	DECLARE_INTRINSIC_MODULE(wavmIntrinsicsMemory);
+	DECLARE_INTRINSIC_MODULE(wavmIntrinsicsTable);
 
 	// Checks whether an address is owned by a table or memory.
 	bool isAddressOwnedByTable(U8* address, Table*& outTable, Uptr& outTableIndex);
@@ -259,4 +267,27 @@ namespace WAVM { namespace Runtime {
 													 Uptr moduleInstanceId);
 	Table* getTableFromRuntimeData(ContextRuntimeData* contextRuntimeData, Uptr tableId);
 	Memory* getMemoryFromRuntimeData(ContextRuntimeData* contextRuntimeData, Uptr memoryId);
+
+	// Initialize a data segment (equivalent to executing a memory.init instruction).
+	void initDataSegment(ModuleInstance* moduleInstance,
+						 Uptr dataSegmentIndex,
+						 const std::vector<U8>* dataVector,
+						 Memory* memory,
+						 Uptr destAddress,
+						 Uptr sourceOffset,
+						 Uptr numBytes);
+
+	// Initialize a table segment (equivalent to executing a table.init instruction).
+	void initElemSegment(ModuleInstance* moduleInstance,
+						 Uptr elemSegmentIndex,
+						 const std::vector<IR::Elem>* elemVector,
+						 Table* table,
+						 Uptr destOffset,
+						 Uptr sourceOffset,
+						 Uptr numElems);
+}}
+
+namespace WAVM { namespace Intrinsics {
+	HashMap<std::string, Function*> getUninstantiatedFunctions(
+		const std::initializer_list<const Intrinsics::Module*>& moduleRefs);
 }}

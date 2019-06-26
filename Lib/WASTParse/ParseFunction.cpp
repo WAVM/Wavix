@@ -129,7 +129,9 @@ static bool tryParseAndResolveBranchTargetRef(CursorState* cursor, Uptr& outTarg
 			}
 			break;
 		}
-		default: Errors::unreachable();
+
+		case Reference::Type::invalid:
+		default: WAVM_UNREACHABLE();
 		};
 		return true;
 	}
@@ -154,6 +156,11 @@ static void parseAndValidateRedundantBranchTargetName(CursorState* cursor,
 
 static void parseImm(CursorState* cursor, NoImm&) {}
 static void parseImm(CursorState* cursor, MemoryImm& outImm) { outImm.memoryIndex = 0; }
+static void parseImm(CursorState* cursor, MemoryCopyImm& outImm)
+{
+	outImm.sourceMemoryIndex = 0;
+	outImm.destMemoryIndex = 0;
+}
 static void parseImm(CursorState* cursor, TableImm& outImm)
 {
 	if(!tryParseAndResolveNameOrIndexRef(cursor,
@@ -163,14 +170,42 @@ static void parseImm(CursorState* cursor, TableImm& outImm)
 										 outImm.tableIndex))
 	{ outImm.tableIndex = 0; }
 }
+static void parseImm(CursorState* cursor, TableCopyImm& outImm)
+{
+	if(!tryParseAndResolveNameOrIndexRef(cursor,
+										 cursor->moduleState->tableNameToIndexMap,
+										 cursor->moduleState->module.tables.size(),
+										 "table",
+										 outImm.sourceTableIndex))
+	{ outImm.sourceTableIndex = 0; }
+
+	if(!tryParseAndResolveNameOrIndexRef(cursor,
+										 cursor->moduleState->tableNameToIndexMap,
+										 cursor->moduleState->module.tables.size(),
+										 "table",
+										 outImm.destTableIndex))
+	{ outImm.destTableIndex = outImm.sourceTableIndex; }
+}
+
+static void parseImm(CursorState* cursor, SelectImm& outImm)
+{
+	outImm.type = ValueType::any;
+	if(cursor->nextToken[0].type == t_leftParenthesis && cursor->nextToken[1].type == t_result)
+	{
+		parseParenthesized(cursor, [&] {
+			require(cursor, t_result);
+			outImm.type = parseValueType(cursor);
+		});
+	}
+}
 
 static void parseImm(CursorState* cursor, LiteralImm<I32>& outImm)
 {
-	outImm.value = (I32)parseI32(cursor);
+	outImm.value = parseI32(cursor);
 }
 static void parseImm(CursorState* cursor, LiteralImm<I64>& outImm)
 {
-	outImm.value = (I64)parseI64(cursor);
+	outImm.value = parseI64(cursor);
 }
 static void parseImm(CursorState* cursor, LiteralImm<F32>& outImm)
 {
@@ -274,7 +309,7 @@ static void parseImm(CursorState* cursor, LoadOrStoreImm<naturalAlignmentLog2>& 
 	{
 		++cursor->nextToken;
 		require(cursor, t_equals);
-		outImm.offset = parseI32(cursor);
+		outImm.offset = parseU32(cursor);
 	}
 
 	const U32 naturalAlignment = 1 << naturalAlignmentLog2;
@@ -283,7 +318,7 @@ static void parseImm(CursorState* cursor, LoadOrStoreImm<naturalAlignmentLog2>& 
 	{
 		++cursor->nextToken;
 		require(cursor, t_equals);
-		alignment = parseI32(cursor);
+		alignment = parseU32(cursor);
 		if(alignment > naturalAlignment)
 		{
 			parseErrorf(
@@ -304,33 +339,31 @@ static void parseImm(CursorState* cursor, LiteralImm<V128>& outImm)
 
 template<Uptr numLanes> static void parseImm(CursorState* cursor, LaneIndexImm<numLanes>& outImm)
 {
-	const U64 u64 = parseI64(cursor);
-	if(u64 > numLanes)
+	const I8 laneIndex = parseI8(cursor);
+	if(laneIndex < 0 || Uptr(laneIndex) > numLanes)
 	{
 		parseErrorf(cursor->parseState,
 					cursor->nextToken - 1,
 					"lane index must be in the range 0..%" PRIuPTR,
 					numLanes);
 	}
-	outImm.laneIndex = U8(u64);
+	outImm.laneIndex = laneIndex;
 }
 
 template<Uptr numLanes> static void parseImm(CursorState* cursor, ShuffleImm<numLanes>& outImm)
 {
-	parseParenthesized(cursor, [&] {
-		for(Uptr laneIndex = 0; laneIndex < numLanes; ++laneIndex)
+	for(Uptr destLaneIndex = 0; destLaneIndex < numLanes; ++destLaneIndex)
+	{
+		const I8 sourceLaneIndex = parseI8(cursor);
+		if(sourceLaneIndex < 0 || Uptr(sourceLaneIndex) >= numLanes * 2)
 		{
-			const U64 u64 = parseI64(cursor);
-			if(u64 >= numLanes * 2)
-			{
-				parseErrorf(cursor->parseState,
-							cursor->nextToken - 1,
-							"lane index must be in the range 0..%" PRIuPTR,
-							numLanes * 2);
-			}
-			outImm.laneIndices[laneIndex] = U8(u64);
+			parseErrorf(cursor->parseState,
+						cursor->nextToken - 1,
+						"lane index must be in the range 0..%" PRIuPTR,
+						numLanes * 2);
 		}
-	});
+		outImm.laneIndices[destLaneIndex] = sourceLaneIndex;
+	}
 }
 
 template<Uptr naturalAlignmentLog2>
@@ -361,7 +394,11 @@ static void parseImm(CursorState* cursor, RethrowImm& outImm)
 
 static void parseImm(CursorState* cursor, DataSegmentAndMemImm& outImm)
 {
-	outImm.dataSegmentIndex = parseIptr(cursor);
+	outImm.dataSegmentIndex
+		= parseAndResolveNameOrIndexRef(cursor,
+										cursor->moduleState->dataNameToIndexMap,
+										cursor->moduleState->module.dataSegments.size(),
+										"data");
 	if(!tryParseAndResolveNameOrIndexRef(cursor,
 										 cursor->moduleState->memoryNameToIndexMap,
 										 cursor->moduleState->module.memories.size(),
@@ -372,12 +409,20 @@ static void parseImm(CursorState* cursor, DataSegmentAndMemImm& outImm)
 
 static void parseImm(CursorState* cursor, DataSegmentImm& outImm)
 {
-	outImm.dataSegmentIndex = parseIptr(cursor);
+	outImm.dataSegmentIndex
+		= parseAndResolveNameOrIndexRef(cursor,
+										cursor->moduleState->dataNameToIndexMap,
+										cursor->moduleState->module.dataSegments.size(),
+										"data");
 }
 
 static void parseImm(CursorState* cursor, ElemSegmentAndTableImm& outImm)
 {
-	outImm.elemSegmentIndex = parseIptr(cursor);
+	outImm.elemSegmentIndex
+		= parseAndResolveNameOrIndexRef(cursor,
+										cursor->moduleState->elemNameToIndexMap,
+										cursor->moduleState->module.elemSegments.size(),
+										"elem");
 	if(!tryParseAndResolveNameOrIndexRef(cursor,
 										 cursor->moduleState->tableNameToIndexMap,
 										 cursor->moduleState->module.tables.size(),
@@ -388,7 +433,11 @@ static void parseImm(CursorState* cursor, ElemSegmentAndTableImm& outImm)
 
 static void parseImm(CursorState* cursor, ElemSegmentImm& outImm)
 {
-	outImm.elemSegmentIndex = parseIptr(cursor);
+	outImm.elemSegmentIndex
+		= parseAndResolveNameOrIndexRef(cursor,
+										cursor->moduleState->elemNameToIndexMap,
+										cursor->moduleState->module.elemSegments.size(),
+										"elem");
 }
 
 static void parseInstrSequence(CursorState* cursor);
@@ -449,7 +498,7 @@ static void parseControlImm(CursorState* cursor,
 	if(functionType.params().size() == 0 && functionType.results().size() == 0)
 	{
 		imm.type.format = IndexedBlockType::noParametersOrResult;
-		imm.type.resultType = ValueType::any;
+		imm.type.resultType = ValueType::none;
 	}
 	else if(functionType.params().size() == 0 && functionType.results().size() == 1)
 	{

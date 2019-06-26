@@ -50,6 +50,10 @@ static void validate(const IR::FeatureSpec& featureSpec, IR::ValueType valueType
 	case ValueType::v128: isValid = featureSpec.simd; break;
 	case ValueType::anyref:
 	case ValueType::funcref: isValid = featureSpec.referenceTypes; break;
+
+	case ValueType::none:
+	case ValueType::any:
+	case ValueType::nullref:
 	default: isValid = false;
 	};
 
@@ -71,6 +75,8 @@ static void validate(const IR::FeatureSpec& featureSpec, ReferenceType type)
 	{
 	case ReferenceType::funcref: isValid = featureSpec.mvp; break;
 	case ReferenceType::anyref: isValid = featureSpec.referenceTypes; break;
+
+	case ReferenceType::none:
 	default: isValid = false;
 	}
 
@@ -172,7 +178,7 @@ static FunctionType validateBlockType(const Module& module, const IndexedBlockTy
 		}
 		return functionType;
 	}
-	default: Errors::unreachable();
+	default: WAVM_UNREACHABLE();
 	}
 }
 
@@ -223,6 +229,8 @@ static void validateInitializer(const Module& module,
 		validateType(expectedType, ValueType::funcref, context);
 		break;
 	}
+
+	case InitializerExpression::Type::invalid:
 	default: throw ValidationException("invalid initializer expression");
 	};
 }
@@ -290,7 +298,7 @@ struct FunctionValidationContext
 				case ControlContext::Type::loop: controlStackString += "L"; break;
 				case ControlContext::Type::try_: controlStackString += "R"; break;
 				case ControlContext::Type::catch_: controlStackString += "C"; break;
-				default: Errors::unreachable();
+				default: WAVM_UNREACHABLE();
 				};
 				if(!controlStack[stackIndex].isReachable) { controlStackString += ")"; }
 			}
@@ -315,10 +323,6 @@ struct FunctionValidationContext
 	}
 
 	// Operation dispatch methods.
-	void unknown(Opcode opcode)
-	{
-		throw ValidationException("Unknown opcode: " + std::to_string((Uptr)opcode));
-	}
 	void block(ControlStructureImm imm)
 	{
 		const FunctionType type = validateBlockType(module, imm.type);
@@ -433,46 +437,25 @@ struct FunctionValidationContext
 
 		const TypeTuple defaultTargetParams = getBranchTargetByDepth(imm.defaultTargetDepth).params;
 
-		// Meet (intersect) the parameters of all the branch targets to get the most general type
-		// that matches any of the targets.
-		const Uptr numTargetParams = defaultTargetParams.size();
-		ValueType* targetParamMeets = new(alloca(sizeof(ValueType) * defaultTargetParams.size()))
-			ValueType[numTargetParams];
-		for(Uptr elementIndex = 0; elementIndex < numTargetParams; ++elementIndex)
-		{ targetParamMeets[elementIndex] = defaultTargetParams[elementIndex]; }
-
+		// Validate that each target has the same number of parameters as the default target, and
+		// that the parameters for each target match the arguments provided.
 		wavmAssert(imm.branchTableIndex < functionDef.branchTables.size());
 		const std::vector<Uptr>& targetDepths = functionDef.branchTables[imm.branchTableIndex];
 		for(Uptr targetIndex = 0; targetIndex < targetDepths.size(); ++targetIndex)
 		{
 			const TypeTuple targetParams = getBranchTargetByDepth(targetDepths[targetIndex]).params;
-			if(targetParams.size() != numTargetParams)
+			if(targetParams.size() != defaultTargetParams.size())
 			{
 				throw ValidationException(
 					"br_table targets must all take the same number of parameters");
 			}
 			else
 			{
-				for(Uptr elementIndex = 0; elementIndex < numTargetParams; ++elementIndex)
-				{
-					targetParamMeets[elementIndex]
-						= meet(targetParamMeets[elementIndex], targetParams[elementIndex]);
-				}
+				peekAndValidateTypeTuple("br_table argument", targetParams);
 			}
 		}
 
-		// If any target's parameters are disjoint from any other target's parameters, the result of
-		// the meet will be empty; i.e. there are no possible arguments that will match any of the
-		// branch targets.
-		for(Uptr elementIndex = 0; elementIndex < numTargetParams; ++elementIndex)
-		{
-			if(targetParamMeets[elementIndex] == ValueType::none)
-			{ throw ValidationException("br_table targets have incompatible parameter types"); }
-		}
-
-		// Validate that the br_table's arguments match the meet of the target's parameters.
-		popAndValidateOperands(
-			"br_table argument", (const ValueType*)targetParamMeets, numTargetParams);
+		popAndValidateTypeTuple("br_table argument", defaultTargetParams);
 
 		enterUnreachable();
 	}
@@ -487,22 +470,37 @@ struct FunctionValidationContext
 	void unreachable(NoImm) { enterUnreachable(); }
 	void drop(NoImm) { popAndValidateOperand("drop", ValueType::any); }
 
-	void select(NoImm)
+	void select(SelectImm imm)
 	{
 		popAndValidateOperand("select condition", ValueType::i32);
-		const ValueType falseType = popAndValidateOperand("select false value", ValueType::any);
-		const ValueType trueType = popAndValidateOperand("select true value", ValueType::any);
-		if(falseType == ValueType::any) { pushOperand(trueType); }
-		else if(trueType == ValueType::any)
+
+		if(imm.type == ValueType::any)
 		{
-			pushOperand(falseType);
+			const ValueType falseType = popAndValidateOperand("select false value", ValueType::any);
+			const ValueType trueType = popAndValidateOperand("select true value", ValueType::any);
+			VALIDATE_UNLESS("non-typed select operands must be numeric types: ",
+							(falseType != ValueType::none && !isNumericType(falseType))
+								|| (trueType != ValueType::none && !isNumericType(trueType)))
+			if(falseType == ValueType::none) { pushOperand(trueType); }
+			else if(trueType == ValueType::none)
+			{
+				pushOperand(falseType);
+			}
+			else
+			{
+				VALIDATE_UNLESS("non-typed select operands must have the same numeric type: ",
+								falseType != trueType);
+				pushOperand(falseType);
+			}
 		}
 		else
 		{
-			const ValueType resultType = join(falseType, trueType);
-			if(resultType == ValueType::any)
-			{ throw ValidationException("select operands must have a common supertype"); }
-			pushOperand(resultType);
+			VALIDATE_FEATURE("typed select instruction (0x1c)", referenceTypes);
+
+			validate(module.featureSpec, imm.type);
+			popAndValidateOperand("select false value", imm.type);
+			popAndValidateOperand("select true value", imm.type);
+			pushOperand(imm.type);
 		}
 	}
 
@@ -545,6 +543,20 @@ struct FunctionValidationContext
 		VALIDATE_INDEX(imm.tableIndex, module.tables.size());
 		const TableType& tableType = module.tables.getType(imm.tableIndex);
 		popAndValidateOperands("table.get", ValueType::i32, asValueType(tableType.elementType));
+	}
+	void table_grow(TableImm imm)
+	{
+		VALIDATE_INDEX(imm.tableIndex, module.tables.size());
+		const TableType& tableType = module.tables.getType(imm.tableIndex);
+		popAndValidateOperands("table.grow", asValueType(tableType.elementType), ValueType::i32);
+		pushOperand(ValueType::i32);
+	}
+	void table_fill(TableImm imm)
+	{
+		VALIDATE_INDEX(imm.tableIndex, module.tables.size());
+		const TableType& tableType = module.tables.getType(imm.tableIndex);
+		popAndValidateOperands(
+			"table.fill", ValueType::i32, asValueType(tableType.elementType), ValueType::i32);
 	}
 
 	void throw_(ExceptionTypeImm imm)
@@ -596,8 +608,22 @@ struct FunctionValidationContext
 	}
 
 	void validateImm(MemoryImm imm) { VALIDATE_INDEX(imm.memoryIndex, module.memories.size()); }
+	void validateImm(MemoryCopyImm imm)
+	{
+		VALIDATE_INDEX(imm.sourceMemoryIndex, module.memories.size());
+		VALIDATE_INDEX(imm.destMemoryIndex, module.memories.size());
+	}
 
 	void validateImm(TableImm imm) { VALIDATE_INDEX(imm.tableIndex, module.tables.size()); }
+	void validateImm(TableCopyImm imm)
+	{
+		VALIDATE_INDEX(imm.sourceTableIndex, module.tables.size());
+		VALIDATE_INDEX(imm.destTableIndex, module.tables.size());
+		VALIDATE_UNLESS(
+			"source table element type must be a subtype of the destination table element type",
+			!isSubtype(asValueType(module.tables.getType(imm.sourceTableIndex).elementType),
+					   asValueType(module.tables.getType(imm.destTableIndex).elementType)));
+	}
 
 	void validateImm(FunctionImm imm) { validateFunctionIndex(module, imm.functionIndex); }
 
@@ -658,7 +684,7 @@ struct FunctionValidationContext
 		const char* operatorName = nameString;                                                     \
 		SUPPRESS_UNUSED(operatorName);                                                             \
 		validateImm(imm);                                                                          \
-		popAndValidateTypeTuple("call arguments", IR::getNonParametricOpSigs().name.params());     \
+		popAndValidateTypeTuple(nameString, IR::getNonParametricOpSigs().name.params());           \
 		pushOperandTuple(IR::getNonParametricOpSigs().name.results());                             \
 	}
 	ENUM_NONCONTROL_NONPARAMETRIC_OPERATORS(VALIDATE_OP)
@@ -747,6 +773,40 @@ private:
 		return locals[localIndex];
 	}
 
+	ValueType peekAndValidateOperand(const char* context,
+									 Uptr operandDepth,
+									 const ValueType expectedType)
+	{
+		wavmAssert(controlStack.size());
+
+		ValueType actualType;
+		if(stack.size() > controlStack.back().outerStackSize + operandDepth)
+		{ actualType = stack[stack.size() - operandDepth - 1]; }
+		else if(!controlStack.back().isReachable)
+		{
+			// If the current instruction is unreachable, then pop a bottom type that is a subtype
+			// of all other types.
+			actualType = ValueType::none;
+		}
+		else
+		{
+			// If the current instruction is reachable, but the operand stack is empty, then throw a
+			// validation exception.
+			throw ValidationException(std::string("type mismatch: expected ")
+									  + asString(expectedType) + " but stack was empty" + " in "
+									  + context + " operand");
+		}
+
+		if(!isSubtype(actualType, expectedType))
+		{
+			throw ValidationException(std::string("type mismatch: expected ")
+									  + asString(expectedType) + " but got " + asString(actualType)
+									  + " in " + context + " operand");
+		}
+
+		return actualType;
+	}
+
 	void popAndValidateOperands(const char* context, const ValueType* expectedTypes, Uptr num)
 	{
 		for(Uptr operandIndexFromEnd = 0; operandIndexFromEnd < num; ++operandIndexFromEnd)
@@ -771,35 +831,10 @@ private:
 
 	ValueType popAndValidateOperand(const char* context, const ValueType expectedType)
 	{
+		ValueType actualType = peekAndValidateOperand(context, 0, expectedType);
+
 		wavmAssert(controlStack.size());
-
-		ValueType actualType;
-		if(stack.size() > controlStack.back().outerStackSize)
-		{
-			actualType = stack.back();
-			stack.pop_back();
-		}
-		else if(!controlStack.back().isReachable)
-		{
-			// If the current instruction is unreachable, then pop a polymorphic type that will
-			// match any expected type.
-			actualType = ValueType::any;
-		}
-		else
-		{
-			// If the current instruction is reachable, but the operand stack is empty, then throw a
-			// validation exception.
-			throw ValidationException(std::string("type mismatch: expected ")
-									  + asString(expectedType) + " but stack was empty" + " in "
-									  + context + " operand");
-		}
-
-		if(actualType != ValueType::any && !isSubtype(actualType, expectedType))
-		{
-			throw ValidationException(std::string("type mismatch: expected ")
-									  + asString(expectedType) + " but got " + asString(actualType)
-									  + " in " + context + " operand");
-		}
+		if(stack.size() > controlStack.back().outerStackSize) { stack.pop_back(); }
 
 		return actualType;
 	}
@@ -807,6 +842,15 @@ private:
 	void popAndValidateTypeTuple(const char* context, TypeTuple expectedType)
 	{
 		popAndValidateOperands(context, expectedType.data(), expectedType.size());
+	}
+
+	void peekAndValidateTypeTuple(const char* context, TypeTuple expectedTypes)
+	{
+		for(Uptr operandIndex = 0; operandIndex < expectedTypes.size(); ++operandIndex)
+		{
+			peekAndValidateOperand(
+				context, expectedTypes.size() - operandIndex - 1, expectedTypes[operandIndex]);
+		}
 	}
 
 	void pushOperand(ValueType type) { stack.push_back(type); }
@@ -840,6 +884,11 @@ void IR::validateTypes(const Module& module)
 
 void IR::validateImports(const Module& module)
 {
+	wavmAssert(module.imports.size()
+			   == module.functions.imports.size() + module.tables.imports.size()
+					  + module.memories.imports.size() + module.globals.imports.size()
+					  + module.exceptionTypes.imports.size());
+
 	for(auto& functionImport : module.functions.imports)
 	{ validateFunctionType(module, functionImport.type); }
 	for(auto& tableImport : module.tables.imports) { validate(module, tableImport.type); }
@@ -920,6 +969,8 @@ void IR::validateExports(const Module& module)
 		case ExternKind::exceptionType:
 			VALIDATE_INDEX(exportIt.index, module.exceptionTypes.size());
 			break;
+
+		case ExternKind::invalid:
 		default: throw ValidationException("unknown export kind");
 		};
 
@@ -949,12 +1000,22 @@ void IR::validateElemSegments(const Module& module)
 			VALIDATE_INDEX(elemSegment.tableIndex, module.tables.size());
 			const TableType& tableType = module.tables.getType(elemSegment.tableIndex);
 			VALIDATE_UNLESS("active elem segments must be in funcref tables: ",
-							tableType.elementType != ReferenceType::funcref);
+							!isSubtype(ReferenceType::funcref, tableType.elementType));
 			validateInitializer(
 				module, elemSegment.baseOffset, ValueType::i32, "elem segment base initializer");
 		}
-		for(auto functionIndex : elemSegment.indices)
-		{ VALIDATE_INDEX(functionIndex, module.functions.size()); }
+		for(const Elem& elem : *elemSegment.elems)
+		{
+			switch(elem.type)
+			{
+			case Elem::Type::ref_null:
+				VALIDATE_UNLESS("ref.null is only allowed in passive segments",
+								elemSegment.isActive);
+				break;
+			case Elem::Type::ref_func: VALIDATE_INDEX(elem.index, module.functions.size()); break;
+			default: WAVM_UNREACHABLE();
+			};
+		}
 	}
 }
 

@@ -16,13 +16,22 @@ using namespace WAVM::IR;
 using namespace WAVM::Runtime;
 
 UntaggedValue* Runtime::invokeFunctionUnchecked(Context* context,
-												Function* function,
+												const Function* function,
 												const UntaggedValue* arguments)
 {
 	FunctionType functionType = function->encodedType;
 
-	// Get the invoke thunk for this function type.
-	auto invokeFunctionPointer = LLVMJIT::getInvokeThunk(functionType);
+	// Get the invoke thunk for this function type. Cache it in the function's FunctionMutableData
+	// to avoid the global lock implied by LLVMJIT::getInvokeThunk.
+	InvokeThunkPointer invokeThunk
+		= function->mutableData->invokeThunk.load(std::memory_order_acquire);
+	while(!invokeThunk)
+	{
+		InvokeThunkPointer newInvokeThunk = LLVMJIT::getInvokeThunk(functionType);
+		function->mutableData->invokeThunk.compare_exchange_strong(
+			invokeThunk, newInvokeThunk, std::memory_order_acq_rel);
+	};
+	wavmAssert(invokeThunk);
 
 	// Copy the arguments into the thunk arguments buffer in ContextRuntimeData.
 	ContextRuntimeData* contextRuntimeData
@@ -48,14 +57,14 @@ UntaggedValue* Runtime::invokeFunctionUnchecked(Context* context,
 	}
 
 	// Call the invoke thunk.
-	contextRuntimeData = (*invokeFunctionPointer)(function, contextRuntimeData);
+	contextRuntimeData = (*invokeThunk)(function, contextRuntimeData);
 
 	// Return a pointer to the return value that was written to the ContextRuntimeData.
 	return (UntaggedValue*)contextRuntimeData->thunkArgAndReturnData;
 }
 
 ValueTuple Runtime::invokeFunctionChecked(Context* context,
-										  Function* function,
+										  const Function* function,
 										  const std::vector<Value>& arguments)
 {
 	errorUnless(isInCompartment(asObject(function), context->compartment));
@@ -106,7 +115,11 @@ ValueTuple Runtime::invokeFunctionChecked(Context* context,
 		case ValueType::v128: results.values.push_back(Value(*(V128*)result)); break;
 		case ValueType::anyref: results.values.push_back(Value(*(Object**)result)); break;
 		case ValueType::funcref: results.values.push_back(Value(*(Function**)result)); break;
-		default: Errors::unreachable();
+
+		case ValueType::none:
+		case ValueType::any:
+		case ValueType::nullref:
+		default: WAVM_UNREACHABLE();
 		};
 
 		resultOffset += resultNumBytes;

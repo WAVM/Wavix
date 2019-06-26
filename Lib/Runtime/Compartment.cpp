@@ -112,9 +112,12 @@ Compartment* Runtime::cloneCompartment(const Compartment* compartment)
 
 Object* Runtime::remapToClonedCompartment(Object* object, const Compartment* newCompartment)
 {
+	if(!object) { return nullptr; }
+	if(object->kind == ObjectKind::function) { return object; }
+
+	Lock<Platform::Mutex> compartmentLock(newCompartment->mutex);
 	switch(object->kind)
 	{
-	case ObjectKind::function: return object;
 	case ObjectKind::table: return newCompartment->tables[asTable(object)->id];
 	case ObjectKind::memory: return newCompartment->memories[asMemory(object)->id];
 	case ObjectKind::global: return newCompartment->globals[asGlobal(object)->id];
@@ -122,7 +125,13 @@ Object* Runtime::remapToClonedCompartment(Object* object, const Compartment* new
 		return newCompartment->exceptionTypes[asExceptionType(object)->id];
 	case ObjectKind::moduleInstance:
 		return newCompartment->moduleInstances[asModuleInstance(object)->id];
-	default: Errors::unreachable();
+
+	case ObjectKind::function:
+	case ObjectKind::context:
+	case ObjectKind::compartment:
+	case ObjectKind::foreign:
+	case ObjectKind::invalid:
+	default: WAVM_UNREACHABLE();
 	};
 }
 
@@ -132,33 +141,38 @@ Function* Runtime::remapToClonedCompartment(Function* function, const Compartmen
 }
 Table* Runtime::remapToClonedCompartment(Table* table, const Compartment* newCompartment)
 {
+	if(!table) { return nullptr; }
 	Lock<Platform::Mutex> compartmentLock(newCompartment->mutex);
 	return newCompartment->tables[table->id];
 }
 Memory* Runtime::remapToClonedCompartment(Memory* memory, const Compartment* newCompartment)
 {
+	if(!memory) { return nullptr; }
 	Lock<Platform::Mutex> compartmentLock(newCompartment->mutex);
 	return newCompartment->memories[memory->id];
 }
 Global* Runtime::remapToClonedCompartment(Global* global, const Compartment* newCompartment)
 {
+	if(!global) { return nullptr; }
 	Lock<Platform::Mutex> compartmentLock(newCompartment->mutex);
 	return newCompartment->globals[global->id];
 }
 ExceptionType* Runtime::remapToClonedCompartment(ExceptionType* exceptionType,
 												 const Compartment* newCompartment)
 {
+	if(!exceptionType) { return nullptr; }
 	Lock<Platform::Mutex> compartmentLock(newCompartment->mutex);
 	return newCompartment->exceptionTypes[exceptionType->id];
 }
 ModuleInstance* Runtime::remapToClonedCompartment(ModuleInstance* moduleInstance,
 												  const Compartment* newCompartment)
 {
+	if(!moduleInstance) { return nullptr; }
 	Lock<Platform::Mutex> compartmentLock(newCompartment->mutex);
 	return newCompartment->moduleInstances[moduleInstance->id];
 }
 
-bool Runtime::isInCompartment(Object* object, const Compartment* compartment)
+bool Runtime::isInCompartment(const Object* object, const Compartment* compartment)
 {
 	if(object->kind == ObjectKind::function)
 	{
@@ -170,6 +184,7 @@ bool Runtime::isInCompartment(Object* object, const Compartment* compartment)
 		// Treat functions with moduleInstanceId=UINTPTR_MAX as if they are in all compartments.
 		if(function->moduleInstanceId == UINTPTR_MAX) { return true; }
 
+		Lock<Platform::Mutex> compartmentLock(compartment->mutex);
 		if(!compartment->moduleInstances.contains(function->moduleInstanceId)) { return false; }
 		ModuleInstance* moduleInstance = compartment->moduleInstances[function->moduleInstanceId];
 		return moduleInstance->jitModule.get() == function->mutableData->jitModule;
@@ -181,7 +196,7 @@ bool Runtime::isInCompartment(Object* object, const Compartment* compartment)
 	}
 }
 
-Compartment* Runtime::getCompartment(Object* object)
+Compartment* Runtime::getCompartment(const Object* object)
 {
 	if(object->kind == ObjectKind::function) { return nullptr; }
 	else

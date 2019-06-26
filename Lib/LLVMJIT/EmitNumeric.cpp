@@ -159,14 +159,15 @@ llvm::Value* EmitFunctionContext::emitSRem(ValueType type, llvm::Value* left, ll
 	return phi;
 }
 
-static llvm::Value* emitShiftCountMask(EmitContext& emitContext, llvm::Value* shiftCount)
+static llvm::Value* emitShiftCountMask(EmitContext& emitContext,
+									   llvm::Value* shiftCount,
+									   Uptr numBits)
 {
 	// LLVM's shifts have undefined behavior where WebAssembly specifies that the shift count will
 	// wrap numbers greater than the bit count of the operands. This matches x86's native shift
 	// instructions, but explicitly mask the shift count anyway to support other platforms, and
 	// ensure the optimizer doesn't take advantage of the UB.
-	llvm::Value* bitsMinusOne = llvm::ConstantInt::get(
-		shiftCount->getType(), shiftCount->getType()->getIntegerBitWidth() - 1);
+	llvm::Value* bitsMinusOne = llvm::ConstantInt::get(shiftCount->getType(), numBits - 1);
 	return emitContext.irBuilder.CreateAnd(shiftCount, bitsMinusOne);
 }
 
@@ -177,9 +178,10 @@ static llvm::Value* emitRotl(EmitContext& emitContext, llvm::Value* left, llvm::
 	llvm::Value* bitWidthMinusRight
 		= emitContext.irBuilder.CreateSub(emitContext.irBuilder.CreateZExt(bitWidth, type), right);
 	return emitContext.irBuilder.CreateOr(
-		emitContext.irBuilder.CreateShl(left, emitShiftCountMask(emitContext, right)),
-		emitContext.irBuilder.CreateLShr(left,
-										 emitShiftCountMask(emitContext, bitWidthMinusRight)));
+		emitContext.irBuilder.CreateShl(
+			left, emitShiftCountMask(emitContext, right, type->getIntegerBitWidth())),
+		emitContext.irBuilder.CreateLShr(
+			left, emitShiftCountMask(emitContext, bitWidthMinusRight, type->getIntegerBitWidth())));
 }
 
 static llvm::Value* emitRotr(EmitContext& emitContext, llvm::Value* left, llvm::Value* right)
@@ -189,8 +191,10 @@ static llvm::Value* emitRotr(EmitContext& emitContext, llvm::Value* left, llvm::
 	llvm::Value* bitWidthMinusRight
 		= emitContext.irBuilder.CreateSub(emitContext.irBuilder.CreateZExt(bitWidth, type), right);
 	return emitContext.irBuilder.CreateOr(
-		emitContext.irBuilder.CreateShl(left, emitShiftCountMask(emitContext, bitWidthMinusRight)),
-		emitContext.irBuilder.CreateLShr(left, emitShiftCountMask(emitContext, right)));
+		emitContext.irBuilder.CreateShl(
+			left, emitShiftCountMask(emitContext, bitWidthMinusRight, type->getIntegerBitWidth())),
+		emitContext.irBuilder.CreateLShr(
+			left, emitShiftCountMask(emitContext, right, type->getIntegerBitWidth())));
 }
 
 EMIT_INT_BINARY_OP(add, irBuilder.CreateAdd(left, right))
@@ -211,9 +215,15 @@ EMIT_INT_BINARY_OP(div_u, (trapDivideByZero(right), irBuilder.CreateUDiv(left, r
 EMIT_INT_BINARY_OP(rem_u, (trapDivideByZero(right), irBuilder.CreateURem(left, right)))
 
 // Explicitly mask the shift amount operand to the word size to avoid LLVM's undefined behavior.
-EMIT_INT_BINARY_OP(shl, irBuilder.CreateShl(left, emitShiftCountMask(*this, right)))
-EMIT_INT_BINARY_OP(shr_s, irBuilder.CreateAShr(left, emitShiftCountMask(*this, right)))
-EMIT_INT_BINARY_OP(shr_u, irBuilder.CreateLShr(left, emitShiftCountMask(*this, right)))
+EMIT_INT_BINARY_OP(shl,
+				   irBuilder.CreateShl(left,
+									   emitShiftCountMask(*this, right, getTypeBitWidth(type))))
+EMIT_INT_BINARY_OP(shr_s,
+				   irBuilder.CreateAShr(left,
+										emitShiftCountMask(*this, right, getTypeBitWidth(type))))
+EMIT_INT_BINARY_OP(shr_u,
+				   irBuilder.CreateLShr(left,
+										emitShiftCountMask(*this, right, getTypeBitWidth(type))))
 
 EMIT_INT_UNARY_OP(clz,
 				  callLLVMIntrinsic({operand->getType()},
@@ -273,19 +283,19 @@ EMIT_FP_UNARY_OP(sqrt,
 									moduleContext.fpRoundingModeMetadata,
 									moduleContext.fpExceptionMetadata}))
 
-#define EMIT_FP_COMPARE_OP(name, predicate, llvmOperandType, llvmResultType)                       \
+#define EMIT_FP_COMPARE_OP(name, pred, zextOrSext, llvmOperandType, llvmResultType)                \
 	void EmitFunctionContext::name(NoImm)                                                          \
 	{                                                                                              \
 		auto right = irBuilder.CreateBitCast(pop(), llvmOperandType);                              \
 		auto left = irBuilder.CreateBitCast(pop(), llvmOperandType);                               \
-		push(zext(createFCmpWithWorkaround(irBuilder, predicate, left, right), llvmResultType));   \
+		push(zextOrSext(createFCmpWithWorkaround(irBuilder, pred, left, right), llvmResultType));  \
 	}
 
-#define EMIT_FP_COMPARE(name, predicate)                                                           \
-	EMIT_FP_COMPARE_OP(f32_##name, predicate, llvmContext.f32Type, llvmContext.i32Type)            \
-	EMIT_FP_COMPARE_OP(f64_##name, predicate, llvmContext.f64Type, llvmContext.i32Type)            \
-	EMIT_FP_COMPARE_OP(f32x4_##name, predicate, llvmContext.f32x4Type, llvmContext.i32x4Type)      \
-	EMIT_FP_COMPARE_OP(f64x2_##name, predicate, llvmContext.f64x2Type, llvmContext.i64x2Type)
+#define EMIT_FP_COMPARE(name, pred)                                                                \
+	EMIT_FP_COMPARE_OP(f32_##name, pred, zext, llvmContext.f32Type, llvmContext.i32Type)           \
+	EMIT_FP_COMPARE_OP(f64_##name, pred, zext, llvmContext.f64Type, llvmContext.i32Type)           \
+	EMIT_FP_COMPARE_OP(f32x4_##name, pred, sext, llvmContext.f32x4Type, llvmContext.i32x4Type)     \
+	EMIT_FP_COMPARE_OP(f64x2_##name, pred, sext, llvmContext.f64x2Type, llvmContext.i64x2Type)
 
 EMIT_FP_COMPARE(eq, llvm::CmpInst::FCMP_OEQ)
 EMIT_FP_COMPARE(ne, llvm::CmpInst::FCMP_UNE)
@@ -294,91 +304,136 @@ EMIT_FP_COMPARE(le, llvm::CmpInst::FCMP_OLE)
 EMIT_FP_COMPARE(gt, llvm::CmpInst::FCMP_OGT)
 EMIT_FP_COMPARE(ge, llvm::CmpInst::FCMP_OGE)
 
+static llvm::Value* emitFloatMin(llvm::IRBuilder<>& irBuilder,
+								 llvm::Value* left,
+								 llvm::Value* right,
+								 llvm::Type* intType)
+{
+	llvm::Type* floatType = left->getType();
+	llvm::Value* isLeftNaN
+		= createFCmpWithWorkaround(irBuilder, llvm::CmpInst::FCMP_UNO, left, left);
+	llvm::Value* isRightNaN
+		= createFCmpWithWorkaround(irBuilder, llvm::CmpInst::FCMP_UNO, right, right);
+	llvm::Value* isLeftLessThanRight
+		= createFCmpWithWorkaround(irBuilder, llvm::CmpInst::FCMP_OLT, left, right);
+	llvm::Value* isLeftGreaterThanRight
+		= createFCmpWithWorkaround(irBuilder, llvm::CmpInst::FCMP_OGT, left, right);
+
+	return irBuilder.CreateSelect(
+		isLeftNaN,
+		left,
+		irBuilder.CreateSelect(
+			isRightNaN,
+			right,
+			irBuilder.CreateSelect(
+				isLeftLessThanRight,
+				left,
+				irBuilder.CreateSelect(
+					isLeftGreaterThanRight,
+					right,
+					irBuilder.CreateBitCast(
+						irBuilder.CreateOr(irBuilder.CreateBitCast(left, intType),
+										   irBuilder.CreateBitCast(right, intType)),
+						floatType)))));
+}
+
+static llvm::Value* emitFloatMax(llvm::IRBuilder<>& irBuilder,
+								 llvm::Value* left,
+								 llvm::Value* right,
+								 llvm::Type* intType)
+{
+	llvm::Type* floatType = left->getType();
+	llvm::Value* isLeftNaN
+		= createFCmpWithWorkaround(irBuilder, llvm::CmpInst::FCMP_UNO, left, left);
+	llvm::Value* isRightNaN
+		= createFCmpWithWorkaround(irBuilder, llvm::CmpInst::FCMP_UNO, right, right);
+	llvm::Value* isLeftLessThanRight
+		= createFCmpWithWorkaround(irBuilder, llvm::CmpInst::FCMP_OLT, left, right);
+	llvm::Value* isLeftGreaterThanRight
+		= createFCmpWithWorkaround(irBuilder, llvm::CmpInst::FCMP_OGT, left, right);
+
+	return irBuilder.CreateSelect(
+		isLeftNaN,
+		left,
+		irBuilder.CreateSelect(
+			isRightNaN,
+			right,
+			irBuilder.CreateSelect(
+				isLeftLessThanRight,
+				right,
+				irBuilder.CreateSelect(
+					isLeftGreaterThanRight,
+					left,
+					irBuilder.CreateBitCast(
+						irBuilder.CreateAnd(irBuilder.CreateBitCast(left, intType),
+											irBuilder.CreateBitCast(right, intType)),
+						floatType)))));
+}
+
 // These operations don't match LLVM's semantics exactly, so just call out to C++ implementations.
 EMIT_FP_BINARY_OP(min,
-				  emitRuntimeIntrinsic(type == ValueType::f32 ? "f32.min" : "f64.min",
-									   FunctionType(TypeTuple(type), TypeTuple{type, type}),
-									   {left, right})[0])
+				  emitFloatMin(irBuilder,
+							   left,
+							   right,
+							   type == ValueType::f32 ? llvmContext.i32Type : llvmContext.i64Type))
 EMIT_FP_BINARY_OP(max,
-				  emitRuntimeIntrinsic(type == ValueType::f32 ? "f32.max" : "f64.max",
-									   FunctionType(TypeTuple(type), TypeTuple{type, type}),
-									   {left, right})[0])
-EMIT_FP_UNARY_OP(ceil,
-				 emitRuntimeIntrinsic(type == ValueType::f32 ? "f32.ceil" : "f64.ceil",
-									  FunctionType(TypeTuple(type), TypeTuple{type}),
-									  {operand})[0])
-EMIT_FP_UNARY_OP(floor,
-				 emitRuntimeIntrinsic(type == ValueType::f32 ? "f32.floor" : "f64.floor",
-									  FunctionType(TypeTuple(type), TypeTuple{type}),
-									  {operand})[0])
-EMIT_FP_UNARY_OP(trunc,
-				 emitRuntimeIntrinsic(type == ValueType::f32 ? "f32.trunc" : "f64.trunc",
-									  FunctionType(TypeTuple(type), TypeTuple{type}),
-									  {operand})[0])
-EMIT_FP_UNARY_OP(nearest,
-				 emitRuntimeIntrinsic(type == ValueType::f32 ? "f32.nearest" : "f64.nearest",
-									  FunctionType(TypeTuple(type), TypeTuple{type}),
-									  {operand})[0])
+				  emitFloatMax(irBuilder,
+							   left,
+							   right,
+							   type == ValueType::f32 ? llvmContext.i32Type : llvmContext.i64Type))
+EMIT_FP_UNARY_OP(ceil, callLLVMIntrinsic({operand->getType()}, llvm::Intrinsic::ceil, {operand}))
+EMIT_FP_UNARY_OP(floor, callLLVMIntrinsic({operand->getType()}, llvm::Intrinsic::floor, {operand}))
+EMIT_FP_UNARY_OP(trunc, callLLVMIntrinsic({operand->getType()}, llvm::Intrinsic::trunc, {operand}))
+EMIT_FP_UNARY_OP(nearest, callLLVMIntrinsic({operand->getType()}, llvm::Intrinsic::rint, {operand}))
 
 EMIT_SIMD_INT_BINARY_OP(add, irBuilder.CreateAdd(left, right))
 EMIT_SIMD_INT_BINARY_OP(sub, irBuilder.CreateSub(left, right))
 
-static llvm::Value* emitVectorShiftCountMask(llvm::IRBuilder<>& irBuilder,
-											 llvm::Type* scalarType,
-											 U32 numLanes,
-											 llvm::Value* shiftCount)
-{
-	// LLVM's shifts have undefined behavior where WebAssembly specifies that the shift count will
-	// wrap numbers grather than the bit count of the operands. This matches x86's native shift
-	// instructions, but explicitly mask the shift count anyway to support other platforms, and
-	// ensure the optimizer doesn't take advantage of the UB.
-	const U32 numScalarBits = scalarType->getPrimitiveSizeInBits();
-	llvm::APInt bitsMinusOneInt = llvm::APInt(numScalarBits, U64(numScalarBits - 1), false);
-	llvm::Value* bitsMinusOne = llvm::ConstantInt::get(scalarType, bitsMinusOneInt);
-	llvm::Value* bitsMinusOneSplat = irBuilder.CreateVectorSplat(numLanes, bitsMinusOne);
-	return irBuilder.CreateAnd(shiftCount, bitsMinusOneSplat);
-}
+#define EMIT_SIMD_SHIFT_OP(name, llvmType, createShift)                                            \
+	void EmitFunctionContext::name(IR::NoImm)                                                      \
+	{                                                                                              \
+		llvm::Type* vectorType = llvmType;                                                         \
+		llvm::Type* scalarType = llvmType->getScalarType();                                        \
+		SUPPRESS_UNUSED(vectorType);                                                               \
+		auto right = irBuilder.CreateVectorSplat(                                                  \
+			vectorType->getVectorNumElements(),                                                    \
+			irBuilder.CreateZExtOrTrunc(                                                           \
+				emitShiftCountMask(*this, pop(), scalarType->getIntegerBitWidth()), scalarType));  \
+		SUPPRESS_UNUSED(right);                                                                    \
+		auto left = irBuilder.CreateBitCast(pop(), llvmType);                                      \
+		SUPPRESS_UNUSED(left);                                                                     \
+		auto result = createShift(left, right);                                                    \
+		push(result);                                                                              \
+	}
 
-EMIT_SIMD_INT_BINARY_OP(
-	shl,
-	irBuilder.CreateShl(left,
-						emitVectorShiftCountMask(irBuilder,
-												 vectorType->getScalarType(),
-												 vectorType->getVectorNumElements(),
-												 right)))
-EMIT_SIMD_INT_BINARY_OP(
-	shr_s,
-	irBuilder.CreateAShr(left,
-						 emitVectorShiftCountMask(irBuilder,
-												  vectorType->getScalarType(),
-												  vectorType->getVectorNumElements(),
-												  right)))
-EMIT_SIMD_INT_BINARY_OP(
-	shr_u,
-	irBuilder.CreateLShr(left,
-						 emitVectorShiftCountMask(irBuilder,
-												  vectorType->getScalarType(),
-												  vectorType->getVectorNumElements(),
-												  right)))
+#define EMIT_SIMD_SHIFT(name, emitCode)                                                            \
+	EMIT_SIMD_SHIFT_OP(i8x16_##name, llvmContext.i8x16Type, emitCode)                              \
+	EMIT_SIMD_SHIFT_OP(i16x8_##name, llvmContext.i16x8Type, emitCode)                              \
+	EMIT_SIMD_SHIFT_OP(i32x4_##name, llvmContext.i32x4Type, emitCode)                              \
+	EMIT_SIMD_SHIFT_OP(i64x2_##name, llvmContext.i64x2Type, emitCode)
+
+EMIT_SIMD_SHIFT(shl, irBuilder.CreateShl)
+EMIT_SIMD_SHIFT(shr_s, irBuilder.CreateAShr)
+EMIT_SIMD_SHIFT(shr_u, irBuilder.CreateLShr)
 
 EMIT_SIMD_BINARY_OP(i8x16_mul, llvmContext.i8x16Type, irBuilder.CreateMul(left, right))
 EMIT_SIMD_BINARY_OP(i16x8_mul, llvmContext.i16x8Type, irBuilder.CreateMul(left, right))
 EMIT_SIMD_BINARY_OP(i32x4_mul, llvmContext.i32x4Type, irBuilder.CreateMul(left, right))
 
-#define EMIT_INT_COMPARE_OP(name, llvmOperandType, llvmDestType, predicate)                        \
+#define EMIT_INT_COMPARE_OP(name, llvmOperandType, llvmDestType, pred, zextOrSext)                 \
 	void EmitFunctionContext::name(IR::NoImm)                                                      \
 	{                                                                                              \
 		auto right = irBuilder.CreateBitCast(pop(), llvmOperandType);                              \
 		auto left = irBuilder.CreateBitCast(pop(), llvmOperandType);                               \
-		push(zext(createICmpWithWorkaround(irBuilder, predicate, left, right), llvmDestType));     \
+		push(zextOrSext(createICmpWithWorkaround(irBuilder, pred, left, right), llvmDestType));    \
 	}
 
-#define EMIT_INT_COMPARE(name, emitCode)                                                           \
-	EMIT_INT_COMPARE_OP(i32_##name, llvmContext.i32Type, llvmContext.i32Type, emitCode)            \
-	EMIT_INT_COMPARE_OP(i64_##name, llvmContext.i64Type, llvmContext.i32Type, emitCode)            \
-	EMIT_INT_COMPARE_OP(i8x16_##name, llvmContext.i8x16Type, llvmContext.i8x16Type, emitCode)      \
-	EMIT_INT_COMPARE_OP(i16x8_##name, llvmContext.i16x8Type, llvmContext.i16x8Type, emitCode)      \
-	EMIT_INT_COMPARE_OP(i32x4_##name, llvmContext.i32x4Type, llvmContext.i32x4Type, emitCode)
+#define EMIT_INT_COMPARE(name, pred)                                                               \
+	EMIT_INT_COMPARE_OP(i32_##name, llvmContext.i32Type, llvmContext.i32Type, pred, zext)          \
+	EMIT_INT_COMPARE_OP(i64_##name, llvmContext.i64Type, llvmContext.i32Type, pred, zext)          \
+	EMIT_INT_COMPARE_OP(i8x16_##name, llvmContext.i8x16Type, llvmContext.i8x16Type, pred, sext)    \
+	EMIT_INT_COMPARE_OP(i16x8_##name, llvmContext.i16x8Type, llvmContext.i16x8Type, pred, sext)    \
+	EMIT_INT_COMPARE_OP(i32x4_##name, llvmContext.i32x4Type, llvmContext.i32x4Type, pred, sext)
 
 EMIT_INT_COMPARE(eq, llvm::CmpInst::ICMP_EQ)
 EMIT_INT_COMPARE(ne, llvm::CmpInst::ICMP_NE)
@@ -505,16 +560,16 @@ EMIT_SIMD_FP_BINARY_OP(div, irBuilder.CreateFDiv(left, right))
 
 EMIT_SIMD_BINARY_OP(f32x4_min,
 					llvmContext.f32x4Type,
-					callLLVMIntrinsic({}, llvm::Intrinsic::x86_sse_min_ps, {left, right}))
+					emitFloatMin(irBuilder, left, right, llvmContext.i32x4Type))
 EMIT_SIMD_BINARY_OP(f64x2_min,
 					llvmContext.f64x2Type,
-					callLLVMIntrinsic({}, llvm::Intrinsic::x86_sse2_min_pd, {left, right}))
+					emitFloatMin(irBuilder, left, right, llvmContext.i64x2Type))
 EMIT_SIMD_BINARY_OP(f32x4_max,
 					llvmContext.f32x4Type,
-					callLLVMIntrinsic({}, llvm::Intrinsic::x86_sse_max_ps, {left, right}))
+					emitFloatMax(irBuilder, left, right, llvmContext.i32x4Type))
 EMIT_SIMD_BINARY_OP(f64x2_max,
 					llvmContext.f64x2Type,
-					callLLVMIntrinsic({}, llvm::Intrinsic::x86_sse2_max_pd, {left, right}))
+					emitFloatMax(irBuilder, left, right, llvmContext.i64x2Type))
 
 EMIT_SIMD_FP_UNARY_OP(neg, irBuilder.CreateFNeg(operand))
 EMIT_SIMD_FP_UNARY_OP(abs,
@@ -669,7 +724,40 @@ EMIT_SIMD_REPLACE_LANE_OP(i64x2, llvmContext.i64x2Type, 2, scalar)
 EMIT_SIMD_REPLACE_LANE_OP(f32x4, llvmContext.f32x4Type, 4, scalar)
 EMIT_SIMD_REPLACE_LANE_OP(f64x2, llvmContext.f64x2Type, 2, scalar)
 
-void EmitFunctionContext::v8x16_shuffle(IR::ShuffleImm<16> imm)
+void EmitFunctionContext::v8x16_shuffle1(NoImm)
+{
+	auto indexVector = irBuilder.CreateBitCast(pop(), llvmContext.i8x16Type);
+	auto elementVector = irBuilder.CreateBitCast(pop(), llvmContext.i8x16Type);
+
+	// WASM defines any out-of-range index to write zero to the output vector, but x86 pshufb just
+	// uses the index modulo 16, and only writes zero if the MSB of the index is 1. Do a saturated
+	// add of 112 to set the MSB in any index >= 16 while leaving the index modulo 16 unchanged.
+	auto constant112 = llvm::ConstantInt::get(llvmContext.i8Type, 112);
+	auto saturatedIndexVector = emitAddUnsignedSaturated(irBuilder,
+														 indexVector,
+														 llvm::ConstantVector::get({constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112,
+																					constant112}),
+														 llvmContext.i8x16Type);
+
+	push(callLLVMIntrinsic(
+		{}, llvm::Intrinsic::x86_ssse3_pshuf_b_128, {elementVector, saturatedIndexVector}));
+}
+
+void EmitFunctionContext::v8x16_shuffle2_imm(IR::ShuffleImm<16> imm)
 {
 	auto right = irBuilder.CreateBitCast(pop(), llvmContext.i8x16Type);
 	auto left = irBuilder.CreateBitCast(pop(), llvmContext.i8x16Type);

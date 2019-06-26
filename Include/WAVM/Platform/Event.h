@@ -1,13 +1,10 @@
 #pragma once
 
 #include "WAVM/Inline/BasicTypes.h"
+#include "WAVM/Inline/I128.h"
 #include "WAVM/Platform/Defines.h"
 
 namespace WAVM { namespace Platform {
-	// Returns the current value of a clock that may be used as an absolute time for wait timeouts.
-	// The resolution is microseconds, and the origin is arbitrary.
-	PLATFORM_API U64 getMonotonicClock();
-
 	// Platform-independent events.
 	struct Event
 	{
@@ -20,7 +17,7 @@ namespace WAVM { namespace Platform {
 		void operator=(const Event&) = delete;
 		void operator=(Event&&) = delete;
 
-		PLATFORM_API bool wait(U64 untilClock);
+		PLATFORM_API bool wait(I128 waitDuration);
 		PLATFORM_API void signal();
 
 	private:

@@ -33,7 +33,7 @@ FORCEINLINE void serializeOpcode(InputStream& stream, Opcode& opcode)
 {
 	opcode = (Opcode)0;
 	serializeNativeValue(stream, *(U8*)&opcode);
-	if(opcode > Opcode::maxSingleByteOpcode)
+	if(opcode > (Opcode)maxSingleByteOpcode)
 	{
 		opcode = (Opcode)(U16(opcode) << 8);
 		serializeVarUInt8(stream, *(U8*)&opcode);
@@ -41,7 +41,7 @@ FORCEINLINE void serializeOpcode(InputStream& stream, Opcode& opcode)
 }
 FORCEINLINE void serializeOpcode(OutputStream& stream, Opcode opcode)
 {
-	if(opcode <= Opcode::maxSingleByteOpcode)
+	if(opcode <= (Opcode)maxSingleByteOpcode)
 	{ Serialization::serializeNativeValue(stream, *(U8*)&opcode); }
 	else
 	{
@@ -80,6 +80,10 @@ namespace WAVM { namespace IR {
 		case ValueType::v128: return -5;
 		case ValueType::funcref: return -16;
 		case ValueType::anyref: return -17;
+
+		case ValueType::none:
+		case ValueType::any:
+		case ValueType::nullref:
 		default: throw FatalSerializationException("invalid value type");
 		};
 	}
@@ -122,7 +126,7 @@ namespace WAVM { namespace IR {
 	void serialize(Stream& stream, SizeConstraints& sizeConstraints, bool hasMax)
 	{
 		serializeVarUInt32(stream, sizeConstraints.min);
-		if(hasMax) { serializeVarUInt64(stream, sizeConstraints.max); }
+		if(hasMax) { serializeVarUInt32(stream, sizeConstraints.max); }
 		else if(Stream::isInput)
 		{
 			sizeConstraints.max = UINT64_MAX;
@@ -149,7 +153,9 @@ namespace WAVM { namespace IR {
 			{
 			case ReferenceType::funcref: encodedReferenceType = 0x70; break;
 			case ReferenceType::anyref: encodedReferenceType = 0x6F; break;
-			default: Errors::unreachable();
+
+			case ReferenceType::none:
+			default: WAVM_UNREACHABLE();
 			}
 			serializeNativeValue(stream, encodedReferenceType);
 		}
@@ -224,6 +230,8 @@ namespace WAVM { namespace IR {
 		case InitializerExpression::Type::ref_func:
 			serializeVarUInt32(stream, initializer.ref);
 			break;
+
+		case InitializerExpression::Type::invalid:
 		default: throw FatalSerializationException("invalid initializer expression opcode");
 		}
 		serializeConstant(stream, "expected end opcode", (U8)Opcode::end);
@@ -276,6 +284,7 @@ namespace WAVM { namespace IR {
 				break;
 			default: throw FatalSerializationException("invalid elem segment flags");
 			};
+			elemSegment.elems = std::make_shared<std::vector<IR::Elem>>();
 		}
 		else
 		{
@@ -291,9 +300,28 @@ namespace WAVM { namespace IR {
 				serialize(stream, elemSegment.baseOffset);
 			}
 		}
-		serializeArray(stream, elemSegment.indices, [](Stream& stream, Uptr& functionIndex) {
-			serializeVarUInt32(stream, functionIndex);
-		});
+		if(elemSegment.isActive)
+		{
+			serializeArray(stream, *elemSegment.elems, [](Stream& stream, Elem& elem) {
+				if(Stream::isInput) { elem.type = Elem::Type::ref_func; }
+				wavmAssert(elem.type == Elem::Type::ref_func);
+				serializeVarUInt32(stream, elem.index);
+			});
+		}
+		else
+		{
+			serialize(stream, elemSegment.elemType);
+			serializeArray(stream, *elemSegment.elems, [](Stream& stream, Elem& elem) {
+				serializeOpcode(stream, elem.typeOpcode);
+				switch(elem.type)
+				{
+				case Elem::Type::ref_null: break;
+				case Elem::Type::ref_func: serializeVarUInt32(stream, elem.index); break;
+				default: throw FatalSerializationException("invalid elem opcode");
+				};
+				serializeConstant(stream, "expected end opcode", (U8)Opcode::end);
+			});
+		}
 	}
 
 	template<typename Stream> void serialize(Stream& stream, DataSegment& dataSegment)
@@ -322,6 +350,7 @@ namespace WAVM { namespace IR {
 				break;
 			default: throw FatalSerializationException("invalid data segment flags");
 			};
+			dataSegment.data = std::make_shared<std::vector<U8>>();
 		}
 		else
 		{
@@ -337,7 +366,7 @@ namespace WAVM { namespace IR {
 				serialize(stream, dataSegment.baseOffset);
 			}
 		}
-		serialize(stream, dataSegment.data);
+		serialize(stream, *dataSegment.data);
 	}
 }}
 
@@ -410,15 +439,28 @@ static void serialize(OutputStream& stream, SectionType sectionType)
 	case SectionType::data: serializedSectionId = 11; break;
 	case SectionType::dataCount: serializedSectionId = 12; break;
 	case SectionType::exceptionTypes: serializedSectionId = 0x7f; break;
-	default: Errors::unreachable();
+
+	case SectionType::unknown:
+	default: WAVM_UNREACHABLE();
 	};
 
 	*stream.advance(1) = serializedSectionId;
 }
 
-template<typename Stream> void serialize(Stream& stream, NoImm&, const FunctionDef&) {}
+struct ModuleSerializationState
+{
+	bool hadDataCountSection = false;
+};
 
-static void serialize(InputStream& stream, ControlStructureImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream, NoImm&, const FunctionDef&, const ModuleSerializationState&)
+{
+}
+
+static void serialize(InputStream& stream,
+					  ControlStructureImm& imm,
+					  const FunctionDef&,
+					  const ModuleSerializationState&)
 {
 	Iptr encodedBlockType;
 	serializeVarInt32(stream, encodedBlockType);
@@ -430,7 +472,7 @@ static void serialize(InputStream& stream, ControlStructureImm& imm, const Funct
 	else if(encodedBlockType == -64)
 	{
 		imm.type.format = IndexedBlockType::noParametersOrResult;
-		imm.type.resultType = ValueType::any;
+		imm.type.resultType = ValueType::none;
 	}
 	else
 	{
@@ -439,7 +481,10 @@ static void serialize(InputStream& stream, ControlStructureImm& imm, const Funct
 	}
 }
 
-static void serialize(OutputStream& stream, const ControlStructureImm& imm, const FunctionDef&)
+static void serialize(OutputStream& stream,
+					  const ControlStructureImm& imm,
+					  const FunctionDef&,
+					  const ModuleSerializationState&)
 {
 	Iptr encodedBlockType;
 	switch(imm.type.format)
@@ -449,17 +494,27 @@ static void serialize(OutputStream& stream, const ControlStructureImm& imm, cons
 		encodedBlockType = encodeValueType(imm.type.resultType);
 		break;
 	case IndexedBlockType::functionType: encodedBlockType = imm.type.index; break;
-	default: Errors::unreachable();
+	default: WAVM_UNREACHABLE();
 	};
 	serializeVarInt32(stream, encodedBlockType);
 }
 
-template<typename Stream> void serialize(Stream& stream, BranchImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream, SelectImm& imm, const FunctionDef&, const ModuleSerializationState&)
+{
+	serialize(stream, imm.type);
+}
+
+template<typename Stream>
+void serialize(Stream& stream, BranchImm& imm, const FunctionDef&, const ModuleSerializationState&)
 {
 	serializeVarUInt32(stream, imm.targetDepth);
 }
 
-static void serialize(InputStream& stream, BranchTableImm& imm, FunctionDef& functionDef)
+static void serialize(InputStream& stream,
+					  BranchTableImm& imm,
+					  FunctionDef& functionDef,
+					  const ModuleSerializationState&)
 {
 	std::vector<Uptr> branchTable;
 	serializeArray(stream, branchTable, [](InputStream& stream, Uptr& targetDepth) {
@@ -469,7 +524,10 @@ static void serialize(InputStream& stream, BranchTableImm& imm, FunctionDef& fun
 	functionDef.branchTables.push_back(std::move(branchTable));
 	serializeVarUInt32(stream, imm.defaultTargetDepth);
 }
-static void serialize(OutputStream& stream, BranchTableImm& imm, FunctionDef& functionDef)
+static void serialize(OutputStream& stream,
+					  BranchTableImm& imm,
+					  FunctionDef& functionDef,
+					  const ModuleSerializationState&)
 {
 	wavmAssert(imm.branchTableIndex < functionDef.branchTables.size());
 	std::vector<Uptr>& branchTable = functionDef.branchTables[imm.branchTableIndex];
@@ -479,48 +537,91 @@ static void serialize(OutputStream& stream, BranchTableImm& imm, FunctionDef& fu
 	serializeVarUInt32(stream, imm.defaultTargetDepth);
 }
 
-template<typename Stream> void serialize(Stream& stream, LiteralImm<I32>& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream,
+			   LiteralImm<I32>& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarInt32(stream, imm.value);
 }
 
-template<typename Stream> void serialize(Stream& stream, LiteralImm<I64>& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream,
+			   LiteralImm<I64>& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarInt64(stream, imm.value);
 }
 
 template<typename Stream, bool isGlobal>
-void serialize(Stream& stream, GetOrSetVariableImm<isGlobal>& imm, const FunctionDef&)
+void serialize(Stream& stream,
+			   GetOrSetVariableImm<isGlobal>& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarUInt32(stream, imm.variableIndex);
 }
 
-template<typename Stream> void serialize(Stream& stream, FunctionImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream,
+			   FunctionImm& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarUInt32(stream, imm.functionIndex);
 }
 
-template<typename Stream> void serialize(Stream& stream, CallIndirectImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream,
+			   CallIndirectImm& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarUInt32(stream, imm.type.index);
 	serializeVarUInt32(stream, imm.tableIndex);
 }
 
 template<typename Stream, Uptr naturalAlignmentLog2>
-void serialize(Stream& stream, LoadOrStoreImm<naturalAlignmentLog2>& imm, const FunctionDef&)
+void serialize(Stream& stream,
+			   LoadOrStoreImm<naturalAlignmentLog2>& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarUInt7(stream, imm.alignmentLog2);
 	serializeVarUInt32(stream, imm.offset);
 }
-template<typename Stream> void serialize(Stream& stream, MemoryImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream, MemoryImm& imm, const FunctionDef&, const ModuleSerializationState&)
 {
-	serializeConstant(
-		stream, "memory.(grow|size|copy|fill) immediate reserved field must be 0", U8(0));
+	serializeConstant(stream, "memory.(grow|size|fill) immediate memory field must be 0", U8(0));
 	if(Stream::isInput) { imm.memoryIndex = 0; }
 }
-template<typename Stream> void serialize(Stream& stream, TableImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream,
+			   MemoryCopyImm& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
+{
+	serializeConstant(stream, "memory.copy immediate source field must be 0", U8(0));
+	if(Stream::isInput) { imm.sourceMemoryIndex = 0; }
+	serializeConstant(stream, "memory.copy immediate dest field must be 0", U8(0));
+	if(Stream::isInput) { imm.destMemoryIndex = 0; }
+}
+template<typename Stream>
+void serialize(Stream& stream, TableImm& imm, const FunctionDef&, const ModuleSerializationState&)
 {
 	serializeVarUInt32(stream, imm.tableIndex);
+}
+template<typename Stream>
+void serialize(Stream& stream,
+			   TableCopyImm& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
+{
+	serializeVarUInt32(stream, imm.sourceTableIndex);
+	serializeVarUInt32(stream, imm.destTableIndex);
 }
 
 template<typename Stream> void serialize(Stream& stream, V128& v128)
@@ -529,61 +630,104 @@ template<typename Stream> void serialize(Stream& stream, V128& v128)
 }
 
 template<typename Stream, Uptr numLanes>
-void serialize(Stream& stream, LaneIndexImm<numLanes>& imm, const FunctionDef&)
+void serialize(Stream& stream,
+			   LaneIndexImm<numLanes>& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarUInt7(stream, imm.laneIndex);
 }
 
 template<typename Stream, Uptr numLanes>
-void serialize(Stream& stream, ShuffleImm<numLanes>& imm, const FunctionDef&)
+void serialize(Stream& stream,
+			   ShuffleImm<numLanes>& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	for(Uptr laneIndex = 0; laneIndex < numLanes; ++laneIndex)
 	{ serializeVarUInt7(stream, imm.laneIndices[laneIndex]); }
 }
 
 template<typename Stream, Uptr naturalAlignmentLog2>
-void serialize(Stream& stream, AtomicLoadOrStoreImm<naturalAlignmentLog2>& imm, const FunctionDef&)
+void serialize(Stream& stream,
+			   AtomicLoadOrStoreImm<naturalAlignmentLog2>& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarUInt7(stream, imm.alignmentLog2);
 	serializeVarUInt32(stream, imm.offset);
 }
 
-template<typename Stream> void serialize(Stream& stream, ExceptionTypeImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream,
+			   ExceptionTypeImm& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarUInt32(stream, imm.exceptionTypeIndex);
 }
 
-template<typename Stream> void serialize(Stream& stream, RethrowImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream, RethrowImm& imm, const FunctionDef&, const ModuleSerializationState&)
 {
 	serializeVarUInt32(stream, imm.catchDepth);
 }
 
 template<typename Stream>
-void serialize(Stream& stream, DataSegmentAndMemImm& imm, const FunctionDef&)
+void serialize(Stream& stream,
+			   DataSegmentAndMemImm& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState& moduleState)
 {
+	if(Stream::isInput && !moduleState.hadDataCountSection)
+	{
+		throw FatalSerializationException(
+			"memory.init instruction cannot occur in a module without a DataCount section");
+	}
+
 	serializeVarUInt32(stream, imm.dataSegmentIndex);
 	serializeVarUInt32(stream, imm.memoryIndex);
 }
 
-template<typename Stream> void serialize(Stream& stream, DataSegmentImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream,
+			   DataSegmentImm& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState& moduleState)
 {
+	if(Stream::isInput && !moduleState.hadDataCountSection)
+	{
+		throw FatalSerializationException(
+			"data.drop instruction cannot occur in a module without a DataCount section");
+	}
+
 	serializeVarUInt32(stream, imm.dataSegmentIndex);
 }
 
 template<typename Stream>
-void serialize(Stream& stream, ElemSegmentAndTableImm& imm, const FunctionDef&)
+void serialize(Stream& stream,
+			   ElemSegmentAndTableImm& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarUInt32(stream, imm.elemSegmentIndex);
 	serializeVarUInt32(stream, imm.tableIndex);
 }
 
-template<typename Stream> void serialize(Stream& stream, ElemSegmentImm& imm, const FunctionDef&)
+template<typename Stream>
+void serialize(Stream& stream,
+			   ElemSegmentImm& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serializeVarUInt32(stream, imm.elemSegmentIndex);
 }
 
 template<typename Stream, typename Value>
-void serialize(Stream& stream, LiteralImm<Value>& imm, const FunctionDef&)
+void serialize(Stream& stream,
+			   LiteralImm<Value>& imm,
+			   const FunctionDef&,
+			   const ModuleSerializationState&)
 {
 	serialize(stream, imm.value);
 }
@@ -649,8 +793,10 @@ struct OperatorSerializerStream
 {
 	typedef void Result;
 
-	OperatorSerializerStream(Serialization::OutputStream& inByteStream, FunctionDef& inFunctionDef)
-	: byteStream(inByteStream), functionDef(inFunctionDef)
+	OperatorSerializerStream(Serialization::OutputStream& inByteStream,
+							 FunctionDef& inFunctionDef,
+							 const ModuleSerializationState& inModuleState)
+	: byteStream(inByteStream), functionDef(inFunctionDef), moduleState(inModuleState)
 	{
 	}
 
@@ -659,21 +805,39 @@ struct OperatorSerializerStream
 	{                                                                                              \
 		Opcode opcode = Opcode::name;                                                              \
 		serializeOpcode(byteStream, opcode);                                                       \
-		serialize(byteStream, imm, functionDef);                                                   \
+		serialize(byteStream, imm, functionDef, moduleState);                                      \
 	}
-	ENUM_OPERATORS(VISIT_OPCODE)
+	ENUM_NONOVERLOADED_OPERATORS(VISIT_OPCODE)
 #undef VISIT_OPCODE
 
-	void unknown(Opcode opcode) { throw FatalSerializationException("unknown opcode"); }
+	void select(SelectImm imm) const
+	{
+		// Serialize different opcodes depending on the select immediates:
+		// implicitly-typed select: 0x1b
+		// explicitly-typed select: 0x1c
+		if(imm.type == ValueType::any)
+		{
+			Opcode opcode = Opcode(0x1b);
+			serializeOpcode(byteStream, opcode);
+		}
+		else
+		{
+			Opcode opcode = Opcode(0x1c);
+			serializeOpcode(byteStream, opcode);
+			serialize(byteStream, imm, functionDef, moduleState);
+		}
+	}
 
 private:
 	Serialization::OutputStream& byteStream;
 	FunctionDef& functionDef;
+	const ModuleSerializationState& moduleState;
 };
 
 static void serializeFunctionBody(OutputStream& sectionStream,
 								  Module& module,
-								  FunctionDef& functionDef)
+								  FunctionDef& functionDef,
+								  const ModuleSerializationState& moduleState)
 {
 	ArrayOutputStream bodyStream;
 
@@ -705,7 +869,7 @@ static void serializeFunctionBody(OutputStream& sectionStream,
 
 	// Serialize the function code.
 	OperatorDecoderStream irDecoderStream(functionDef.code);
-	OperatorSerializerStream wasmOpEncoderStream(bodyStream, functionDef);
+	OperatorSerializerStream wasmOpEncoderStream(bodyStream, functionDef, moduleState);
 	while(irDecoderStream) { irDecoderStream.decodeOp(wasmOpEncoderStream); };
 
 	std::vector<U8> bodyBytes = bodyStream.getBytes();
@@ -714,7 +878,8 @@ static void serializeFunctionBody(OutputStream& sectionStream,
 
 static void serializeFunctionBody(InputStream& sectionStream,
 								  Module& module,
-								  FunctionDef& functionDef)
+								  FunctionDef& functionDef,
+								  const ModuleSerializationState& moduleState)
 {
 	Uptr numBodyBytes = 0;
 	serializeVarUInt32(sectionStream, numBodyBytes);
@@ -742,19 +907,37 @@ static void serializeFunctionBody(InputStream& sectionStream,
 	{
 		Opcode opcode;
 		serializeOpcode(bodyStream, opcode);
-		switch(opcode)
+		switch(U16(opcode))
 		{
 #define VISIT_OPCODE(_, name, nameString, Imm, ...)                                                \
-	case Opcode::name:                                                                             \
+	case Uptr(Opcode::name):                                                                       \
 	{                                                                                              \
 		Imm imm;                                                                                   \
-		serialize(bodyStream, imm, functionDef);                                                   \
+		serialize(bodyStream, imm, functionDef, moduleState);                                      \
 		codeValidationStream.name(imm);                                                            \
 		irEncoderStream.name(imm);                                                                 \
 		break;                                                                                     \
 	}
-			ENUM_OPERATORS(VISIT_OPCODE)
+			ENUM_NONOVERLOADED_OPERATORS(VISIT_OPCODE)
 #undef VISIT_OPCODE
+		// Explicitly handle both select opcodes here:
+		case 0x1b:
+		{
+			SelectImm imm{ValueType::any};
+
+			codeValidationStream.select(imm);
+			irEncoderStream.select(imm);
+			break;
+		}
+		case 0x1c:
+		{
+			SelectImm imm;
+			serialize(bodyStream, imm, functionDef, moduleState);
+
+			codeValidationStream.select(imm);
+			irEncoderStream.select(imm);
+			break;
+		}
 		default: throw FatalSerializationException("unknown opcode");
 		};
 	};
@@ -794,7 +977,7 @@ template<typename Stream> void serializeImportSection(Stream& moduleStream, Modu
 	serializeSection(moduleStream, SectionType::import, [&module](Stream& sectionStream) {
 		Uptr size = module.functions.imports.size() + module.tables.imports.size()
 					+ module.memories.imports.size() + module.globals.imports.size()
-					+ module.exceptionTypes.size();
+					+ module.exceptionTypes.imports.size();
 		serializeVarUInt32(sectionStream, size);
 		if(Stream::isInput)
 		{
@@ -808,6 +991,7 @@ template<typename Stream> void serializeImportSection(Stream& moduleStream, Modu
 				throwIfNotValidUTF8(moduleName);
 				throwIfNotValidUTF8(exportName);
 				serialize(sectionStream, kind);
+				Uptr kindIndex = 0;
 				switch(kind)
 				{
 				case ExternKind::function:
@@ -816,6 +1000,7 @@ template<typename Stream> void serializeImportSection(Stream& moduleStream, Modu
 					serializeVarUInt32(sectionStream, functionTypeIndex);
 					if(functionTypeIndex >= module.types.size())
 					{ throw FatalSerializationException("invalid import function type index"); }
+					kindIndex = module.functions.imports.size();
 					module.functions.imports.push_back(
 						{{functionTypeIndex}, std::move(moduleName), std::move(exportName)});
 					break;
@@ -824,6 +1009,7 @@ template<typename Stream> void serializeImportSection(Stream& moduleStream, Modu
 				{
 					TableType tableType;
 					serialize(sectionStream, tableType);
+					kindIndex = module.tables.imports.size();
 					module.tables.imports.push_back(
 						{tableType, std::move(moduleName), std::move(exportName)});
 					break;
@@ -832,6 +1018,7 @@ template<typename Stream> void serializeImportSection(Stream& moduleStream, Modu
 				{
 					MemoryType memoryType;
 					serialize(sectionStream, memoryType);
+					kindIndex = module.memories.imports.size();
 					module.memories.imports.push_back(
 						{memoryType, std::move(moduleName), std::move(exportName)});
 					break;
@@ -840,6 +1027,7 @@ template<typename Stream> void serializeImportSection(Stream& moduleStream, Modu
 				{
 					GlobalType globalType;
 					serialize(sectionStream, globalType);
+					kindIndex = module.globals.imports.size();
 					module.globals.imports.push_back(
 						{globalType, std::move(moduleName), std::move(exportName)});
 					break;
@@ -848,55 +1036,80 @@ template<typename Stream> void serializeImportSection(Stream& moduleStream, Modu
 				{
 					ExceptionType exceptionType;
 					serialize(sectionStream, exceptionType);
+					kindIndex = module.exceptionTypes.imports.size();
 					module.exceptionTypes.imports.push_back(
 						{exceptionType, std::move(moduleName), std::move(exportName)});
 					break;
 				}
+
+				case ExternKind::invalid:
 				default: throw FatalSerializationException("invalid ExternKind");
-				}
+				};
+
+				module.imports.push_back({kind, kindIndex});
 			}
 		}
 		else
 		{
-			for(auto& functionImport : module.functions.imports)
+			wavmAssert(module.imports.size()
+					   == module.functions.imports.size() + module.tables.imports.size()
+							  + module.memories.imports.size() + module.globals.imports.size()
+							  + module.exceptionTypes.imports.size());
+
+			for(const auto& kindIndex : module.imports)
 			{
-				serialize(sectionStream, functionImport.moduleName);
-				serialize(sectionStream, functionImport.exportName);
-				ExternKind kind = ExternKind::function;
-				serialize(sectionStream, kind);
-				serializeVarUInt32(sectionStream, functionImport.type.index);
-			}
-			for(auto& tableImport : module.tables.imports)
-			{
-				serialize(sectionStream, tableImport.moduleName);
-				serialize(sectionStream, tableImport.exportName);
-				ExternKind kind = ExternKind::table;
-				serialize(sectionStream, kind);
-				serialize(sectionStream, tableImport.type);
-			}
-			for(auto& memoryImport : module.memories.imports)
-			{
-				serialize(sectionStream, memoryImport.moduleName);
-				serialize(sectionStream, memoryImport.exportName);
-				ExternKind kind = ExternKind::memory;
-				serialize(sectionStream, kind);
-				serialize(sectionStream, memoryImport.type);
-			}
-			for(auto& globalImport : module.globals.imports)
-			{
-				serialize(sectionStream, globalImport.moduleName);
-				serialize(sectionStream, globalImport.exportName);
-				ExternKind kind = ExternKind::global;
-				serialize(sectionStream, kind);
-				serialize(sectionStream, globalImport.type);
-			}
-			for(auto& exceptionTypeImport : module.exceptionTypes.imports)
-			{
-				serialize(sectionStream, exceptionTypeImport.moduleName);
-				serialize(sectionStream, exceptionTypeImport.exportName);
-				ExternKind kind = ExternKind::exceptionType;
-				serialize(sectionStream, kind);
-				serialize(sectionStream, exceptionTypeImport.type);
+				ExternKind kind = kindIndex.kind;
+				switch(kindIndex.kind)
+				{
+				case ExternKind::function:
+				{
+					auto& functionImport = module.functions.imports[kindIndex.index];
+					serialize(sectionStream, functionImport.moduleName);
+					serialize(sectionStream, functionImport.exportName);
+					serialize(sectionStream, kind);
+					serializeVarUInt32(sectionStream, functionImport.type.index);
+					break;
+				}
+				case ExternKind::table:
+				{
+					auto& tableImport = module.tables.imports[kindIndex.index];
+					serialize(sectionStream, tableImport.moduleName);
+					serialize(sectionStream, tableImport.exportName);
+					serialize(sectionStream, kind);
+					serialize(sectionStream, tableImport.type);
+					break;
+				}
+				case ExternKind::memory:
+				{
+					auto& memoryImport = module.memories.imports[kindIndex.index];
+					serialize(sectionStream, memoryImport.moduleName);
+					serialize(sectionStream, memoryImport.exportName);
+					serialize(sectionStream, kind);
+					serialize(sectionStream, memoryImport.type);
+					break;
+				}
+				case ExternKind::global:
+				{
+					auto& globalImport = module.globals.imports[kindIndex.index];
+					serialize(sectionStream, globalImport.moduleName);
+					serialize(sectionStream, globalImport.exportName);
+					serialize(sectionStream, kind);
+					serialize(sectionStream, globalImport.type);
+					break;
+				}
+				case ExternKind::exceptionType:
+				{
+					auto& exceptionTypeImport = module.exceptionTypes.imports[kindIndex.index];
+					serialize(sectionStream, exceptionTypeImport.moduleName);
+					serialize(sectionStream, exceptionTypeImport.exportName);
+					serialize(sectionStream, kind);
+					serialize(sectionStream, exceptionTypeImport.type);
+					break;
+				}
+
+				case ExternKind::invalid:
+				default: WAVM_UNREACHABLE();
+				};
 			}
 		}
 	});
@@ -979,29 +1192,35 @@ template<typename Stream> void serializeElementSection(Stream& moduleStream, Mod
 	});
 }
 
-static void serializeCodeSection(InputStream& moduleStream, Module& module)
+static void serializeCodeSection(InputStream& moduleStream,
+								 Module& module,
+								 const ModuleSerializationState& moduleState)
 {
-	serializeSection(moduleStream, SectionType::code, [&module](InputStream& sectionStream) {
-		Uptr numFunctionBodies = module.functions.defs.size();
-		serializeVarUInt32(sectionStream, numFunctionBodies);
-		if(numFunctionBodies != module.functions.defs.size())
-		{
-			throw FatalSerializationException(
-				"function and code sections have mismatched function counts");
-		}
-		for(FunctionDef& functionDef : module.functions.defs)
-		{ serializeFunctionBody(sectionStream, module, functionDef); }
-	});
+	serializeSection(
+		moduleStream, SectionType::code, [&module, &moduleState](InputStream& sectionStream) {
+			Uptr numFunctionBodies = module.functions.defs.size();
+			serializeVarUInt32(sectionStream, numFunctionBodies);
+			if(numFunctionBodies != module.functions.defs.size())
+			{
+				throw FatalSerializationException(
+					"function and code sections have mismatched function counts");
+			}
+			for(FunctionDef& functionDef : module.functions.defs)
+			{ serializeFunctionBody(sectionStream, module, functionDef, moduleState); }
+		});
 }
 
-void serializeCodeSection(OutputStream& moduleStream, Module& module)
+void serializeCodeSection(OutputStream& moduleStream,
+						  Module& module,
+						  const ModuleSerializationState& moduleState)
 {
-	serializeSection(moduleStream, SectionType::code, [&module](OutputStream& sectionStream) {
-		Uptr numFunctionBodies = module.functions.defs.size();
-		serializeVarUInt32(sectionStream, numFunctionBodies);
-		for(FunctionDef& functionDef : module.functions.defs)
-		{ serializeFunctionBody(sectionStream, module, functionDef); }
-	});
+	serializeSection(
+		moduleStream, SectionType::code, [&module, &moduleState](OutputStream& sectionStream) {
+			Uptr numFunctionBodies = module.functions.defs.size();
+			serializeVarUInt32(sectionStream, numFunctionBodies);
+			for(FunctionDef& functionDef : module.functions.defs)
+			{ serializeFunctionBody(sectionStream, module, functionDef, moduleState); }
+		});
 }
 
 template<typename Stream> void serializeDataCountSection(Stream& moduleStream, Module& module)
@@ -1030,9 +1249,9 @@ void serializeDataSection(InputStream& moduleStream, Module& module, bool hadDat
 						 serializeVarUInt32(sectionStream, numDataSegments);
 						 if(!hadDataCountSection)
 						 {
-							 // To make fuzzing more effective, fail gracefully instead of through
-							 // OOM if the DataCount section specifies a large number of data
-							 // segments.
+							 // To make fuzzing more effective, fail gracefully instead of
+							 // through OOM if the DataCount section specifies a large number of
+							 // data segments.
 							 if(numDataSegments > module.featureSpec.maxDataSegments)
 							 { throw FatalSerializationException("too many data segments"); }
 							 module.dataSegments.resize(numDataSegments);
@@ -1057,6 +1276,8 @@ void serializeDataSection(OutputStream& moduleStream, Module& module)
 
 static void serializeModule(OutputStream& moduleStream, Module& module)
 {
+	ModuleSerializationState moduleState;
+
 	serializeConstant(moduleStream, "magic number", U32(magicNumber));
 	serializeConstant(moduleStream, "version", U32(currentVersion));
 
@@ -1074,8 +1295,13 @@ static void serializeModule(OutputStream& moduleStream, Module& module)
 	if(module.exports.size() > 0) { serializeExportSection(moduleStream, module); }
 	if(module.startFunctionIndex != UINTPTR_MAX) { serializeStartSection(moduleStream, module); }
 	if(module.elemSegments.size() > 0) { serializeElementSection(moduleStream, module); }
-	if(module.dataSegments.size() > 0) { serializeDataCountSection(moduleStream, module); }
-	if(module.functions.defs.size() > 0) { serializeCodeSection(moduleStream, module); }
+	if(module.dataSegments.size() > 0)
+	{
+		serializeDataCountSection(moduleStream, module);
+		moduleState.hadDataCountSection = true;
+	}
+	if(module.functions.defs.size() > 0)
+	{ serializeCodeSection(moduleStream, module, moduleState); }
 	if(module.dataSegments.size() > 0) { serializeDataSection(moduleStream, module); }
 
 	for(auto& userSection : module.userSections) { serialize(moduleStream, userSection); }
@@ -1087,8 +1313,8 @@ static void serializeModule(InputStream& moduleStream, Module& module)
 	serializeConstant(moduleStream, "version", U32(currentVersion));
 
 	SectionType lastKnownSectionType = SectionType::unknown;
+	ModuleSerializationState moduleState;
 	bool hadFunctionDefinitions = false;
-	bool hadDataCountSection = false;
 	bool hadDataSection = false;
 	while(moduleStream.capacity())
 	{
@@ -1148,14 +1374,14 @@ static void serializeModule(InputStream& moduleStream, Module& module)
 			break;
 		case SectionType::dataCount:
 			serializeDataCountSection(moduleStream, module);
-			hadDataCountSection = true;
+			moduleState.hadDataCountSection = true;
 			break;
 		case SectionType::code:
-			serializeCodeSection(moduleStream, module);
+			serializeCodeSection(moduleStream, module, moduleState);
 			hadFunctionDefinitions = true;
 			break;
 		case SectionType::data:
-			serializeDataSection(moduleStream, module, hadDataCountSection);
+			serializeDataSection(moduleStream, module, moduleState.hadDataCountSection);
 			hadDataSection = true;
 			IR::validateDataSegments(module);
 			break;
@@ -1166,20 +1392,21 @@ static void serializeModule(InputStream& moduleStream, Module& module)
 			serialize(moduleStream, userSection);
 			break;
 		}
+		case SectionType::unknown:
 		default: throw FatalSerializationException("unknown section ID");
 		};
 	};
 
 	if(module.functions.defs.size() && !hadFunctionDefinitions)
 	{
-		throw IR::ValidationException(
+		throw FatalSerializationException(
 			"module contained function declarations, but no corresponding "
 			"function definition section");
 	}
 
 	if(module.dataSegments.size() && !hadDataSection)
 	{
-		throw IR::ValidationException(
+		throw FatalSerializationException(
 			"module contained DataCount section with non-zero segment count, but no corresponding "
 			"Data section");
 	}

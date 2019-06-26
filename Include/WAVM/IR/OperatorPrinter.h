@@ -22,11 +22,6 @@ namespace WAVM { namespace IR {
 		ENUM_OPERATORS(VISIT_OPCODE)
 #undef VISIT_OPCODE
 
-		std::string unknown(Opcode opcode)
-		{
-			return "<unknown opcode " + std::to_string((Uptr)opcode) + ">";
-		}
-
 	private:
 		const Module& module;
 		const FunctionDef& functionDef;
@@ -37,6 +32,7 @@ namespace WAVM { namespace IR {
 			const FunctionType type = resolveBlockType(module, imm.type);
 			return std::string(" : ") + asString(type.params()) + " -> " + asString(type.results());
 		}
+		std::string describeImm(SelectImm imm) { return asString(imm.type); }
 		std::string describeImm(BranchImm imm) { return " " + std::to_string(imm.targetDepth); }
 		std::string describeImm(BranchTableImm imm)
 		{
@@ -81,7 +77,17 @@ namespace WAVM { namespace IR {
 				   + " align=" + std::to_string(1 << imm.alignmentLog2);
 		}
 		std::string describeImm(MemoryImm imm) { return " " + std::to_string(imm.memoryIndex); }
+		std::string describeImm(MemoryCopyImm imm)
+		{
+			return " " + std::to_string(imm.sourceMemoryIndex) + " "
+				   + std::to_string(imm.destMemoryIndex);
+		}
 		std::string describeImm(TableImm imm) { return " " + std::to_string(imm.tableIndex); }
+		std::string describeImm(TableCopyImm imm)
+		{
+			return " " + std::to_string(imm.sourceTableIndex) + " "
+				   + std::to_string(imm.destTableIndex);
+		}
 
 		template<Uptr numLanes> std::string describeImm(LaneIndexImm<numLanes> imm)
 		{

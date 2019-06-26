@@ -9,19 +9,32 @@ namespace WAVM { namespace IR {
 	struct Module;
 }}
 
+namespace WAVM { namespace VFS {
+	struct FD;
+}}
+
 namespace WAVM { namespace Emscripten {
 	struct Instance
 	{
+		Runtime::GCPointer<Runtime::ModuleInstance> moduleInstance;
+
 		Runtime::GCPointer<Runtime::ModuleInstance> env;
 		Runtime::GCPointer<Runtime::ModuleInstance> asm2wasm;
 		Runtime::GCPointer<Runtime::ModuleInstance> global;
 
-		Runtime::GCPointer<Runtime::Memory> emscriptenMemory;
+		Runtime::GCPointer<Runtime::Memory> memory;
+
+		U32 errnoAddress{0};
+
+		WAVM::VFS::FD* stdIn{nullptr};
+		WAVM::VFS::FD* stdOut{nullptr};
+		WAVM::VFS::FD* stdErr{nullptr};
 	};
 
 	EMSCRIPTEN_API Instance* instantiate(Runtime::Compartment* compartment,
 										 const IR::Module& module);
-	EMSCRIPTEN_API void initializeGlobals(Runtime::Context* context,
+	EMSCRIPTEN_API void initializeGlobals(Emscripten::Instance* instance,
+										  Runtime::Context* context,
 										  const IR::Module& module,
 										  Runtime::ModuleInstance* moduleInstance);
 	EMSCRIPTEN_API void injectCommandArgs(Emscripten::Instance* instance,

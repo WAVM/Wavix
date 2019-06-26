@@ -11,6 +11,9 @@ set(PublicHeaders
 	HashMap.h HashMapImpl.h HashMap.natvis
 	HashSet.h HashSetImpl.h HashSet.natvis
 	HashTable.h HashTableImpl.h HashTable.natvis
+	I128.h
+	I128Impl.h
+	I128Impl.LICENSE
 	IndexMap.h
 	IntrusiveSharedPtr.h
 	IsNameChar.h
@@ -19,7 +22,8 @@ set(PublicHeaders
 	Serialization.h
 	Timing.h
 	Unicode.h)
-add_custom_target(Inline SOURCES ${PublicHeaders})
-set_target_properties(Inline PROPERTIES FOLDER Libraries)
+
+WAVM_ADD_LIB_COMPONENT(Inline
+	NONCOMPILED_SOURCES ${PublicHeaders})
 
 add_subdirectory(xxhash)

@@ -120,7 +120,7 @@ bool WAST::tryParseValueType(CursorState* cursor, ValueType& outValueType)
 	case t_v128: outValueType = ValueType::v128; break;
 	case t_anyref: outValueType = ValueType::anyref; break;
 	case t_funcref: outValueType = ValueType::funcref; break;
-	default: outValueType = ValueType::any; return false;
+	default: outValueType = ValueType::none; return false;
 	};
 
 	++cursor->nextToken;
@@ -301,13 +301,23 @@ bool WAST::tryParseName(CursorState* cursor, Name& outName)
 		{
 			std::string quotedNameChars;
 			parseStringChars(nextChar, cursor->parseState, quotedNameChars);
-			cursor->parseState->quotedNameStrings.push_back(
-				std::unique_ptr<std::string>{new std::string(std::move(quotedNameChars))});
+			if(quotedNameChars.size() == 0)
+			{
+				parseErrorf(
+					cursor->parseState, cursor->nextToken, "quoted names must not be empty");
+				outName = Name();
+			}
+			else
+			{
+				cursor->parseState->quotedNameStrings.push_back(
+					std::unique_ptr<std::string>{new std::string(std::move(quotedNameChars))});
+				const std::unique_ptr<std::string>& quotedName
+					= cursor->parseState->quotedNameStrings.back();
+				wavmAssert(quotedName->size() <= UINT32_MAX);
+				outName
+					= Name(quotedName->data(), U32(quotedName->size()), cursor->nextToken->begin);
+			}
 		}
-		const std::unique_ptr<std::string>& quotedName
-			= cursor->parseState->quotedNameStrings.back();
-		wavmAssert(quotedName->size() <= UINT32_MAX);
-		outName = Name(quotedName->data(), U32(quotedName->size()), cursor->nextToken->begin);
 	}
 	else
 	{
@@ -340,7 +350,7 @@ bool WAST::tryParseNameOrIndexRef(CursorState* cursor, Reference& outRef)
 		outRef.type = Reference::Type::name;
 		return true;
 	}
-	else if(tryParseIptr(cursor, outRef.index))
+	else if(tryParseUptr(cursor, outRef.index))
 	{
 		outRef.type = Reference::Type::index;
 		return true;
@@ -425,7 +435,9 @@ Uptr WAST::resolveRef(ParseState* parseState,
 			return nameIndexPair->value;
 		}
 	}
-	default: Errors::unreachable();
+
+	case Reference::Type::invalid:
+	default: WAVM_UNREACHABLE();
 	};
 }
 

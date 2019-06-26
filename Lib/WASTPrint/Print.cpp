@@ -200,7 +200,9 @@ static void print(std::string& string, ReferenceType type)
 	{
 	case ReferenceType::funcref: string += "funcref"; break;
 	case ReferenceType::anyref: string += "anyref"; break;
-	default: Errors::unreachable();
+
+	case ReferenceType::none:
+	default: WAVM_UNREACHABLE();
 	}
 }
 
@@ -299,6 +301,8 @@ struct ModulePrintContext
 		for(auto& name : names.tables) { globalNameScope.map(name); }
 		for(auto& name : names.memories) { globalNameScope.map(name); }
 		for(auto& name : names.globals) { globalNameScope.map(name); }
+		for(auto& name : names.elemSegments) { globalNameScope.map(name); }
+		for(auto& name : names.dataSegments) { globalNameScope.map(name); }
 		for(auto& name : names.exceptionTypes) { globalNameScope.map(name); }
 		for(auto& function : names.functions)
 		{
@@ -340,7 +344,9 @@ struct ModulePrintContext
 		case InitializerExpression::Type::ref_func:
 			string += "(ref.func " + names.functions[expression.ref].name + ')';
 			break;
-		default: Errors::unreachable();
+
+		case InitializerExpression::Type::invalid:
+		default: WAVM_UNREACHABLE();
 		};
 	}
 };
@@ -377,7 +383,6 @@ struct FunctionPrintContext
 
 	void printFunctionBody();
 
-	void unknown(Opcode) { Errors::unreachable(); }
 	void block(ControlStructureImm imm)
 	{
 		string += "\nblock";
@@ -460,7 +465,16 @@ struct FunctionPrintContext
 	}
 	void drop(NoImm) { string += "\ndrop"; }
 
-	void select(NoImm) { string += "\nselect"; }
+	void select(SelectImm imm)
+	{
+		if(imm.type == ValueType::any) { string += "\nselect"; }
+		else
+		{
+			string += "\nselect (result ";
+			string += asString(imm.type);
+			string += ")";
+		}
+	}
 
 	void local_get(GetOrSetVariableImm<false> imm)
 	{
@@ -491,6 +505,14 @@ struct FunctionPrintContext
 	void table_set(TableImm imm)
 	{
 		string += "\ntable.set " + moduleContext.names.tables[imm.tableIndex];
+	}
+	void table_grow(TableImm imm)
+	{
+		string += "\ntable.grow " + moduleContext.names.tables[imm.tableIndex];
+	}
+	void table_fill(TableImm imm)
+	{
+		string += "\ntable.fill " + moduleContext.names.tables[imm.tableIndex];
 	}
 
 	void throw_(ExceptionTypeImm imm)
@@ -524,10 +546,22 @@ struct FunctionPrintContext
 
 	void printImm(NoImm) {}
 	void printImm(MemoryImm imm) { errorUnless(imm.memoryIndex == 0); }
+	void printImm(MemoryCopyImm imm)
+	{
+		errorUnless(imm.sourceMemoryIndex == 0);
+		errorUnless(imm.destMemoryIndex == 0);
+	}
 	void printImm(TableImm imm)
 	{
 		string += ' ';
 		string += moduleContext.names.tables[imm.tableIndex];
+	}
+	void printImm(TableCopyImm imm)
+	{
+		string += ' ';
+		string += moduleContext.names.tables[imm.sourceTableIndex];
+		string += ' ';
+		string += moduleContext.names.tables[imm.destTableIndex];
 	}
 	void printImm(FunctionImm imm)
 	{
@@ -584,13 +618,11 @@ struct FunctionPrintContext
 
 	template<Uptr numLanes> void printImm(ShuffleImm<numLanes> imm)
 	{
-		string += " (";
 		for(Uptr laneIndex = 0; laneIndex < numLanes; ++laneIndex)
 		{
-			if(laneIndex != 0) { string += ' '; }
+			string += ' ';
 			string += std::to_string(imm.laneIndices[laneIndex]);
 		}
-		string += ')';
 	}
 
 	template<Uptr naturalAlignmentLog2>
@@ -606,17 +638,23 @@ struct FunctionPrintContext
 
 	void printImm(DataSegmentAndMemImm imm)
 	{
-		string += " " + std::to_string(imm.dataSegmentIndex);
-		string += " " + std::to_string(imm.memoryIndex);
+		string += " " + moduleContext.names.dataSegments[imm.dataSegmentIndex];
+		string += " " + moduleContext.names.memories[imm.memoryIndex];
 	}
-	void printImm(DataSegmentImm imm) { string += " " + std::to_string(imm.dataSegmentIndex); }
+	void printImm(DataSegmentImm imm)
+	{
+		string += " " + moduleContext.names.dataSegments[imm.dataSegmentIndex];
+	}
 
 	void printImm(ElemSegmentAndTableImm imm)
 	{
-		string += " " + std::to_string(imm.elemSegmentIndex);
-		string += " " + std::to_string(imm.tableIndex);
+		string += " " + moduleContext.names.elemSegments[imm.elemSegmentIndex];
+		string += " " + moduleContext.names.tables[imm.tableIndex];
 	}
-	void printImm(ElemSegmentImm imm) { string += " " + std::to_string(imm.elemSegmentIndex); }
+	void printImm(ElemSegmentImm imm)
+	{
+		string += " " + moduleContext.names.elemSegments[imm.elemSegmentIndex];
+	}
 
 	void try_(ControlStructureImm imm)
 	{
@@ -746,51 +784,56 @@ void ModulePrintContext::printModule()
 	}
 
 	// Print the module imports.
-	for(Uptr importIndex = 0; importIndex < module.functions.imports.size(); ++importIndex)
+	for(const auto& import : module.imports)
 	{
-		printImport(string,
-					module,
-					module.functions.imports[importIndex],
-					importIndex,
-					names.functions[importIndex].name.c_str(),
-					"func");
+		switch(import.kind)
+		{
+		case ExternKind::function:
+			printImport(string,
+						module,
+						module.functions.imports[import.index],
+						import.index,
+						names.functions[import.index].name.c_str(),
+						"func");
+			break;
+		case ExternKind::table:
+			printImport(string,
+						module,
+						module.tables.imports[import.index],
+						import.index,
+						names.tables[import.index].c_str(),
+						"table");
+			break;
+		case ExternKind::memory:
+			printImport(string,
+						module,
+						module.memories.imports[import.index],
+						import.index,
+						names.memories[import.index].c_str(),
+						"memory");
+			break;
+		case ExternKind::global:
+			printImport(string,
+						module,
+						module.globals.imports[import.index],
+						import.index,
+						names.globals[import.index].c_str(),
+						"global");
+			break;
+		case ExternKind::exceptionType:
+			printImport(string,
+						module,
+						module.exceptionTypes.imports[import.index],
+						import.index,
+						names.exceptionTypes[import.index].c_str(),
+						"exception_type");
+			break;
+
+		case ExternKind::invalid:
+		default: WAVM_UNREACHABLE();
+		};
 	}
-	for(Uptr importIndex = 0; importIndex < module.tables.imports.size(); ++importIndex)
-	{
-		printImport(string,
-					module,
-					module.tables.imports[importIndex],
-					importIndex,
-					names.tables[importIndex].c_str(),
-					"table");
-	}
-	for(Uptr importIndex = 0; importIndex < module.memories.imports.size(); ++importIndex)
-	{
-		printImport(string,
-					module,
-					module.memories.imports[importIndex],
-					importIndex,
-					names.memories[importIndex].c_str(),
-					"memory");
-	}
-	for(Uptr importIndex = 0; importIndex < module.globals.imports.size(); ++importIndex)
-	{
-		printImport(string,
-					module,
-					module.globals.imports[importIndex],
-					importIndex,
-					names.globals[importIndex].c_str(),
-					"global");
-	}
-	for(Uptr importIndex = 0; importIndex < module.exceptionTypes.imports.size(); ++importIndex)
-	{
-		printImport(string,
-					module,
-					module.exceptionTypes.imports[importIndex],
-					importIndex,
-					names.exceptionTypes[importIndex].c_str(),
-					"exception_type");
-	}
+
 	// Print the module exports.
 	for(auto export_ : module.exports)
 	{
@@ -808,7 +851,9 @@ void ModulePrintContext::printModule()
 		case ExternKind::exceptionType:
 			string += "exception_type " + names.exceptionTypes[export_.index];
 			break;
-		default: Errors::unreachable();
+
+		case ExternKind::invalid:
+		default: WAVM_UNREACHABLE();
 		};
 		string += ')';
 	}
@@ -863,54 +908,88 @@ void ModulePrintContext::printModule()
 	}
 
 	// Print the data and elem segment definitions.
-	for(auto elemSegment : module.elemSegments)
+	for(Uptr segmentIndex = 0; segmentIndex < module.elemSegments.size(); ++segmentIndex)
 	{
+		const ElemSegment& elemSegment = module.elemSegments[segmentIndex];
 		string += '\n';
 		ScopedTagPrinter dataTag(string, "elem");
 		string += ' ';
-		if(!elemSegment.isActive) { string += "passive"; }
+		string += names.elemSegments[segmentIndex];
+		string += ' ';
+		if(!elemSegment.isActive)
+		{
+			switch(elemSegment.elemType)
+			{
+			case ReferenceType::anyref: string += " anyref"; break;
+			case ReferenceType::funcref: string += " funcref"; break;
+
+			case ReferenceType::none:
+			default: WAVM_UNREACHABLE();
+			};
+		}
 		else
 		{
 			string += names.tables[elemSegment.tableIndex];
 			string += ' ';
 			printInitializerExpression(elemSegment.baseOffset);
 		}
+
 		enum
 		{
 			numElemsPerLine = 8
 		};
-		for(Uptr elementIndex = 0; elementIndex < elemSegment.indices.size(); ++elementIndex)
+		for(Uptr elementIndex = 0; elementIndex < elemSegment.elems->size(); ++elementIndex)
 		{
-			if(elementIndex % numElemsPerLine == 0) { string += '\n'; }
+			const Elem& elem = (*elemSegment.elems)[elementIndex];
+			string += (elementIndex % numElemsPerLine == 0) ? '\n' : ' ';
+			if(elemSegment.isActive)
+			{
+				wavmAssert(elem.type == Elem::Type::ref_func);
+				wavmAssert(elem.index < names.functions.size());
+				string += names.functions[elem.index].name;
+			}
 			else
 			{
-				string += ' ';
+				switch(elem.type)
+				{
+				case Elem::Type::ref_null: string += "(ref.null)"; break;
+				case Elem::Type::ref_func:
+					wavmAssert(elem.index < names.functions.size());
+					string += "(ref.func ";
+					string += names.functions[elem.index].name;
+					string += ')';
+					break;
+
+				default: WAVM_UNREACHABLE();
+				};
 			}
-			string += names.functions[elemSegment.indices[elementIndex]].name;
 		}
 	}
-	for(auto dataSegment : module.dataSegments)
+	for(Uptr segmentIndex = 0; segmentIndex < module.dataSegments.size(); ++segmentIndex)
 	{
+		const DataSegment& dataSegment = module.dataSegments[segmentIndex];
 		string += '\n';
 		ScopedTagPrinter dataTag(string, "data");
 		string += ' ';
-		if(!dataSegment.isActive) { string += "passive"; }
-		else
+		string += names.dataSegments[segmentIndex];
+		string += ' ';
+		if(dataSegment.isActive)
 		{
 			string += names.memories[dataSegment.memoryIndex];
 			string += ' ';
 			printInitializerExpression(dataSegment.baseOffset);
 		}
+
 		enum
 		{
 			numBytesPerLine = 64
 		};
-		for(Uptr offset = 0; offset < dataSegment.data.size(); offset += numBytesPerLine)
+		for(Uptr offset = 0; offset < dataSegment.data->size(); offset += numBytesPerLine)
 		{
 			string += "\n\"";
 			string += escapeString(
-				(const char*)dataSegment.data.data() + offset,
-				std::min(Uptr(dataSegment.data.size()) - offset, Uptr(numBytesPerLine)));
+				(const char*)dataSegment.data->data() + offset,
+				std::min(Uptr(dataSegment.data->size()) - offset, Uptr(numBytesPerLine)));
 			string += "\"";
 		}
 	}
@@ -1177,7 +1256,7 @@ void ModulePrintContext::printLinkingSection(const IR::UserSection& linkingSecti
 							break;
 						default:
 							linkingSectionString
-								+= "\nUnknown comdat kind: " + std::to_string(kind);
+								+= "\n;; Unknown comdat kind: " + std::to_string(kind);
 							throw FatalSerializationException("Unknown COMDAT kind");
 							break;
 						};
@@ -1281,15 +1360,29 @@ void ModulePrintContext::printLinkingSection(const IR::UserSection& linkingSecti
 					switch(SymbolKind(kind))
 					{
 					case SymbolKind::function:
-						linkingSectionString += " " + names.functions[index].name;
+						if(index < names.functions.size())
+						{ linkingSectionString += " " + names.functions[index].name; }
+						else
+						{
+							linkingSectionString
+								+= " *invalid index " + std::to_string(index) + "*";
+						}
 						break;
 					case SymbolKind::global:
-						linkingSectionString += " " + names.globals[index];
+						if(index < names.globals.size())
+						{ linkingSectionString += " " + names.globals[index]; }
+						else
+						{
+							linkingSectionString
+								+= " *invalid index " + std::to_string(index) + "*";
+						}
 						break;
 					case SymbolKind::data:
 					case SymbolKind::section:
 						linkingSectionString += " index=" + std::to_string(index);
 						break;
+
+					default: WAVM_UNREACHABLE();
 					}
 
 					if(SymbolKind(kind) == SymbolKind::data)
@@ -1325,6 +1418,8 @@ void ModulePrintContext::printLinkingSection(const IR::UserSection& linkingSecti
 				--indentDepth;
 				break;
 			}
+
+			case LinkingSubsectionType::invalid:
 			default:
 				linkingSectionString += "\n;; Unknown WASM linking subsection type: "
 										+ std::to_string(subsectionType);

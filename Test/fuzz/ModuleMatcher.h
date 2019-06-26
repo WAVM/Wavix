@@ -13,6 +13,9 @@ namespace WAVM {
 
 		void verify()
 		{
+			verifyMatches(aModule.imports, bModule.imports);
+			verifyMatches(aModule.exports, bModule.exports);
+
 			verifyMatches(aModule.functions, bModule.functions);
 			verifyMatches(aModule.tables, bModule.tables);
 			verifyMatches(aModule.memories, bModule.memories);
@@ -43,7 +46,7 @@ namespace WAVM {
 				if(segment.isActive
 				   && (segment.tableIndex != wastSegment.tableIndex
 					   || segment.baseOffset != wastSegment.baseOffset
-					   || segment.indices != wastSegment.indices))
+					   || segment.elems != wastSegment.elems))
 				{ failVerification(); }
 			}
 		}
@@ -51,6 +54,9 @@ namespace WAVM {
 	private:
 		const Module& aModule;
 		const Module& bModule;
+
+		const FunctionDef* aFunction = nullptr;
+		const FunctionDef* bFunction = nullptr;
 
 		[[noreturn]] void failVerification()
 		{
@@ -60,6 +66,16 @@ namespace WAVM {
 		void verifyMatches(const IndexedFunctionType& a, const IndexedFunctionType& b)
 		{
 			if(aModule.types[a.index] != bModule.types[b.index]) { failVerification(); }
+		}
+
+		void verifyMatches(const KindAndIndex& a, const KindAndIndex& b)
+		{
+			if(a.kind != b.kind || a.index != b.index) { failVerification(); }
+		}
+
+		void verifyMatches(const Export& a, const Export& b)
+		{
+			if(a.name != b.name || a.kind != b.kind || a.index != b.index) { failVerification(); }
 		}
 
 		template<typename Type> void verifyMatches(const Import<Type>& a, const Import<Type>& b)
@@ -73,15 +89,30 @@ namespace WAVM {
 		{
 			if(a.memoryIndex != b.memoryIndex) { failVerification(); }
 		}
+		void verifyMatches(MemoryCopyImm a, MemoryCopyImm b)
+		{
+			if(a.sourceMemoryIndex != b.sourceMemoryIndex || a.destMemoryIndex != b.destMemoryIndex)
+			{ failVerification(); }
+		}
 		void verifyMatches(TableImm a, TableImm b)
 		{
 			if(a.tableIndex != b.tableIndex) { failVerification(); }
+		}
+		void verifyMatches(TableCopyImm a, TableCopyImm b)
+		{
+			if(a.sourceTableIndex != b.sourceTableIndex || a.destTableIndex != b.destTableIndex)
+			{ failVerification(); }
 		}
 
 		void verifyMatches(ControlStructureImm a, ControlStructureImm b)
 		{
 			if(resolveBlockType(aModule, a.type) != resolveBlockType(bModule, b.type))
 			{ failVerification(); }
+		}
+
+		void verifyMatches(SelectImm a, SelectImm b)
+		{
+			if(a.type != b.type) { failVerification(); }
 		}
 
 		void verifyMatches(BranchImm a, BranchImm b)
@@ -92,7 +123,8 @@ namespace WAVM {
 		void verifyMatches(BranchTableImm a, BranchTableImm b)
 		{
 			if(a.defaultTargetDepth != b.defaultTargetDepth
-			   || a.branchTableIndex != b.branchTableIndex)
+			   || aFunction->branchTables[a.branchTableIndex]
+					  != bFunction->branchTables[b.branchTableIndex])
 			{ failVerification(); }
 		}
 
@@ -179,10 +211,11 @@ namespace WAVM {
 
 		void verifyMatches(const FunctionDef& a, const FunctionDef& b)
 		{
+			aFunction = &a;
+			bFunction = &b;
+
 			verifyMatches(a.type, b.type);
-			if(a.branchTables != b.branchTables
-			   || a.nonParameterLocalTypes != b.nonParameterLocalTypes)
-			{ failVerification(); }
+			if(a.nonParameterLocalTypes != b.nonParameterLocalTypes) { failVerification(); }
 
 			if(a.code.size() != b.code.size()) { failVerification(); }
 
@@ -220,11 +253,14 @@ namespace WAVM {
 	}
 					ENUM_OPERATORS(VISIT_OPCODE)
 #undef VISIT_OPCODE
-				default: Errors::unreachable();
+				default: WAVM_UNREACHABLE();
 				}
 			}
 			wavmAssert(aNextByte == aEnd);
 			wavmAssert(bNextByte == bEnd);
+
+			aFunction = nullptr;
+			bFunction = nullptr;
 		}
 
 		void verifyMatches(const TableType& a, const TableType& b)
@@ -265,17 +301,19 @@ namespace WAVM {
 
 		void verifyMatches(const TableDef& a, const TableDef& b) { verifyMatches(a.type, b.type); }
 
+		template<typename Element>
+		void verifyMatches(const std::vector<Element>& a, const std::vector<Element>& b)
+		{
+			if(a.size() != b.size()) { failVerification(); }
+			for(Uptr index = 0; index < a.size(); ++index) { verifyMatches(a[index], b[index]); }
+		}
+
 		template<typename Definition, typename Type>
 		void verifyMatches(const IndexSpace<Definition, Type>& a,
 						   const IndexSpace<Definition, Type>& b)
 		{
-			if(a.imports.size() != b.imports.size()) { failVerification(); }
-			for(Uptr importIndex = 0; importIndex < a.imports.size(); ++importIndex)
-			{ verifyMatches(a.imports[importIndex], b.imports[importIndex]); }
-
-			if(a.defs.size() != b.defs.size()) { failVerification(); }
-			for(Uptr defIndex = 0; defIndex < a.defs.size(); ++defIndex)
-			{ verifyMatches(a.defs[defIndex], b.defs[defIndex]); }
+			verifyMatches(a.imports, b.imports);
+			verifyMatches(a.defs, b.defs);
 		}
 	};
 }

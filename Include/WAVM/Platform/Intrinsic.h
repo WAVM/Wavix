@@ -22,8 +22,10 @@ namespace WAVM { namespace Platform {
 		// BitScanReverse returns 0 if the input is 0.
 		unsigned long result;
 		return _BitScanReverse(&result, value) ? (31 - result) : 32;
-#else
+#elif defined(__GNUC__)
 		return value == 0 ? 32 : __builtin_clz(value);
+#else
+#error Unsupported compiler
 #endif
 	}
 
@@ -34,8 +36,10 @@ namespace WAVM { namespace Platform {
 		return _BitScanReverse64(&result, value) ? (63 - result) : 64;
 #elif defined(_WIN32)
 		DEBUG_TRAP();
-#else
+#elif defined(__GNUC__)
 		return value == 0 ? 64 : __builtin_clzll(value);
+#else
+#error Unsupported compiler
 #endif
 	}
 
@@ -47,8 +51,10 @@ namespace WAVM { namespace Platform {
 		// BitScanForward returns 0 if the input is 0.
 		unsigned long result;
 		return _BitScanForward(&result, value) ? result : 32;
-#else
+#elif defined(__GNUC__)
 		return value == 0 ? 32 : __builtin_ctz(value);
+#else
+#error Unsupported compiler
 #endif
 	}
 	inline U64 countTrailingZeroes(U64 value)
@@ -58,8 +64,10 @@ namespace WAVM { namespace Platform {
 		return _BitScanForward64(&result, value) ? result : 64;
 #elif defined(_WIN32)
 		DEBUG_TRAP();
-#else
+#elif defined(__GNUC__)
 		return value == 0 ? 64 : __builtin_ctzll(value);
+#else
+#error Unsupported compiler
 #endif
 	}
 
@@ -74,12 +82,12 @@ namespace WAVM { namespace Platform {
 		return value <= 1 ? 0 : 31 - countLeadingZeroes(value * 2 - 1);
 	}
 
-	inline U64 saturateToBounds(U64 value, U64 maxValue)
+	inline U64 branchlessMin(U64 value, U64 maxValue)
 	{
 		return U64(value + ((I64(maxValue - value) >> 63) & (maxValue - value)));
 	}
 
-	inline U32 saturateToBounds(U32 value, U32 maxValue)
+	inline U32 branchlessMin(U32 value, U32 maxValue)
 	{
 		return U32(value + ((I32(maxValue - value) >> 31) & (maxValue - value)));
 	}
@@ -106,6 +114,12 @@ namespace WAVM { namespace Platform {
 #endif
 	}
 
+	inline void bytewiseMemCopyReverse(U8* dest, const U8* source, Uptr numBytes)
+	{
+		for(Uptr index = 0; index < numBytes; ++index)
+		{ dest[numBytes - index - 1] = source[numBytes - index - 1]; }
+	}
+
 	inline void bytewiseMemSet(U8* dest, U8 value, Uptr numBytes)
 	{
 #ifdef _WIN32
@@ -127,16 +141,11 @@ namespace WAVM { namespace Platform {
 
 	inline void bytewiseMemMove(U8* dest, U8* source, Uptr numBytes)
 	{
-		const Uptr numNonOverlappingBytes
-			= source < dest && source + numBytes > dest ? dest - source : numBytes;
-
-		if(numNonOverlappingBytes != numBytes)
+		if(source < dest && source + numBytes > dest)
+		{ bytewiseMemCopyReverse(dest, source, numBytes); }
+		else
 		{
-			bytewiseMemCopy(dest + numNonOverlappingBytes,
-							source + numNonOverlappingBytes,
-							numBytes - numNonOverlappingBytes);
+			bytewiseMemCopy(dest, source, numBytes);
 		}
-
-		bytewiseMemCopy(dest, source, numNonOverlappingBytes);
 	}
 }}

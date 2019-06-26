@@ -109,6 +109,18 @@
 )
 
 
+(module $Mglobal-ex
+  (func $f)
+  (global (export "g") anyref (ref.func $f))
+)
+(register "Mglobal-ex" $Mglobal-ex)
+
+(assert_unlinkable
+  (module (global (import "Mglobal-ex" "g") funcref))
+  "incompatible import type"
+)
+
+
 ;; Tables
 
 (module $Mt
@@ -241,6 +253,8 @@
 )
 (assert_trap (invoke $Mt "call" (i32.const 7)) "uninitialized")
 
+;; Unlike in the v1 spec, the elements stored before an out-of-bounds access
+;; persist after the instantiation failure.
 (assert_unlinkable
   (module
     (table (import "Mt" "tab") 10 funcref)
@@ -250,6 +264,7 @@
   )
   "elements segment does not fit"
 )
+(assert_return (invoke $Mt "call" (i32.const 7)) (i32.const 0))
 
 (assert_unlinkable
   (module
@@ -260,6 +275,20 @@
     (data (i32.const 0x10000) "d") ;; out of bounds
   )
   "data segment does not fit"
+)
+(assert_return (invoke $Mt "call" (i32.const 7)) (i32.const 0))
+
+
+(module $Mtable-ex
+  (func $f)
+  (table $t (export "t") 1 anyref)
+  (elem (i32.const 0) $f)
+)
+(register "Mtable-ex" $Mtable-ex)
+
+(assert_unlinkable
+  (module (table (import "Mtable-ex" "t") 1 funcref))
+  "incompatible import type"
 )
 
 
@@ -346,6 +375,8 @@
 )
 (assert_return (invoke $Mm "load" (i32.const 0)) (i32.const 0))
 
+;; Unlike in v1 spec, bytes written before an out-of-bounds access persist
+;; after the instantiation failure.
 (assert_unlinkable
   (module
     (memory (import "Mm" "mem") 1)
@@ -354,6 +385,7 @@
   )
   "data segment does not fit"
 )
+(assert_return (invoke $Mm "load" (i32.const 0)) (i32.const 97))
 
 (assert_unlinkable
   (module
@@ -365,3 +397,38 @@
   )
   "elements segment does not fit"
 )
+(assert_return (invoke $Mm "load" (i32.const 0)) (i32.const 97))
+
+;; Store is modified if the start function traps.
+(module $Ms
+  (type $t (func (result i32)))
+  (memory (export "memory") 1)
+  (table (export "table") 1 funcref)
+  (func (export "get memory[0]") (type $t)
+    (i32.load8_u (i32.const 0))
+  )
+  (func (export "get table[0]") (type $t)
+    (call_indirect (type $t) (i32.const 0))
+  )
+)
+(register "Ms" $Ms)
+
+(assert_trap
+  (module
+    (import "Ms" "memory" (memory 1))
+    (import "Ms" "table" (table 1 funcref))
+    (data (i32.const 0) "hello")
+    (elem (i32.const 0) $f)
+    (func $f (result i32)
+      (i32.const 0xdead)
+    )
+    (func $main
+      (unreachable)
+    )
+    (start $main)
+  )
+  "unreachable"
+)
+
+(assert_return (invoke $Ms "get memory[0]") (i32.const 104))  ;; 'h'
+(assert_return (invoke $Ms "get table[0]") (i32.const 0xdead))

@@ -1251,12 +1251,48 @@
     )
   )
 
-  (func (export "meet-funcref") (param i32) (result anyref)
+  (func (export "meet-funcref-1") (param i32) (result anyref)
+    (block $l1 (result anyref)
+      (block $l2 (result funcref)
+        (br_table $l1 $l1 $l2 (table.get 0 (i32.const 0)) (local.get 0))
+      )
+    )
+  )
+
+  (func (export "meet-funcref-2") (param i32) (result anyref)
+    (block $l1 (result anyref)
+      (block $l2 (result funcref)
+        (br_table $l2 $l2 $l1 (table.get 0 (i32.const 0)) (local.get 0))
+      )
+    )
+  )
+
+  (func (export "meet-funcref-3") (param i32) (result anyref)
     (block $l1 (result anyref)
       (block $l2 (result funcref)
         (br_table $l2 $l1 $l2 (table.get 0 (i32.const 0)) (local.get 0))
       )
     )
+  )
+
+  (func (export "meet-funcref-4") (param i32) (result anyref)
+    (block $l1 (result anyref)
+      (block $l2 (result funcref)
+        (br_table $l1 $l2 $l1 (table.get 0 (i32.const 0)) (local.get 0))
+      )
+    )
+  )
+
+  (func (export "meet-bottom")
+    (block (result f64)
+      (block (result f32)
+        (unreachable)
+        (br_table 0 1 1 (i32.const 1))
+      )
+      (drop)
+      (f64.const 0)
+    )
+    (drop)
   )
 )
 
@@ -1445,13 +1481,29 @@
 (assert_return (invoke "meet-anyref" (i32.const 1) (ref.host 1)) (ref.host 1))
 (assert_return (invoke "meet-anyref" (i32.const 2) (ref.host 1)) (ref.host 1))
 
-(assert_return_func (invoke "meet-funcref" (i32.const 0)))
-(assert_return_func (invoke "meet-funcref" (i32.const 1)))
-(assert_return_func (invoke "meet-funcref" (i32.const 2)))
+(assert_return_func (invoke "meet-funcref-1" (i32.const 0)))
+(assert_return_func (invoke "meet-funcref-1" (i32.const 1)))
+(assert_return_func (invoke "meet-funcref-1" (i32.const 2)))
+(assert_return_func (invoke "meet-funcref-2" (i32.const 0)))
+(assert_return_func (invoke "meet-funcref-2" (i32.const 1)))
+(assert_return_func (invoke "meet-funcref-2" (i32.const 2)))
+(assert_return_func (invoke "meet-funcref-3" (i32.const 0)))
+(assert_return_func (invoke "meet-funcref-3" (i32.const 1)))
+(assert_return_func (invoke "meet-funcref-3" (i32.const 2)))
+(assert_return_func (invoke "meet-funcref-4" (i32.const 0)))
+(assert_return_func (invoke "meet-funcref-4" (i32.const 1)))
+(assert_return_func (invoke "meet-funcref-4" (i32.const 2)))
 
 (assert_invalid
   (module (func $type-arg-void-vs-num (result i32)
     (block (br_table 0 (i32.const 1)) (i32.const 1))
+  ))
+  "type mismatch"
+)
+
+(assert_invalid
+  (module (func $type-arg-empty-vs-num (result i32)
+    (block (br_table 0) (i32.const 1))
   ))
   "type mismatch"
 )
@@ -1512,6 +1564,74 @@
       (br_table 0 0 (i32.const 0) (i64.const 0)) (i32.const 1)
     )
   ))
+  "type mismatch"
+)
+
+(assert_invalid
+  (module (func $meet-bottom (param i32) (result anyref)
+    (block $l1 (result anyref)
+      (drop
+        (block $l2 (result i32)
+          (br_table $l2 $l1 $l2 (ref.null) (local.get 0))
+        )
+      )
+      (ref.null)
+    )
+  ))
+  "type mismatch"
+)
+
+(assert_invalid
+  (module (func $type-arg-void-vs-num (result i32)
+    (block (br_table 0 (i32.const 1)) (i32.const 1))
+  ))
+  "type mismatch"
+)
+
+(assert_invalid
+  (module
+    (func $type-arg-index-empty-in-then
+      (block
+        (i32.const 0) (i32.const 0)
+        (if (result i32) (then (br_table 0)))
+      )
+      (i32.eqz) (drop)
+    )
+  )
+  "type mismatch"
+)
+(assert_invalid
+  (module
+    (func $type-arg-value-empty-in-then
+      (block
+        (i32.const 0) (i32.const 0)
+        (if (result i32) (then (br_table 0 (i32.const 1))))
+      )
+      (i32.eqz) (drop)
+    )
+  )
+  "type mismatch"
+)
+(assert_invalid
+  (module
+    (func $type-arg-index-empty-in-return
+      (block (result i32)
+        (return (br_table 0))
+      )
+      (i32.eqz) (drop)
+    )
+  )
+  "type mismatch"
+)
+(assert_invalid
+  (module
+    (func $type-arg-value-empty-in-return
+      (block (result i32)
+        (return (br_table 0 (i32.const 1)))
+      )
+      (i32.eqz) (drop)
+    )
+  )
   "type mismatch"
 )
 

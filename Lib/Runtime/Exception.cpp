@@ -10,6 +10,7 @@
 #include "WAVM/Inline/Assert.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/Errors.h"
+#include "WAVM/Inline/HashSet.h"
 #include "WAVM/Inline/Lock.h"
 #include "WAVM/LLVMJIT/LLVMJIT.h"
 #include "WAVM/Platform/Diagnostics.h"
@@ -22,11 +23,27 @@
 using namespace WAVM;
 using namespace WAVM::Runtime;
 
+namespace WAVM { namespace Runtime {
+	DEFINE_INTRINSIC_MODULE(wavmIntrinsicsException)
+}}
+
 #define DEFINE_INTRINSIC_EXCEPTION_TYPE(name, ...)                                                 \
 	ExceptionType* Runtime::ExceptionTypes::name = new ExceptionType(                              \
 		nullptr, IR::ExceptionType{IR::TypeTuple({__VA_ARGS__})}, "wavm." #name);
 ENUM_INTRINSIC_EXCEPTION_TYPES(DEFINE_INTRINSIC_EXCEPTION_TYPE)
 #undef DEFINE_INTRINSIC_EXCEPTION_TYPE
+
+Runtime::Exception::~Exception()
+{
+	if(finalizeUserData) { (*finalizeUserData)(userData); }
+}
+
+void Runtime::setUserData(Exception* exception, void* userData, void (*finalizer)(void*))
+{
+	exception->userData = userData;
+	exception->finalizeUserData = finalizer;
+}
+void* Runtime::getUserData(const Exception* exception) { return exception->userData; }
 
 bool Runtime::describeInstructionPointer(Uptr ip, std::string& outDescription)
 {
@@ -60,33 +77,37 @@ bool Runtime::describeInstructionPointer(Uptr ip, std::string& outDescription)
 std::vector<std::string> Runtime::describeCallStack(const Platform::CallStack& callStack)
 {
 	std::vector<std::string> frameDescriptions;
-	Uptr runIP = 0;
-	Uptr runLength = 0;
-	for(Uptr frameIndex = 0; frameIndex < callStack.stackFrames.size(); ++frameIndex)
+	HashSet<Uptr> describedIPs;
+	Uptr frameIndex = 0;
+	while(frameIndex < callStack.stackFrames.size())
 	{
-		const Platform::CallStack::Frame& frame = callStack.stackFrames[frameIndex];
-		if(frameIndex > 0 && frame.ip == runIP) { ++runLength; }
+		if(frameIndex + 1 < callStack.stackFrames.size()
+		   && describedIPs.contains(callStack.stackFrames[frameIndex].ip)
+		   && describedIPs.contains(callStack.stackFrames[frameIndex + 1].ip))
+		{
+			Uptr numOmittedFrames = 2;
+			while(frameIndex + numOmittedFrames < callStack.stackFrames.size()
+				  && describedIPs.contains(callStack.stackFrames[frameIndex + numOmittedFrames].ip))
+			{ ++numOmittedFrames; }
+
+			frameDescriptions.push_back("<" + std::to_string(numOmittedFrames)
+										+ " redundant frames omitted>");
+
+			frameIndex += numOmittedFrames;
+		}
 		else
 		{
-			if(runLength > 0)
-			{
-				frameDescriptions.push_back("<" + std::to_string(runLength)
-											+ " identical frames omitted>");
-			}
-
-			runIP = frame.ip;
-			runLength = 0;
+			const Uptr frameIP = callStack.stackFrames[frameIndex].ip;
 
 			std::string frameDescription;
-			if(!describeInstructionPointer(frame.ip, frameDescription))
+			if(!describeInstructionPointer(frameIP, frameDescription))
 			{ frameDescription = "<unknown function>"; }
 
+			describedIPs.add(frameIP);
 			frameDescriptions.push_back(frameDescription);
+
+			++frameIndex;
 		}
-	}
-	if(runLength > 0)
-	{
-		frameDescriptions.push_back("<" + std::to_string(runLength) + "identical frames omitted>");
 	}
 	return frameDescriptions;
 }
@@ -150,7 +171,7 @@ Exception* Runtime::createException(ExceptionType* type,
 
 	const bool isUserException = type->compartment != nullptr;
 	Exception* exception = new(malloc(Exception::calcNumBytes(params.size())))
-		Exception{type->id, type, isUserException ? U8(1) : U8(0), std::move(callStack)};
+		Exception(type->id, type, isUserException, std::move(callStack));
 	if(params.size())
 	{ memcpy(exception->arguments, arguments, sizeof(IR::UntaggedValue) * params.size()); }
 	return exception;
@@ -168,6 +189,11 @@ IR::UntaggedValue Runtime::getExceptionArgument(const Exception* exception, Uptr
 {
 	errorUnless(argIndex < exception->type->sig.params.size());
 	return exception->arguments[argIndex];
+}
+
+const Platform::CallStack& Runtime::getExceptionCallStack(const Exception* exception)
+{
+	return exception->callStack;
 }
 
 std::string Runtime::describeException(const Exception* exception)
@@ -225,7 +251,7 @@ std::string Runtime::describeException(const Exception* exception)
 		createException(type, arguments.data(), arguments.size(), Platform::captureCallStack(1)));
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
+DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsException,
 						  "createException",
 						  Uptr,
 						  intrinsicCreateException,
@@ -247,7 +273,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 	return reinterpret_cast<Uptr>(exception);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
+DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsException,
 						  "destroyException",
 						  void,
 						  intrinsicDestroyException,
@@ -257,7 +283,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
 	destroyException(exception);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavmIntrinsics,
+DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsException,
 						  "throwException",
 						  void,
 						  intrinsicThrowException,
@@ -313,7 +339,9 @@ static bool translateSignalToRuntimeException(const Platform::Signal& signal,
 		outException = createException(
 			ExceptionTypes::integerDivideByZeroOrOverflow, nullptr, 0, std::move(callStack));
 		return true;
-	default: Errors::unreachable();
+
+	case Platform::Signal::Type::invalid:
+	default: WAVM_UNREACHABLE();
 	}
 }
 
