@@ -193,9 +193,9 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 	}
 
 	VFS::FD* vfd = nullptr;
-	VFS::OpenResult openResult
+	VFS::Result openResult
 		= Platform::openHostFile(pathString, platformAccessMode, platformCreateMode, vfd);
-	if(openResult != VFS::OpenResult::success)
+	if(openResult != VFS::Result::success)
 	{
 		traceSyscallReturnf("open", "EACCESS (Platform::openFile failed)");
 		return -ErrNo::eacces;
@@ -205,7 +205,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 	I32 fd = currentProcess->files.add(-1, vfd);
 	if(fd == -1)
 	{
-		errorUnless(vfd->close() == VFS::CloseResult::success);
+		errorUnless(vfd->close() == VFS::Result::success);
 		traceSyscallReturnf("open", "EMFILE (exhausted fd index space)");
 		return -ErrNo::emfile;
 	}
@@ -226,7 +226,12 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_creat", I32, __syscall_creat, U32 pathAddress, U32 mode)
+DEFINE_INTRINSIC_FUNCTION(wavixFile,
+						  "__syscall_creat",
+						  I32,
+						  __syscall_creat,
+						  U32 pathAddress,
+						  U32 mode)
 {
 	traceSyscallf("creat", "");
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
@@ -243,7 +248,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_close", I32, __syscall_close, I3
 	VFS::FD* vfd = currentProcess->files[fd];
 	currentProcess->files.removeOrFail(fd);
 
-	if(vfd->close() == VFS::CloseResult::success) { return 0; }
+	if(vfd->close() == VFS::Result::success) { return 0; }
 	else
 	{
 		return -1;
@@ -281,8 +286,8 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 
 	VFS::FD* vfd = currentProcess->files[fd];
 
-	VFS::SeekResult result = vfd->seek(offset, seekOrigin, &memoryRef<U64>(memory, resultAddress));
-	if(result != VFS::SeekResult::success) { return -1; }
+	VFS::Result result = vfd->seek(offset, seekOrigin, &memoryRef<U64>(memory, resultAddress));
+	if(result != VFS::Result::success) { return -1; }
 
 	return 0;
 }
@@ -309,8 +314,8 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 	U8* buffer = memoryArrayPtr<U8>(memory, bufferAddress, numBytes);
 
 	Uptr numReadBytes = 0;
-	VFS::ReadResult result = vfd->read(buffer, numBytes, &numReadBytes);
-	if(result != VFS::ReadResult::success) { return -1; }
+	VFS::Result result = vfd->read(buffer, numBytes, &numReadBytes);
+	if(result != VFS::Result::success) { return -1; }
 
 	return coerce32bitAddressSigned(numReadBytes);
 }
@@ -337,8 +342,8 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 	U8* buffer = memoryArrayPtr<U8>(memory, bufferAddress, numBytes);
 
 	Uptr numWrittenBytes = 0;
-	VFS::WriteResult result = vfd->write(buffer, numBytes, &numWrittenBytes);
-	if(result != VFS::WriteResult::success) { return -ErrNo::einval; }
+	VFS::Result result = vfd->write(buffer, numBytes, &numWrittenBytes);
+	if(result != VFS::Result::success) { return -ErrNo::einval; }
 
 	return coerce32bitAddressSigned(numWrittenBytes);
 }
@@ -383,9 +388,9 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 		{
 			U8* ioData = memoryArrayPtr<U8>(memory, io.address, io.numBytes);
 			Uptr ioNumReadBytes = 0;
-			VFS::ReadResult readResult = vfd->read(ioData, io.numBytes, &ioNumReadBytes);
+			VFS::Result readResult = vfd->read(ioData, io.numBytes, &ioNumReadBytes);
 			numReadBytes += ioNumReadBytes;
-			if(readResult != VFS::ReadResult::success || ioNumReadBytes != io.numBytes) { break; }
+			if(readResult != VFS::Result::success || ioNumReadBytes != io.numBytes) { break; }
 		}
 	}
 
@@ -432,10 +437,9 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 		{
 			const U8* ioData = memoryArrayPtr<U8>(memory, io.address, io.numBytes);
 			Uptr ioNumWrittenBytes = 0;
-			VFS::WriteResult writeResult = vfd->write(ioData, io.numBytes, &ioNumWrittenBytes);
+			VFS::Result writeResult = vfd->write(ioData, io.numBytes, &ioNumWrittenBytes);
 			numWrittenBytes += ioNumWrittenBytes;
-			if(writeResult != VFS::WriteResult::success || ioNumWrittenBytes != io.numBytes)
-			{ break; }
+			if(writeResult != VFS::Result::success || ioNumWrittenBytes != io.numBytes) { break; }
 		}
 	}
 
@@ -453,8 +457,8 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_fsync", I32, __syscall_fsync, I3
 	VFS::FD* vfd = currentProcess->files[fd];
 	if(!vfd) { return -ErrNo::ebadf; }
 
-	VFS::SyncResult result = vfd->sync(VFS::SyncType::contentsAndMetadata);
-	if(result != VFS::SyncResult::success) { return -1; }
+	VFS::Result result = vfd->sync(VFS::SyncType::contentsAndMetadata);
+	if(result != VFS::Result::success) { return -1; }
 
 	return 0;
 }
@@ -470,8 +474,8 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_fdatasync", I32, __syscall_fdata
 	VFS::FD* vfd = currentProcess->files[fd];
 	if(!vfd) { return -ErrNo::ebadf; }
 
-	VFS::SyncResult result = vfd->sync(VFS::SyncType::contents);
-	if(result != VFS::SyncResult::success) { return -1; }
+	VFS::Result result = vfd->sync(VFS::SyncType::contents);
+	if(result != VFS::Result::success) { return -1; }
 
 	return 0;
 }
@@ -718,7 +722,13 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_rename", I32, __syscall_rename, 
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_chown32", I32, __syscall_chown32, I32 a, I32 b, I32 c)
+DEFINE_INTRINSIC_FUNCTION(wavixFile,
+						  "__syscall_chown32",
+						  I32,
+						  __syscall_chown32,
+						  I32 a,
+						  I32 b,
+						  I32 c)
 {
 	traceSyscallf("chown32", "(%i,%i,%i)", a, b, c);
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);

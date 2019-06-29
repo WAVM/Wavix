@@ -134,21 +134,21 @@ inline bool loadBinaryModuleFromFile(const char* wasmFilename, IR::Module& outMo
 		VFS::FD* vfd = nullptr;
 		if(Platform::openHostFile(
 			   wasmFilename, VFS::FileAccessMode::readOnly, VFS::FileCreateMode::openExisting, vfd)
-		   != VFS::OpenResult::success)
+		   != VFS::Result::success)
 		{ return false; }
 
 		U64 numFileBytes = 0;
-		errorUnless(vfd->seek(0, VFS::SeekOrigin::end, &numFileBytes) == VFS::SeekResult::success);
+		errorUnless(vfd->seek(0, VFS::SeekOrigin::end, &numFileBytes) == VFS::Result::success);
 		if(numFileBytes > UINTPTR_MAX)
 		{
-			errorUnless(vfd->close() == VFS::CloseResult::success);
+			errorUnless(vfd->close() == VFS::Result::success);
 			return false;
 		}
 
 		std::unique_ptr<U8[]> fileContents{new U8[numFileBytes]};
-		errorUnless(vfd->seek(0, VFS::SeekOrigin::begin) == VFS::SeekResult::success);
-		errorUnless(vfd->read(fileContents.get(), numFileBytes) == VFS::ReadResult::success);
-		errorUnless(vfd->close() == VFS::CloseResult::success);
+		errorUnless(vfd->seek(0, VFS::SeekOrigin::begin) == VFS::Result::success);
+		errorUnless(vfd->read(fileContents.get(), numFileBytes) == VFS::Result::success);
+		errorUnless(vfd->close() == VFS::Result::success);
 
 		Serialization::MemoryInputStream stream(fileContents.get(), numFileBytes);
 		WASM::serialize(stream, outModule);
