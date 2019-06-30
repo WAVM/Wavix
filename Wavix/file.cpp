@@ -192,7 +192,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 		}
 	}
 
-	VFS::FD* vfd = nullptr;
+	VFS::VFD* vfd = nullptr;
 	VFS::Result openResult
 		= Platform::openHostFile(pathString, platformAccessMode, platformCreateMode, vfd);
 	if(openResult != VFS::Result::success)
@@ -245,7 +245,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_close", I32, __syscall_close, I3
 
 	if(!validateFD(fd)) { return -1; }
 
-	VFS::FD* vfd = currentProcess->files[fd];
+	VFS::VFD* vfd = currentProcess->files[fd];
 	currentProcess->files.removeOrFail(fd);
 
 	if(vfd->close() == VFS::Result::success) { return 0; }
@@ -284,7 +284,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 
 	if(!validateFD(fd)) { return -1; }
 
-	VFS::FD* vfd = currentProcess->files[fd];
+	VFS::VFD* vfd = currentProcess->files[fd];
 
 	VFS::Result result = vfd->seek(offset, seekOrigin, &memoryRef<U64>(memory, resultAddress));
 	if(result != VFS::Result::success) { return -1; }
@@ -308,7 +308,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 
 	if(!validateFD(fd)) { return -ErrNo::ebadf; }
 
-	VFS::FD* vfd = currentProcess->files[fd];
+	VFS::VFD* vfd = currentProcess->files[fd];
 	if(!vfd) { return -ErrNo::ebadf; }
 
 	U8* buffer = memoryArrayPtr<U8>(memory, bufferAddress, numBytes);
@@ -336,7 +336,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 
 	if(!validateFD(fd)) { return -ErrNo::ebadf; }
 
-	VFS::FD* vfd = currentProcess->files[fd];
+	VFS::VFD* vfd = currentProcess->files[fd];
 	if(!vfd) { return -ErrNo::ebadf; }
 
 	U8* buffer = memoryArrayPtr<U8>(memory, bufferAddress, numBytes);
@@ -370,7 +370,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 
 	if(!validateFD(fd)) { return -1; }
 
-	VFS::FD* vfd = currentProcess->files[fd];
+	VFS::VFD* vfd = currentProcess->files[fd];
 	if(!vfd) { return -ErrNo::ebadf; }
 
 	if(isTracingSyscalls) { Log::printf(Log::debug, "IOVs:\n"); }
@@ -419,7 +419,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 
 	if(!validateFD(fd)) { return -1; }
 
-	VFS::FD* vfd = currentProcess->files[fd];
+	VFS::VFD* vfd = currentProcess->files[fd];
 	if(!vfd) { return -ErrNo::ebadf; }
 
 	if(isTracingSyscalls) { Log::printf(Log::debug, "IOVs:\n"); }
@@ -454,7 +454,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_fsync", I32, __syscall_fsync, I3
 
 	if(!validateFD(fd)) { return -1; }
 
-	VFS::FD* vfd = currentProcess->files[fd];
+	VFS::VFD* vfd = currentProcess->files[fd];
 	if(!vfd) { return -ErrNo::ebadf; }
 
 	VFS::Result result = vfd->sync(VFS::SyncType::contentsAndMetadata);
@@ -471,7 +471,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_fdatasync", I32, __syscall_fdata
 
 	if(!validateFD(fd)) { return -1; }
 
-	VFS::FD* vfd = currentProcess->files[fd];
+	VFS::VFD* vfd = currentProcess->files[fd];
 	if(!vfd) { return -ErrNo::ebadf; }
 
 	VFS::Result result = vfd->sync(VFS::SyncType::contents);

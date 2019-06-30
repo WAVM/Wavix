@@ -31,7 +31,7 @@ namespace Wavix {
 		std::string cwd;
 
 		Platform::Mutex filesMutex;
-		IndexMap<I32, VFS::FD*> files;
+		IndexMap<I32, VFS::VFD*> files;
 
 		Platform::Mutex childrenMutex;
 		std::vector<Process*> children;
