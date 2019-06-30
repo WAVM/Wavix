@@ -63,7 +63,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 	const Uptr numPages = (numBytes + IR::numBytesPerPage - 1) / IR::numBytesPerPage;
 
 	Uptr memoryMaxPages = getMemoryType(memory).size.max;
-	if (memoryMaxPages == UINT64_MAX) { memoryMaxPages = IR::maxMemoryPages; }
+	if(memoryMaxPages == UINT64_MAX) { memoryMaxPages = IR::maxMemoryPages; }
 
 	if(basePageIndex + numPages > memoryMaxPages) { return -ErrNo::einval; }
 
