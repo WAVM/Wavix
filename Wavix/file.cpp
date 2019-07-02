@@ -194,7 +194,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixFile,
 
 	VFS::VFD* vfd = nullptr;
 	VFS::Result openResult
-		= Platform::openHostFile(pathString, platformAccessMode, platformCreateMode, vfd);
+		= Platform::getHostFS().open(pathString, platformAccessMode, platformCreateMode, vfd);
 	if(openResult != VFS::Result::success)
 	{
 		traceSyscallReturnf("open", "EACCESS (Platform::openFile failed)");

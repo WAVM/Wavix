@@ -132,7 +132,7 @@ inline bool loadBinaryModuleFromFile(const char* wasmFilename, IR::Module& outMo
 	try
 	{
 		VFS::VFD* vfd = nullptr;
-		if(Platform::openHostFile(
+		if(Platform::getHostFS().open(
 			   wasmFilename, VFS::FileAccessMode::readOnly, VFS::FileCreateMode::openExisting, vfd)
 		   != VFS::Result::success)
 		{ return false; }
