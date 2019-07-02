@@ -38,19 +38,51 @@ struct SandboxedFileSystem : FileSystem
 		if(rootPath.back() != '/' && rootPath.back() != '\\') { rootPath += '/'; }
 	}
 
-	virtual OpenResult open(const std::string& absolutePathName,
-							FileAccessMode accessMode,
-							FileCreateMode createMode,
-							FD*& outFD,
-							FDImplicitSync implicitSync)
+	virtual Result open(const std::string& absolutePathName,
+						FileAccessMode accessMode,
+						FileCreateMode createMode,
+						VFD*& outFD,
+						const VFDFlags& flags) override
 	{
 		return Platform::openHostFile(
-			getHostPath(absolutePathName), accessMode, createMode, outFD, implicitSync);
+			getHostPath(absolutePathName), accessMode, createMode, outFD, flags);
 	}
 
-	virtual GetInfoByPathResult getInfo(const std::string& absolutePathName, FileInfo& outInfo)
+	virtual Result getInfo(const std::string& absolutePathName, FileInfo& outInfo) override
 	{
 		return Platform::getHostFileInfo(getHostPath(absolutePathName), outInfo);
+	}
+	virtual Result setFileTimes(const std::string& absolutePathName,
+								bool setLastAccessTime,
+								I128 lastAccessTime,
+								bool setLastWriteTime,
+								I128 lastWriteTime) override
+	{
+		return Platform::setHostFileTimes(getHostPath(absolutePathName),
+										  setLastAccessTime,
+										  lastAccessTime,
+										  setLastWriteTime,
+										  lastWriteTime);
+	}
+
+	virtual Result openDir(const std::string& absolutePathName, DirEntStream*& outStream) override
+	{
+		return Platform::openHostDir(getHostPath(absolutePathName), outStream);
+	}
+
+	virtual Result unlinkFile(const std::string& absolutePathName) override
+	{
+		return Platform::unlinkHostFile(getHostPath(absolutePathName));
+	}
+
+	virtual Result removeDir(const std::string& absolutePathName) override
+	{
+		return Platform::removeHostDir(getHostPath(absolutePathName));
+	}
+
+	virtual Result createDir(const std::string& absolutePathName) override
+	{
+		return Platform::createHostDir(getHostPath(absolutePathName));
 	}
 
 private:
@@ -191,18 +223,19 @@ static int run(const CommandLineOptions& options)
 
 static void showHelp()
 {
-	Log::printf(Log::error,
-				"Usage: wavm-run-wasi [switches] [programfile] [--] [arguments]\n"
-				"  in.wast|in.wasm             Specify program file (.wast/.wasm)\n"
-				"  -c|--check                  Exit after checking that the program is valid\n"
-				"  -d|--debug                  Write additional debug information to stdout\n"
-				"  -h|--help                   Display this message\n"
-				"  --precompiled               Use precompiled object code in programfile\n"
-				"  --metrics                   Write benchmarking information to stdout\n"
-				"  --trace-syscalls            Trace WASI syscalls to stdout\n"
-				"  --trace-syscall-callstacks  Trace WASI syscalls w/ callstacks to stdout\n"
-				"  --mount-root <directory>    Mounts directory as a "
-				"  --                          Stop parsing arguments\n");
+	Log::printf(
+		Log::error,
+		"Usage: wavm-run-wasi [options] <module file> [program arguments]\n"
+		"  -h|--help                   Display this message\n"
+		"  -c|--check                  Exit after checking that the program is valid\n"
+		"  -d|--debug                  Write additional debug information to stdout\n"
+		"  --precompiled               Use precompiled object code in <program file>\n"
+		"  --metrics                   Write benchmarking information to stdout\n"
+		"  --trace-syscalls            Trace WASI syscalls to stdout\n"
+		"  --trace-syscall-callstacks  Trace WASI syscalls w/ callstacks to stdout\n"
+		"  --mount-root <directory>    Mounts directory as the WASI root directory\n"
+		"  <program file>              The WebAssembly module (.wast/.wasm) to run\n"
+		"  [program arguments]         The arguments to pass to the WebAssembly function\n");
 }
 
 int main(int argc, char** argv)
@@ -211,7 +244,15 @@ int main(int argc, char** argv)
 	char** nextArg = argv;
 	while(*++nextArg)
 	{
-		if(!strcmp(*nextArg, "--check") || !strcmp(*nextArg, "-c")) { options.onlyCheck = true; }
+		if(!strcmp(*nextArg, "--help") || !strcmp(*nextArg, "-h"))
+		{
+			showHelp();
+			return EXIT_SUCCESS;
+		}
+		else if(!strcmp(*nextArg, "--check") || !strcmp(*nextArg, "-c"))
+		{
+			options.onlyCheck = true;
+		}
 		else if(!strcmp(*nextArg, "--debug") || !strcmp(*nextArg, "-d"))
 		{
 			Log::setCategoryEnabled(Log::debug, true);
@@ -241,22 +282,10 @@ int main(int argc, char** argv)
 			}
 			options.rootMountPath = *nextArg;
 		}
-		else if(!strcmp(*nextArg, "--"))
-		{
-			++nextArg;
-			break;
-		}
-		else if(!strcmp(*nextArg, "--help") || !strcmp(*nextArg, "-h"))
-		{
-			showHelp();
-			return EXIT_SUCCESS;
-		}
-		else if(!options.filename)
-		{
-			options.filename = *nextArg;
-		}
 		else
 		{
+			options.filename = *nextArg;
+			++nextArg;
 			break;
 		}
 	}

@@ -60,7 +60,7 @@ bool ProcessResolver::resolve(const std::string& moduleName,
 
 DEFINE_INTRINSIC_FUNCTION(wasi,
 						  "poll_oneoff",
-						  __wasi_errno_t,
+						  __wasi_errno_return_t,
 						  wasi_poll_oneoff,
 						  WASIAddress inAddress,
 						  WASIAddress outAddress,
@@ -82,7 +82,11 @@ DEFINE_INTRINSIC_FUNCTION(wasi, "proc_exit", void, wasi_proc_exit, __wasi_exitco
 	throw ExitException{exitCode};
 }
 
-DEFINE_INTRINSIC_FUNCTION(wasi, "proc_raise", __wasi_errno_t, wasi_proc_raise, __wasi_signal_t sig)
+DEFINE_INTRINSIC_FUNCTION(wasi,
+						  "proc_raise",
+						  __wasi_errno_return_t,
+						  wasi_proc_raise,
+						  __wasi_signal_t sig)
 {
 	// proc_raise will possibly be removed: https://github.com/WebAssembly/WASI/issues/7
 	UNIMPLEMENTED_SYSCALL("proc_raise", "(%u)", sig);
@@ -90,7 +94,7 @@ DEFINE_INTRINSIC_FUNCTION(wasi, "proc_raise", __wasi_errno_t, wasi_proc_raise, _
 
 DEFINE_INTRINSIC_FUNCTION(wasi,
 						  "random_get",
-						  __wasi_errno_t,
+						  __wasi_errno_return_t,
 						  wasi_random_get,
 						  WASIAddress bufferAddress,
 						  WASIAddress numBufferBytes)
@@ -102,12 +106,12 @@ DEFINE_INTRINSIC_FUNCTION(wasi,
 	U8* buffer = memoryArrayPtr<U8>(process->memory, bufferAddress, numBufferBytes);
 	Platform::getCryptographicRNG(buffer, numBufferBytes);
 
-	return TRACE_SYSCALL_RETURN(ESUCCESS);
+	return TRACE_SYSCALL_RETURN(__WASI_ESUCCESS);
 }
 
 DEFINE_INTRINSIC_FUNCTION(wasi,
 						  "sock_recv",
-						  __wasi_errno_t,
+						  __wasi_errno_return_t,
 						  wasi_sock_recv,
 						  __wasi_fd_t sock,
 						  WASIAddress ri_data,
@@ -129,7 +133,7 @@ DEFINE_INTRINSIC_FUNCTION(wasi,
 
 DEFINE_INTRINSIC_FUNCTION(wasi,
 						  "sock_send",
-						  __wasi_errno_t,
+						  __wasi_errno_return_t,
 						  wasi_sock_send,
 						  __wasi_fd_t sock,
 						  WASIAddress si_data,
@@ -148,7 +152,7 @@ DEFINE_INTRINSIC_FUNCTION(wasi,
 
 DEFINE_INTRINSIC_FUNCTION(wasi,
 						  "sock_shutdown",
-						  __wasi_errno_t,
+						  __wasi_errno_return_t,
 						  wasi_sock_shutdown,
 						  __wasi_fd_t sock,
 						  __wasi_sdflags_t how)
@@ -156,18 +160,21 @@ DEFINE_INTRINSIC_FUNCTION(wasi,
 	UNIMPLEMENTED_SYSCALL("sock_shutdown", "(%u, 0x%02x)", sock, how);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wasi, "sched_yield", __wasi_errno_t, wasi_sched_yield)
+DEFINE_INTRINSIC_FUNCTION(wasi, "sched_yield", __wasi_errno_return_t, wasi_sched_yield)
 {
 	TRACE_SYSCALL("sched_yield", "()");
 	Platform::yieldToAnotherThread();
-	return TRACE_SYSCALL_RETURN(ESUCCESS);
+	return TRACE_SYSCALL_RETURN(__WASI_ESUCCESS);
 }
 
 WASI::Process::~Process()
 {
-	for(const WASI::FD& fd : fds)
+	for(const WASI::FDE& fd : fds)
 	{
-		if(fd.vfd) { fd.vfd->close(); }
+		if(fd.close() != VFS::Result::success)
+		{
+			Log::printf(Log::Category::debug, "Error while closing file because of process exit\n");
+		}
 	}
 
 	context = nullptr;
@@ -181,9 +188,9 @@ WASI::RunResult WASI::run(Runtime::ModuleConstRefParam module,
 						  std::vector<std::string>&& inArgs,
 						  std::vector<std::string>&& inEnvs,
 						  VFS::FileSystem* fileSystem,
-						  VFS::FD* stdIn,
-						  VFS::FD* stdOut,
-						  VFS::FD* stdErr,
+						  VFS::VFD* stdIn,
+						  VFS::VFD* stdOut,
+						  VFS::VFD* stdErr,
 						  I32& outExitCode)
 {
 	Process* process = new Process;
@@ -208,24 +215,28 @@ WASI::RunResult WASI::run(Runtime::ModuleConstRefParam module,
 								  | __WASI_RIGHT_FD_WRITE | __WASI_RIGHT_FD_FILESTAT_GET
 								  | __WASI_RIGHT_POLL_FD_READWRITE;
 
-	process->fds.insertOrFail(0, FD{stdIn, stdioRights, 0, "/dev/stdin", false});
-	process->fds.insertOrFail(1, FD{stdOut, stdioRights, 0, "/dev/stdout", false});
-	process->fds.insertOrFail(2, FD{stdErr, stdioRights, 0, "/dev/stderr", false});
+	process->fds.insertOrFail(0, FDE(stdIn, stdioRights, 0, "/dev/stdin"));
+	process->fds.insertOrFail(1, FDE(stdOut, stdioRights, 0, "/dev/stdout"));
+	process->fds.insertOrFail(2, FDE(stdErr, stdioRights, 0, "/dev/stderr"));
 
 	if(fileSystem)
 	{
-		VFS::FD* rootFD = nullptr;
-		errorUnless(fileSystem->open(
-						"/", VFS::FileAccessMode::none, VFS::FileCreateMode::openExisting, rootFD)
-					== VFS::OpenResult::success);
+		VFS::VFD* rootFD = nullptr;
+		const VFS::Result openResult = fileSystem->open(
+			"/", VFS::FileAccessMode::none, VFS::FileCreateMode::openExisting, rootFD);
+		if(openResult != VFS::Result::success)
+		{
+			Errors::fatalf("Error opening WASI root directory: %s",
+						   VFS::describeResult(openResult));
+		}
 
 		process->fds.insertOrFail(3,
-								  FD{rootFD,
-									 DIRECTORY_RIGHTS,
-									 INHERITING_DIRECTORY_RIGHTS,
-									 "/",
-									 true,
-									 __WASI_PREOPENTYPE_DIR});
+								  FDE(rootFD,
+									  DIRECTORY_RIGHTS,
+									  INHERITING_DIRECTORY_RIGHTS,
+									  "/",
+									  true,
+									  __WASI_PREOPENTYPE_DIR));
 	}
 
 	process->processClockOrigin = Platform::getProcessClock();

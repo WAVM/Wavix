@@ -15,12 +15,12 @@
 	traceSyscallf(TRACE_SYSCALL_name, argFormat, ##__VA_ARGS__)
 
 #define TRACE_SYSCALL_RETURN(returnCode, ...)                                                      \
-	traceSyscallReturnf(TRACE_SYSCALL_name, #returnCode __VA_ARGS__), __WASI_##returnCode
+	traceSyscallReturnf(TRACE_SYSCALL_name, returnCode, " " __VA_ARGS__)
 
 #define UNIMPLEMENTED_SYSCALL(syscallName, argFormat, ...)                                         \
 	TRACE_SYSCALL(syscallName, argFormat, ##__VA_ARGS__);                                          \
 	Log::printf(Log::error, "Called unimplemented WASI syscall %s.\n", syscallName);               \
-	return TRACE_SYSCALL_RETURN(ENOSYS);
+	return TRACE_SYSCALL_RETURN(__WASI_ENOSYS);
 
 // Operations that apply to regular files.
 #define REGULAR_FILE_RIGHTS                                                                        \
@@ -45,13 +45,15 @@
 #define INHERITING_DIRECTORY_RIGHTS (DIRECTORY_RIGHTS | REGULAR_FILE_RIGHTS)
 
 namespace WAVM { namespace VFS {
-	struct FD;
+	enum class Result;
+	struct DirEntStream;
+	struct VFD;
 }}
 
 namespace WAVM { namespace WASI {
-	struct FD
+	struct FDE
 	{
-		VFS::FD* vfd;
+		VFS::VFD* vfd;
 		__wasi_rights_t rights;
 		__wasi_rights_t inheritingRights;
 
@@ -59,6 +61,25 @@ namespace WAVM { namespace WASI {
 
 		bool isPreopened;
 		__wasi_preopentype_t preopenedType;
+
+		VFS::DirEntStream* dirEntStream{nullptr};
+
+		FDE(VFS::VFD* inVFD,
+			__wasi_rights_t inRights,
+			__wasi_rights_t inInheritingRights,
+			std::string&& inOriginalPath,
+			bool inIsPreopened = false,
+			__wasi_preopentype_t inPreopenedType = __WASI_PREOPENTYPE_DIR)
+		: vfd(inVFD)
+		, rights(inRights)
+		, inheritingRights(inInheritingRights)
+		, originalPath(std::move(inOriginalPath))
+		, isPreopened(inIsPreopened)
+		, preopenedType(inPreopenedType)
+		{
+		}
+
+		VFS::Result close() const;
 	};
 
 	struct ProcessResolver : Runtime::Resolver
@@ -80,7 +101,7 @@ namespace WAVM { namespace WASI {
 		std::vector<std::string> args;
 		std::vector<std::string> envs;
 
-		IndexMap<__wasi_fd_t, WASI::FD> fds{0, INT32_MAX};
+		IndexMap<__wasi_fd_t, WASI::FDE> fds{0, INT32_MAX};
 		VFS::FileSystem* fileSystem = nullptr;
 
 		ProcessResolver resolver;
@@ -94,6 +115,10 @@ namespace WAVM { namespace WASI {
 #define WASIADDRESS_MAX UINT32_MAX
 #define WASIADDRESS_FORMAT "0x%08x"
 
+	// __wasi_errno_t is actually 16-bits but since WebAssembly doesn't have an I16 type, we need to
+	// return an I32 from the intrinsic functions.
+	typedef uint32_t __wasi_errno_return_t;
+
 	inline Process* getProcessFromContextRuntimeData(
 		Runtime::ContextRuntimeData* contextRuntimeData)
 	{
@@ -104,8 +129,11 @@ namespace WAVM { namespace WASI {
 	VALIDATE_AS_PRINTF(2, 3)
 	void traceSyscallf(const char* syscallName, const char* argFormat, ...);
 
-	VALIDATE_AS_PRINTF(2, 3)
-	void traceSyscallReturnf(const char* syscallName, const char* returnFormat, ...);
+	VALIDATE_AS_PRINTF(3, 4)
+	__wasi_errno_t traceSyscallReturnf(const char* syscallName,
+									   __wasi_errno_t result,
+									   const char* format,
+									   ...);
 
 	DECLARE_INTRINSIC_MODULE(wasi);
 	DECLARE_INTRINSIC_MODULE(wasiArgsEnvs);

@@ -15,14 +15,27 @@ namespace WAVM { namespace Platform {
 		err,
 	};
 
-	PLATFORM_API VFS::FD* getStdFD(StdDevice device);
-	PLATFORM_API VFS::OpenResult openHostFile(const std::string& pathName,
-											  VFS::FileAccessMode accessMode,
-											  VFS::FileCreateMode createMode,
-											  VFS::FD*& outFD,
-											  VFS::FDImplicitSync implicitSync
-											  = VFS::FDImplicitSync::none);
-	PLATFORM_API VFS::GetInfoByPathResult getHostFileInfo(const std::string& pathName,
-														  VFS::FileInfo& outInfo);
+	PLATFORM_API VFS::VFD* getStdFD(StdDevice device);
+
+	PLATFORM_API VFS::Result openHostFile(const std::string& pathName,
+										  VFS::FileAccessMode accessMode,
+										  VFS::FileCreateMode createMode,
+										  VFS::VFD*& outFD,
+										  const VFS::VFDFlags& flags = VFS::VFDFlags{});
+
+	PLATFORM_API VFS::Result getHostFileInfo(const std::string& pathName, VFS::FileInfo& outInfo);
+	PLATFORM_API VFS::Result setHostFileTimes(const std::string& pathName,
+											  bool setLastAccessTime,
+											  I128 lastAccessTime,
+											  bool setLastWriteTime,
+											  I128 lastWriteTime);
+
+	PLATFORM_API VFS::Result unlinkHostFile(const std::string& pathName);
+	PLATFORM_API VFS::Result removeHostDir(const std::string& pathName);
+	PLATFORM_API VFS::Result createHostDir(const std::string& pathName);
+
+	PLATFORM_API VFS::Result openHostDir(const std::string& pathName,
+										 VFS::DirEntStream*& outStream);
+
 	PLATFORM_API std::string getCurrentWorkingDirectory();
 }}
