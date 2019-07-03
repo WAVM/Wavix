@@ -53,10 +53,10 @@ namespace Wavix {
 		}
 	};
 
-	DECLARE_INTRINSIC_MODULE(wavix);
-	DECLARE_INTRINSIC_MODULE(wavixFile);
-	DECLARE_INTRINSIC_MODULE(wavixMemory);
-	DECLARE_INTRINSIC_MODULE(wavixProcess);
+	WAVM_DECLARE_INTRINSIC_MODULE(wavix);
+	WAVM_DECLARE_INTRINSIC_MODULE(wavixFile);
+	WAVM_DECLARE_INTRINSIC_MODULE(wavixMemory);
+	WAVM_DECLARE_INTRINSIC_MODULE(wavixProcess);
 
 	extern thread_local Thread* currentThread;
 	extern thread_local Process* currentProcess;
@@ -64,7 +64,7 @@ namespace Wavix {
 	extern std::string sysroot;
 	extern bool isTracingSyscalls;
 
-	VALIDATE_AS_PRINTF(2, 3)
+	WAVM_VALIDATE_AS_PRINTF(2, 3)
 	inline void traceSyscallf(const char* syscallName, const char* argFormat, ...)
 	{
 		if(isTracingSyscalls)
@@ -88,7 +88,7 @@ namespace Wavix {
 		}
 	}
 
-	VALIDATE_AS_PRINTF(2, 3)
+	WAVM_VALIDATE_AS_PRINTF(2, 3)
 	inline void traceSyscallReturnf(const char* syscallName, const char* returnFormat, ...)
 	{
 		if(isTracingSyscalls)

@@ -38,7 +38,7 @@ namespace Wavix {
 	thread_local Thread* currentThread = nullptr;
 	thread_local Process* currentProcess = nullptr;
 
-	DEFINE_INTRINSIC_MODULE(wavixProcess);
+	WAVM_DEFINE_INTRINSIC_MODULE(wavixProcess);
 }
 
 static ConcurrentHashMap<I32, Process*> pidToProcessMap;
@@ -70,17 +70,17 @@ struct ExitThreadException
 	I64 code;
 };
 
-FORCENOINLINE static void setCurrentThreadAndProcess(Thread* newThread)
+WAVM_FORCENOINLINE static void setCurrentThreadAndProcess(Thread* newThread)
 {
 	currentThread = newThread;
 	currentProcess = newThread->process;
 }
 
-FORCENOINLINE static Thread* getCurrentThread() { return currentThread; }
+WAVM_FORCENOINLINE static Thread* getCurrentThread() { return currentThread; }
 
-FORCENOINLINE static Process* getCurrentProcess() { return currentProcess; }
+WAVM_FORCENOINLINE static Process* getCurrentProcess() { return currentProcess; }
 
-FORCENOINLINE static void signalProcessWaiters(Process* process)
+WAVM_FORCENOINLINE static void signalProcessWaiters(Process* process)
 {
 	Lock<Platform::Mutex> waitersLock(process->waitersMutex);
 	for(Thread* waitingThread : process->waiters) { waitingThread->wakeEvent.signal(); }
@@ -188,10 +188,10 @@ ModuleInstance* loadModule(Process* process, const char* hostFilename)
 	RootResolver rootResolver;
 	ModuleInstance* wavixIntrinsicModuleInstance
 		= Intrinsics::instantiateModule(process->compartment,
-										{INTRINSIC_MODULE_REF(wavix),
-										 INTRINSIC_MODULE_REF(wavixFile),
-										 INTRINSIC_MODULE_REF(wavixProcess),
-										 INTRINSIC_MODULE_REF(wavixMemory)},
+										{WAVM_INTRINSIC_MODULE_REF(wavix),
+										 WAVM_INTRINSIC_MODULE_REF(wavixFile),
+										 WAVM_INTRINSIC_MODULE_REF(wavixProcess),
+										 WAVM_INTRINSIC_MODULE_REF(wavixMemory)},
 										"WavixIntrinsics");
 	rootResolver.moduleNameToInstanceMap.set("env", wavixIntrinsicModuleInstance);
 
@@ -310,14 +310,14 @@ Process* Wavix::spawnProcess(Process* parent,
 	return process;
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_exit", I32, __syscall_exit, I32 exitCode)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_exit", I32, __syscall_exit, I32 exitCode)
 {
 	traceSyscallf("exit", "(%i)", exitCode);
 
 	throw ExitThreadException{exitCode};
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess,
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_exit_group",
 						  I32,
 						  __syscall_exit_group,
@@ -328,7 +328,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 	throw ExitThreadException{exitCode};
 }
 
-DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
+WAVM_DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 											  "__syscall_fork",
 											  I32,
 											  __syscall_fork,
@@ -402,7 +402,7 @@ DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 		// compilers will cache a pointer to thread-local data that's accessed multiple times in one
 		// function, and currentProcess is accessed before calling forkCurrentThread, we can't
 		// directly write to it in this function in case the compiler tries to write to the original
-		// thread's currentProcess variable. Instead, call a FORCENOINLINE function
+		// thread's currentProcess variable. Instead, call a WAVM_FORCENOINLINE function
 		// (setCurrentProcess) to set the variable.
 		setCurrentThreadAndProcess(newThread);
 
@@ -413,7 +413,7 @@ DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess,
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_execve",
 						  I32,
 						  __syscall_execve,
@@ -495,19 +495,19 @@ DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 	WAVM_UNREACHABLE();
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_kill", I32, __syscall_kill, I32 a, I32 b)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_kill", I32, __syscall_kill, I32 a, I32 b)
 {
 	traceSyscallf("kill", "(%i,%i)", a, b);
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_getpid", I32, __syscall_getpid, I32 dummy)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_getpid", I32, __syscall_getpid, I32 dummy)
 {
 	traceSyscallf("getpid", "");
 	return currentProcess->id;
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_getppid", I32, __syscall_getppid, I32 dummy)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_getppid", I32, __syscall_getppid, I32 dummy)
 {
 	traceSyscallf("getppid", "");
 	if(currentProcess->parent) { return currentProcess->parent->id; }
@@ -517,7 +517,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_getppid", I32, __syscall_getp
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess,
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_sched_getaffinity",
 						  I32,
 						  __syscall_sched_getaffinity,
@@ -537,7 +537,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 #define WAVIX_WCONTINUED 8
 #define WAVIX_WNOWAIT 0x1000000
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess,
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_wait4",
 						  I32,
 						  __syscall_wait4,
@@ -588,7 +588,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 			child->waiters.push_back(currentThread);
 		}
 
-		while(!currentThread->wakeEvent.wait(INT128_MAX)) {};
+		while(!currentThread->wakeEvent.wait(WAVM_INT128_MAX)) {};
 
 		for(Process* child : waiteeProcesses)
 		{
@@ -602,14 +602,14 @@ DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_gettid", I32, __syscall_gettid, I32)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_gettid", I32, __syscall_gettid, I32)
 {
 	traceSyscallf("gettid", "()");
 	// throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 	return 1;
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess,
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_tkill",
 						  I32,
 						  __syscall_tkill,
@@ -621,7 +621,7 @@ DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 	throw ExitThreadException{-1};
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavixProcess,
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 						  "__syscall_rt_sigprocmask",
 						  I32,
 						  __syscall_rt_sigprocmask,
