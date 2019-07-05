@@ -91,8 +91,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavix,
 {
 	if(argIndex < currentProcess->args.size())
 	{
-		const Uptr safeArgIndex
-			= Platform::branchlessMin((Uptr)argIndex, currentProcess->args.size() - 1);
+		const Uptr safeArgIndex = branchlessMin((Uptr)argIndex, currentProcess->args.size() - 1);
 		return coerce32bitAddress(currentProcess->args[safeArgIndex].size() + 1);
 	}
 	else
@@ -112,8 +111,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavix,
 	Memory* memory = currentThread->process->memory;
 	if(argIndex < currentProcess->args.size())
 	{
-		const Uptr safeArgIndex
-			= Platform::branchlessMin((Uptr)argIndex, currentProcess->args.size() - 1);
+		const Uptr safeArgIndex = branchlessMin((Uptr)argIndex, currentProcess->args.size() - 1);
 		const Uptr numChars = currentProcess->args[safeArgIndex].size();
 		if(numChars + 1 <= Uptr(numCharsInBuffer))
 		{
