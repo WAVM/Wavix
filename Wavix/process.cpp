@@ -588,7 +588,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 			child->waiters.push_back(currentThread);
 		}
 
-		while(!currentThread->wakeEvent.wait(WAVM_INT128_MAX)) {};
+		while(!currentThread->wakeEvent.wait(I128::nan())) {};
 
 		for(Process* child : waiteeProcesses)
 		{
