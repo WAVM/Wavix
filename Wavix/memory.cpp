@@ -110,9 +110,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 
 	const U32 numBytesToCopy = std::min(oldNumBytes, newNumBytes);
 
-	WAVM::bytewiseMemCopy(memoryArrayPtr<U8>(memory, newAddress, numBytesToCopy),
-						  memoryArrayPtr<U8>(memory, oldAddress, numBytesToCopy),
-						  numBytesToCopy);
+	if(numBytesToCopy > 0)
+	{
+		memcpy(memoryArrayPtr<U8>(memory, newAddress, numBytesToCopy),
+			   memoryArrayPtr<U8>(memory, oldAddress, numBytesToCopy),
+			   numBytesToCopy);
+	}
 
 	unmapMemoryPages(memory,
 					 oldAddress / IR::numBytesPerPage,
@@ -146,7 +149,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 
 	if(advice == WAVIX_MADV_DONTNEED)
 	{
-		WAVM::bytewiseMemSet(memoryArrayPtr<U8>(memory, address, numBytes), 0, numBytes);
+		if(numBytes > 0) { memset(memoryArrayPtr<U8>(memory, address, numBytes), 0, numBytes); }
 		return 0;
 	}
 	else
