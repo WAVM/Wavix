@@ -23,6 +23,67 @@ using namespace WAVM::IR;
 using namespace WAVM::WAST;
 
 namespace WAVM { namespace WAST {
+
+	template<typename InnerStream> struct ResumableCodeValidationProxyStream
+	{
+		const Token* validationErrorToken{nullptr};
+
+		ResumableCodeValidationProxyStream(const Module& module,
+										   const FunctionDef& function,
+										   InnerStream& inInnerStream,
+										   ParseState* inParseState)
+		: codeValidationStream(module, function)
+		, innerStream(inInnerStream)
+		, parseState(inParseState)
+		{
+		}
+
+#define VISIT_OPERATOR(name, Imm, isControlOp)                                                     \
+	void name(Imm imm = {})                                                                        \
+	{                                                                                              \
+		try                                                                                        \
+		{                                                                                          \
+			codeValidationStream.name(imm);                                                        \
+			innerStream.name(imm);                                                                 \
+		}                                                                                          \
+		catch(ValidationException const& exception)                                                \
+		{                                                                                          \
+			try                                                                                    \
+			{                                                                                      \
+				codeValidationStream.unreachable();                                                \
+				innerStream.unreachable();                                                         \
+			}                                                                                      \
+			catch(ValidationException const&)                                                      \
+			{                                                                                      \
+				/* If a second validation exception occurs trying to emit unreachable, just */     \
+				/* throw the original exception up to the top level. */                            \
+				throw exception;                                                                   \
+			}                                                                                      \
+			parseErrorf(parseState,                                                                \
+						validationErrorToken,                                                      \
+						"validation error: %s",                                                    \
+						exception.message.c_str());                                                \
+			/* The validator won't have the correct control state after an invalid control */      \
+			/* operator, so just continue parsing at the next recovery point. */                   \
+			if(isControlOp) { throw RecoverParseException(); }                                     \
+		}                                                                                          \
+	}
+#define VISIT_CONTROL_OPERATOR(_1, name, _2, Imm, ...) VISIT_OPERATOR(name, Imm, true)
+#define VISIT_NONCONTROL_OPERATOR(_1, name, _2, Imm, ...) VISIT_OPERATOR(name, Imm, false)
+
+		WAVM_ENUM_NONCONTROL_OPERATORS(VISIT_NONCONTROL_OPERATOR)
+		WAVM_ENUM_CONTROL_OPERATORS(VISIT_CONTROL_OPERATOR)
+#undef VISIT_CONTROL_OPERATOR
+#undef VISIT_NONCONTROL_OPERATOR
+
+		void finishValidation() { codeValidationStream.finish(); }
+
+	private:
+		CodeValidationStream codeValidationStream;
+		InnerStream& innerStream;
+		ParseState* parseState;
+	};
+
 	// State associated with parsing a function.
 	struct FunctionState
 	{
@@ -37,7 +98,7 @@ namespace WAVM { namespace WAST {
 
 		Serialization::ArrayOutputStream codeByteStream;
 		OperatorEncoderStream operationEncoder;
-		CodeValidationProxyStream<OperatorEncoderStream> validatingCodeStream;
+		ResumableCodeValidationProxyStream<OperatorEncoderStream> validatingCodeStream;
 
 		FunctionState(const std::shared_ptr<NameToIndexMap>& inLocalNameToIndexMap,
 					  FunctionDef& inFunctionDef,
@@ -48,7 +109,10 @@ namespace WAVM { namespace WAST {
 					+ moduleState->module.types[inFunctionDef.type.index].params().size())
 		, branchTargetDepth(0)
 		, operationEncoder(codeByteStream)
-		, validatingCodeStream(moduleState->module, functionDef, operationEncoder)
+		, validatingCodeStream(moduleState->module,
+							   inFunctionDef,
+							   operationEncoder,
+							   moduleState->parseState)
 		{
 		}
 	};
@@ -190,12 +254,34 @@ static void parseImm(CursorState* cursor, TableCopyImm& outImm)
 static void parseImm(CursorState* cursor, SelectImm& outImm)
 {
 	outImm.type = ValueType::any;
-	if(cursor->nextToken[0].type == t_leftParenthesis && cursor->nextToken[1].type == t_result)
+	const Token* firstResultToken = nullptr;
+	while(cursor->nextToken[0].type == t_leftParenthesis && cursor->nextToken[1].type == t_result)
 	{
 		parseParenthesized(cursor, [&] {
+			const Token* resultToken = cursor->nextToken;
 			require(cursor, t_result);
-			outImm.type = parseValueType(cursor);
+			if(!firstResultToken) { firstResultToken = resultToken; }
+
+			const Token* valueTypeToken = cursor->nextToken;
+			ValueType result;
+			while(tryParseValueType(cursor, result))
+			{
+				if(outImm.type == ValueType::any) { outImm.type = result; }
+				else
+				{
+					parseErrorf(cursor->parseState,
+								valueTypeToken,
+								"validation error: typed select must have exactly one result");
+				}
+			};
 		});
+	};
+
+	if(firstResultToken && outImm.type == ValueType::any)
+	{
+		parseErrorf(cursor->parseState,
+					firstResultToken,
+					"validation error: typed select must have exactly one result");
 	}
 }
 
@@ -318,18 +404,21 @@ static void parseImm(CursorState* cursor, LoadOrStoreImm<naturalAlignmentLog2>& 
 	{
 		++cursor->nextToken;
 		require(cursor, t_equals);
+		const Token* alignmentToken = cursor->nextToken;
 		alignment = parseU32(cursor);
-		if(alignment > naturalAlignment)
+
+		if(!alignment || alignment & (alignment - 1))
+		{ parseErrorf(cursor->parseState, cursor->nextToken, "alignment must be power of 2"); }
+		else if(alignment > naturalAlignment)
 		{
-			parseErrorf(
-				cursor->parseState, cursor->nextToken, "alignment must be <= natural alignment");
+			parseErrorf(cursor->parseState,
+						alignmentToken,
+						"validation error: alignment must be <= natural alignment");
 			alignment = naturalAlignment;
 		}
 	}
 
-	outImm.alignmentLog2 = (U8)Platform::floorLogTwo(alignment);
-	if(!alignment || alignment & (alignment - 1))
-	{ parseErrorf(cursor->parseState, cursor->nextToken, "alignment must be power of 2"); }
+	outImm.alignmentLog2 = (U8)floorLogTwo(alignment);
 }
 
 static void parseImm(CursorState* cursor, LiteralImm<V128>& outImm)
@@ -562,30 +651,13 @@ static void parseExprSequence(CursorState* cursor)
 		if(isExpression) { parseExprSequence(cursor); }                                            \
 		cursor->functionState->validatingCodeStream.name(imm);                                     \
 	}
-ENUM_NONCONTROL_OPERATORS(VISIT_OP)
+WAVM_ENUM_NONCONTROL_OPERATORS(VISIT_OP)
 #undef VISIT_OP
-
-static void tryEmitElse(const Token* errorToken, CursorState* cursor)
-{
-	try
-	{
-		cursor->functionState->validatingCodeStream.else_();
-	}
-	catch(ValidationException const& exception)
-	{
-		parseErrorf(cursor->parseState, errorToken, "%s", exception.message.c_str());
-		cursor->functionState->validatingCodeStream.unreachable();
-		cursor->functionState->validatingCodeStream.else_();
-		cursor->functionState->validatingCodeStream.unreachable();
-		cursor->functionState->validatingCodeStream.end();
-		throw RecoverParseException();
-	}
-}
 
 static void parseExpr(CursorState* cursor)
 {
 	parseParenthesized(cursor, [&] {
-		const Token* opcodeToken = cursor->nextToken;
+		cursor->functionState->validatingCodeStream.validationErrorToken = cursor->nextToken;
 		try
 		{
 			switch(cursor->nextToken->type)
@@ -630,9 +702,10 @@ static void parseExpr(CursorState* cursor)
 					if(cursor->nextToken->type == t_leftParenthesis)
 					{
 						parseParenthesized(cursor, [&] {
-							const Token* elseToken = cursor->nextToken;
 							require(cursor, t_else_);
-							tryEmitElse(elseToken, cursor);
+							cursor->functionState->validatingCodeStream.validationErrorToken
+								= cursor->nextToken;
+							cursor->functionState->validatingCodeStream.else_();
 							parseInstrSequence(cursor);
 						});
 					}
@@ -643,7 +716,7 @@ static void parseExpr(CursorState* cursor)
 					parseExpr(cursor);
 					if(cursor->nextToken->type != t_rightParenthesis)
 					{
-						tryEmitElse(cursor->nextToken, cursor);
+						cursor->functionState->validatingCodeStream.else_();
 						parseExpr(cursor);
 					}
 				}
@@ -654,7 +727,7 @@ static void parseExpr(CursorState* cursor)
 	case t_##name:                                                                                 \
 		parseOp_##name(cursor, true);                                                              \
 		break;
-				ENUM_NONCONTROL_OPERATORS(VISIT_OP)
+				WAVM_ENUM_NONCONTROL_OPERATORS(VISIT_OP)
 #undef VISIT_OP
 			default:
 				parseErrorf(cursor->parseState, cursor->nextToken, "expected opcode");
@@ -666,12 +739,6 @@ static void parseExpr(CursorState* cursor)
 			cursor->functionState->validatingCodeStream.unreachable();
 			throw RecoverParseException();
 		}
-		catch(ValidationException const& exception)
-		{
-			parseErrorf(cursor->parseState, opcodeToken, "%s", exception.message.c_str());
-			cursor->functionState->validatingCodeStream.unreachable();
-			throw RecoverParseException();
-		}
 	});
 }
 
@@ -679,7 +746,7 @@ static void parseInstrSequence(CursorState* cursor)
 {
 	while(true)
 	{
-		const Token* opcodeToken = cursor->nextToken;
+		cursor->functionState->validatingCodeStream.validationErrorToken = cursor->nextToken;
 		try
 		{
 			switch(cursor->nextToken->type)
@@ -781,7 +848,7 @@ static void parseInstrSequence(CursorState* cursor)
 			case t_catch_all: return;
 #define VISIT_OP(opcode, name, nameString, Imm, ...)                                               \
 	case t_##name: parseOp_##name(cursor, false); break;
-				ENUM_NONCONTROL_OPERATORS(VISIT_OP)
+				WAVM_ENUM_NONCONTROL_OPERATORS(VISIT_OP)
 #undef VISIT_OP
 			default:
 				parseErrorf(cursor->parseState, cursor->nextToken, "expected opcode");
@@ -790,12 +857,6 @@ static void parseInstrSequence(CursorState* cursor)
 		}
 		catch(RecoverParseException const&)
 		{
-			cursor->functionState->validatingCodeStream.unreachable();
-			throw RecoverParseException();
-		}
-		catch(ValidationException const& exception)
-		{
-			parseErrorf(cursor->parseState, opcodeToken, "%s", exception.message.c_str());
 			cursor->functionState->validatingCodeStream.unreachable();
 			throw RecoverParseException();
 		}
@@ -866,7 +927,8 @@ FunctionDef WAST::parseFunctionDef(CursorState* cursor, const Token* funcToken)
 					};
 				}
 			}))
-				;
+			{};
+
 			moduleState->disassemblyNames.functions[functionIndex].locals
 				= std::move(*localDisassemblyNames);
 
@@ -886,8 +948,10 @@ FunctionDef WAST::parseFunctionDef(CursorState* cursor, const Token* funcToken)
 			}
 			catch(ValidationException const& exception)
 			{
-				parseErrorf(
-					moduleState->parseState, validationErrorToken, "%s", exception.message.c_str());
+				parseErrorf(moduleState->parseState,
+							validationErrorToken,
+							"validation error: %s",
+							exception.message.c_str());
 			}
 			catch(RecoverParseException const&)
 			{

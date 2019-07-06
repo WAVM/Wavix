@@ -17,7 +17,7 @@ namespace WAVM { namespace IR {
 
 // Declare the different kinds of objects. They are only declared as incomplete struct types here,
 // and Runtime clients will only handle opaque pointers to them.
-#define DECLARE_OBJECT_TYPE(kindId, kindName, Type)                                                \
+#define WAVM_DECLARE_OBJECT_TYPE(kindId, kindName, Type)                                           \
 	struct Type;                                                                                   \
                                                                                                    \
 	RUNTIME_API void addGCRoot(const Type* type);                                                  \
@@ -57,15 +57,15 @@ namespace WAVM { namespace Runtime {
 	template<typename Type> Type* as(Object* object);
 	template<typename Type> const Type* as(const Object* object);
 
-	DECLARE_OBJECT_TYPE(ObjectKind::function, Function, Function);
-	DECLARE_OBJECT_TYPE(ObjectKind::table, Table, Table);
-	DECLARE_OBJECT_TYPE(ObjectKind::memory, Memory, Memory);
-	DECLARE_OBJECT_TYPE(ObjectKind::global, Global, Global);
-	DECLARE_OBJECT_TYPE(ObjectKind::exceptionType, ExceptionType, ExceptionType);
-	DECLARE_OBJECT_TYPE(ObjectKind::moduleInstance, ModuleInstance, ModuleInstance);
-	DECLARE_OBJECT_TYPE(ObjectKind::context, Context, Context);
-	DECLARE_OBJECT_TYPE(ObjectKind::compartment, Compartment, Compartment);
-	DECLARE_OBJECT_TYPE(ObjectKind::foreign, Foreign, Foreign);
+	WAVM_DECLARE_OBJECT_TYPE(ObjectKind::function, Function, Function);
+	WAVM_DECLARE_OBJECT_TYPE(ObjectKind::table, Table, Table);
+	WAVM_DECLARE_OBJECT_TYPE(ObjectKind::memory, Memory, Memory);
+	WAVM_DECLARE_OBJECT_TYPE(ObjectKind::global, Global, Global);
+	WAVM_DECLARE_OBJECT_TYPE(ObjectKind::exceptionType, ExceptionType, ExceptionType);
+	WAVM_DECLARE_OBJECT_TYPE(ObjectKind::moduleInstance, ModuleInstance, ModuleInstance);
+	WAVM_DECLARE_OBJECT_TYPE(ObjectKind::context, Context, Context);
+	WAVM_DECLARE_OBJECT_TYPE(ObjectKind::compartment, Compartment, Compartment);
+	WAVM_DECLARE_OBJECT_TYPE(ObjectKind::foreign, Foreign, Foreign);
 
 	//
 	// Garbage collection
@@ -140,7 +140,7 @@ namespace WAVM { namespace Runtime {
 	// Exception types
 	//
 
-#define ENUM_INTRINSIC_EXCEPTION_TYPES(visit)                                                      \
+#define WAVM_ENUM_INTRINSIC_EXCEPTION_TYPES(visit)                                                 \
 	visit(outOfBoundsMemoryAccess, WAVM::IR::ValueType::anyref, WAVM::IR::ValueType::i64);         \
 	visit(outOfBoundsTableAccess, WAVM::IR::ValueType::anyref, WAVM::IR::ValueType::i64);          \
 	visit(outOfBoundsDataSegmentAccess,                                                            \
@@ -167,7 +167,7 @@ namespace WAVM { namespace Runtime {
 	// Information about a runtime exception.
 	namespace ExceptionTypes {
 #define DECLARE_INTRINSIC_EXCEPTION_TYPE(name, ...) RUNTIME_API extern ExceptionType* name;
-		ENUM_INTRINSIC_EXCEPTION_TYPES(DECLARE_INTRINSIC_EXCEPTION_TYPE)
+		WAVM_ENUM_INTRINSIC_EXCEPTION_TYPES(DECLARE_INTRINSIC_EXCEPTION_TYPE)
 #undef DECLARE_INTRINSIC_EXCEPTION_TYPE
 	};
 
@@ -290,7 +290,6 @@ namespace WAVM { namespace Runtime {
 
 	// Grows or shrinks the size of a table by numElements. Returns the previous size of the table.
 	RUNTIME_API Iptr growTable(Table* table, Uptr numElements, Object* initialElement = nullptr);
-	RUNTIME_API Iptr shrinkTable(Table* table, Uptr numElements);
 
 	//
 	// Memories
@@ -312,7 +311,6 @@ namespace WAVM { namespace Runtime {
 
 	// Grows or shrinks the size of a memory by numPages. Returns the previous size of the memory.
 	RUNTIME_API Iptr growMemory(Memory* memory, Uptr numPages);
-	RUNTIME_API Iptr shrinkMemory(Memory* memory, Uptr numPages);
 
 	// Unmaps a range of memory pages within the memory's address-space.
 	RUNTIME_API void unmapMemoryPages(Memory* memory, Uptr pageIndex, Uptr numPages);

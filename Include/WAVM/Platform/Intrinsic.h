@@ -7,7 +7,7 @@
 #include <intrin.h>
 #endif
 
-namespace WAVM { namespace Platform {
+namespace WAVM {
 	// The number of bytes in a cache line: assume 64 for now.
 	enum
 	{
@@ -35,7 +35,7 @@ namespace WAVM { namespace Platform {
 		unsigned long result;
 		return _BitScanReverse64(&result, value) ? (63 - result) : 64;
 #elif defined(_WIN32)
-		DEBUG_TRAP();
+		WAVM_DEBUG_TRAP();
 #elif defined(__GNUC__)
 		return value == 0 ? 64 : __builtin_clzll(value);
 #else
@@ -63,7 +63,7 @@ namespace WAVM { namespace Platform {
 		unsigned long result;
 		return _BitScanForward64(&result, value) ? result : 64;
 #elif defined(_WIN32)
-		DEBUG_TRAP();
+		WAVM_DEBUG_TRAP();
 #elif defined(__GNUC__)
 		return value == 0 ? 64 : __builtin_ctzll(value);
 #else
@@ -91,6 +91,30 @@ namespace WAVM { namespace Platform {
 	{
 		return U32(value + ((I32(maxValue - value) >> 31) & (maxValue - value)));
 	}
+
+#if defined(__GNUC__)
+	inline bool addAndCheckOverflow(U64 a, U64 b, U64* out)
+	{
+		return __builtin_add_overflow(a, b, out);
+	}
+	inline bool addAndCheckOverflow(I64 a, I64 b, I64* out)
+	{
+		return __builtin_add_overflow(a, b, out);
+	}
+#else
+	inline bool addAndCheckOverflow(U64 a, U64 b, U64* out)
+	{
+		*out = a + b;
+		return *out < a;
+	}
+
+	inline bool addAndCheckOverflow(I64 a, I64 b, I64* out)
+	{
+		// Do the add with U64 because signed overflow is UB.
+		*out = I64(U64(a) + U64(b));
+		return (a < 0 && b < 0 && *out > 0) || (a > 0 && b > 0 && *out < 0);
+	}
+#endif
 
 	// Byte-wise memcpy and memset: these are different from the C library versions because in the
 	// event of a trap while reading/writing memory, they guarantee that every byte preceding the
@@ -146,4 +170,4 @@ namespace WAVM { namespace Platform {
 			bytewiseMemCopy(dest, source, numBytes);
 		}
 	}
-}}
+}

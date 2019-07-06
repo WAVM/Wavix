@@ -46,7 +46,8 @@ static bool tryParseSizeConstraints(CursorState* cursor,
 			{
 				parseErrorf(cursor->parseState,
 							cursor->nextToken - 1,
-							"maximum size exceeds limit (%" PRIu64 ">%" PRIu64 ")",
+							"validation error: maximum size exceeds limit (%" PRIu64 ">%" PRIu64
+							")",
 							outSizeConstraints.max,
 							maxMax);
 				outSizeConstraints.max = maxMax;
@@ -55,7 +56,8 @@ static bool tryParseSizeConstraints(CursorState* cursor,
 			{
 				parseErrorf(cursor->parseState,
 							cursor->nextToken - 1,
-							"maximum size is less than minimum size (%" PRIu64 "<%" PRIu64 ")",
+							"validation error: maximum size is less than minimum size (%" PRIu64
+							"<%" PRIu64 ")",
 							outSizeConstraints.max,
 							outSizeConstraints.min);
 				outSizeConstraints.max = outSizeConstraints.min;
@@ -488,7 +490,8 @@ static void parseType(CursorState* cursor)
 static bool parseSegmentDeclaration(CursorState* cursor,
 									Name& outSegmentName,
 									Reference& outMemoryOrTableRef,
-									UnresolvedInitializerExpression& outBaseIndex)
+									UnresolvedInitializerExpression& outBaseIndex,
+									const char* memoryOrTable)
 {
 	// The segment can have a name, and for active segments, a reference to a memory or table. If
 	// there are two names, the first is the segment name, and the second is the reference to a
@@ -513,7 +516,7 @@ static bool parseSegmentDeclaration(CursorState* cursor,
 		case t_string:
 		case t_rightParenthesis:
 			// <s:name> ...
-			errorUnless(tryParseName(cursor, outSegmentName));
+			outSegmentName = parseName(cursor, "segment");
 			isActive = false;
 			break;
 		case t_quotedName:
@@ -521,18 +524,18 @@ static bool parseSegmentDeclaration(CursorState* cursor,
 		case t_hexInt:
 		case t_decimalInt:
 			// <s:name> <m:ref> ...
-			errorUnless(tryParseName(cursor, outSegmentName));
-			errorUnless(tryParseNameOrIndexRef(cursor, outMemoryOrTableRef));
+			outSegmentName = parseName(cursor, "segment");
+			outMemoryOrTableRef = parseNameOrIndexRef(cursor, memoryOrTable);
 			break;
 		default:
 			// <m:name> ...
-			errorUnless(tryParseNameOrIndexRef(cursor, outMemoryOrTableRef));
+			outMemoryOrTableRef = parseNameOrIndexRef(cursor, memoryOrTable);
 		}
 		break;
 	case t_hexInt:
 	case t_decimalInt:
 		// <m:ref> ...
-		errorUnless(tryParseNameOrIndexRef(cursor, outMemoryOrTableRef));
+		outMemoryOrTableRef = parseNameOrIndexRef(cursor, memoryOrTable);
 		break;
 	default:
 		// ...
@@ -567,7 +570,7 @@ static void parseData(CursorState* cursor)
 	Name segmentName;
 	Reference memoryRef;
 	UnresolvedInitializerExpression baseAddress;
-	bool isActive = parseSegmentDeclaration(cursor, segmentName, memoryRef, baseAddress);
+	bool isActive = parseSegmentDeclaration(cursor, segmentName, memoryRef, baseAddress, "memory");
 
 	// Parse a list of strings that contains the segment's data.
 	std::string dataString;
@@ -602,7 +605,7 @@ static void parseData(CursorState* cursor)
 				parseErrorf(
 					moduleState->parseState,
 					firstToken,
-					"data segments aren't allowed in modules without any memory declarations");
+					"validation error: data segments aren't allowed in modules without any memory declarations");
 			}
 			else
 			{
@@ -717,6 +720,7 @@ static Uptr parseElemSegmentBody(CursorState* cursor,
 					parseErrorf(
 						moduleState->parseState,
 						elemToken,
+						"validation error: "
 						"elem segments aren't allowed in modules without any table declarations");
 				}
 				else
@@ -764,7 +768,7 @@ static void parseElem(CursorState* cursor)
 	Name segmentName;
 	Reference tableRef;
 	UnresolvedInitializerExpression baseIndex;
-	bool isActive = parseSegmentDeclaration(cursor, segmentName, tableRef, baseIndex);
+	bool isActive = parseSegmentDeclaration(cursor, segmentName, tableRef, baseIndex, "table");
 
 	ReferenceType elemType = ReferenceType::funcref;
 	if(!isActive) { elemType = parseReferenceType(cursor); }
@@ -1113,7 +1117,7 @@ void WAST::parseModuleBody(CursorState* cursor, IR::Module& outModule)
 			{
 				parseErrorf(cursor->parseState,
 							firstToken,
-							"validation exception: %s",
+							"validation error: %s",
 							validationException.message.c_str());
 			}
 		}

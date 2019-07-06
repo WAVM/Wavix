@@ -182,9 +182,9 @@ FunctionType WAST::parseFunctionType(CursorState* cursor,
 			};
 		}
 	}))
-		;
+	{};
 
-	// Parse <= 1 result type: (result <value type>*)*
+	// Parse the result types: (result <value type>*)*
 	while(cursor->nextToken[0].type == t_leftParenthesis && cursor->nextToken[1].type == t_result)
 	{
 		parseParenthesized(cursor, [&] {
@@ -370,6 +370,28 @@ bool WAST::tryParseAndResolveNameOrIndexRef(CursorState* cursor,
 	return true;
 }
 
+Name WAST::parseName(CursorState* cursor, const char* context)
+{
+	Name result;
+	if(!tryParseName(cursor, result))
+	{
+		parseErrorf(cursor->parseState, cursor->nextToken, "expected %s name", context);
+		throw RecoverParseException();
+	}
+	return result;
+}
+
+Reference WAST::parseNameOrIndexRef(CursorState* cursor, const char* context)
+{
+	Reference result;
+	if(!tryParseNameOrIndexRef(cursor, result))
+	{
+		parseErrorf(cursor->parseState, cursor->nextToken, "expected %s name or index", context);
+		throw RecoverParseException();
+	}
+	return result;
+}
+
 Uptr WAST::parseAndResolveNameOrIndexRef(CursorState* cursor,
 										 const NameToIndexMap& nameToIndexMap,
 										 Uptr maxIndex,
@@ -417,7 +439,7 @@ Uptr WAST::resolveRef(ParseState* parseState,
 	{
 		if(ref.index >= maxIndex)
 		{
-			parseErrorf(parseState, ref.token, "invalid index");
+			parseErrorf(parseState, ref.token, "validation error: invalid index");
 			return UINTPTR_MAX;
 		}
 		return ref.index;

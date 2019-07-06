@@ -21,7 +21,7 @@ using namespace WAVM;
 using namespace WAVM::Runtime;
 
 namespace WAVM { namespace Runtime {
-	DEFINE_INTRINSIC_MODULE(wavmIntrinsicsMemory)
+	WAVM_DEFINE_INTRINSIC_MODULE(wavmIntrinsicsMemory)
 }}
 
 // Global lists of memories; used to query whether an address is reserved by one of them.
@@ -214,28 +214,6 @@ Iptr Runtime::growMemory(Memory* memory, Uptr numPagesToGrow)
 	return previousNumPages;
 }
 
-Iptr Runtime::shrinkMemory(Memory* memory, Uptr numPagesToShrink)
-{
-	if(numPagesToShrink == 0) { return memory->numPages.load(std::memory_order_acquire); }
-
-	Lock<Platform::Mutex> resizingLock(memory->resizingMutex);
-
-	const Uptr previousNumPages = memory->numPages.load(std::memory_order_acquire);
-
-	// If the number of pages to shrink would cause the memory's size to drop below its minimum,
-	// return -1.
-	if(numPagesToShrink > previousNumPages
-	   || previousNumPages - numPagesToShrink < memory->type.size.min)
-	{ return -1; }
-
-	// Decommit the pages that were shrunk off the end of the memory.
-	Platform::decommitVirtualPages(memory->baseAddress + previousNumPages * IR::numBytesPerPage,
-								   numPagesToShrink << getPlatformPagesPerWebAssemblyPageLog2());
-
-	memory->numPages.store(previousNumPages - numPagesToShrink, std::memory_order_release);
-	return previousNumPages;
-}
-
 void Runtime::unmapMemoryPages(Memory* memory, Uptr pageIndex, Uptr numPages)
 {
 	wavmAssert(pageIndex + numPages > pageIndex);
@@ -261,8 +239,8 @@ static U8* getValidatedMemoryOffsetRangeImpl(Memory* memory,
 			{asObject(memory), U64(address > memoryNumBytes ? address : memoryNumBytes)});
 	}
 	wavmAssert(memoryBase);
-	numBytes = Platform::branchlessMin(numBytes, memoryNumBytes);
-	return memoryBase + Platform::branchlessMin(address, memoryNumBytes - numBytes);
+	numBytes = branchlessMin(numBytes, memoryNumBytes);
+	return memoryBase + branchlessMin(address, memoryNumBytes - numBytes);
 }
 
 U8* Runtime::getReservedMemoryOffsetRange(Memory* memory, Uptr address, Uptr numBytes)
@@ -307,9 +285,9 @@ void Runtime::initDataSegment(ModuleInstance* moduleInstance,
 			if(sourceOffset < dataVector->size())
 			{
 				Runtime::unwindSignalsAsExceptions([destPointer, sourceOffset, dataVector] {
-					Platform::bytewiseMemCopy(destPointer,
-											  dataVector->data() + sourceOffset,
-											  dataVector->size() - sourceOffset);
+					bytewiseMemCopy(destPointer,
+									dataVector->data() + sourceOffset,
+									dataVector->size() - sourceOffset);
 				});
 			}
 			throwException(
@@ -319,18 +297,18 @@ void Runtime::initDataSegment(ModuleInstance* moduleInstance,
 		else
 		{
 			Runtime::unwindSignalsAsExceptions([destPointer, sourceOffset, numBytes, dataVector] {
-				Platform::bytewiseMemCopy(destPointer, dataVector->data() + sourceOffset, numBytes);
+				bytewiseMemCopy(destPointer, dataVector->data() + sourceOffset, numBytes);
 			});
 		}
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
-						  "memory.grow",
-						  I32,
-						  memory_grow,
-						  U32 deltaPages,
-						  Uptr memoryId)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
+							   "memory.grow",
+							   I32,
+							   memory_grow,
+							   U32 deltaPages,
+							   Uptr memoryId)
 {
 	Memory* memory = getMemoryFromRuntimeData(contextRuntimeData, memoryId);
 	const Iptr numPreviousMemoryPages = growMemory(memory, (Uptr)deltaPages);
@@ -338,7 +316,7 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
 	return I32(numPreviousMemoryPages);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory, "memory.size", U32, memory_size, I64 memoryId)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory, "memory.size", U32, memory_size, I64 memoryId)
 {
 	Memory* memory = getMemoryFromRuntimeData(contextRuntimeData, memoryId);
 	Uptr numMemoryPages = getMemoryNumPages(memory);
@@ -346,16 +324,16 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory, "memory.size", U32, memory_size,
 	return U32(numMemoryPages);
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
-						  "memory.init",
-						  void,
-						  memory_init,
-						  U32 destAddress,
-						  U32 sourceOffset,
-						  U32 numBytes,
-						  Uptr moduleInstanceId,
-						  Uptr memoryId,
-						  Uptr dataSegmentIndex)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
+							   "memory.init",
+							   void,
+							   memory_init,
+							   U32 destAddress,
+							   U32 sourceOffset,
+							   U32 numBytes,
+							   Uptr moduleInstanceId,
+							   Uptr memoryId,
+							   Uptr dataSegmentIndex)
 {
 	ModuleInstance* moduleInstance
 		= getModuleInstanceFromRuntimeData(contextRuntimeData, moduleInstanceId);
@@ -381,12 +359,12 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
-						  "data.drop",
-						  void,
-						  data_drop,
-						  Uptr moduleInstanceId,
-						  Uptr dataSegmentIndex)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
+							   "data.drop",
+							   void,
+							   data_drop,
+							   Uptr moduleInstanceId,
+							   Uptr dataSegmentIndex)
 {
 	ModuleInstance* moduleInstance
 		= getModuleInstanceFromRuntimeData(contextRuntimeData, moduleInstanceId);
@@ -400,15 +378,15 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
 	}
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
-						  "memory.copy",
-						  void,
-						  memory_copy,
-						  U32 destAddress,
-						  U32 sourceAddress,
-						  U32 numBytes,
-						  Uptr sourceMemoryId,
-						  Uptr destMemoryId)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
+							   "memory.copy",
+							   void,
+							   memory_copy,
+							   U32 destAddress,
+							   U32 sourceAddress,
+							   U32 numBytes,
+							   Uptr sourceMemoryId,
+							   Uptr destMemoryId)
 {
 	Memory* sourceMemory = getMemoryFromRuntimeData(contextRuntimeData, sourceMemoryId);
 	Memory* destMemory = getMemoryFromRuntimeData(contextRuntimeData, destMemoryId);
@@ -416,21 +394,20 @@ DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
 	U8* destPointer = getReservedMemoryOffsetRange(destMemory, destAddress, numBytes);
 	U8* sourcePointer = getReservedMemoryOffsetRange(sourceMemory, sourceAddress, numBytes);
 
-	unwindSignalsAsExceptions(
-		[=] { Platform::bytewiseMemMove(destPointer, sourcePointer, numBytes); });
+	unwindSignalsAsExceptions([=] { bytewiseMemMove(destPointer, sourcePointer, numBytes); });
 }
 
-DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
-						  "memory.fill",
-						  void,
-						  memory_fill,
-						  U32 destAddress,
-						  U32 value,
-						  U32 numBytes,
-						  Uptr memoryId)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavmIntrinsicsMemory,
+							   "memory.fill",
+							   void,
+							   memory_fill,
+							   U32 destAddress,
+							   U32 value,
+							   U32 numBytes,
+							   Uptr memoryId)
 {
 	Memory* memory = getMemoryFromRuntimeData(contextRuntimeData, memoryId);
 
 	U8* destPointer = getReservedMemoryOffsetRange(memory, destAddress, numBytes);
-	unwindSignalsAsExceptions([=] { Platform::bytewiseMemSet(destPointer, U8(value), numBytes); });
+	unwindSignalsAsExceptions([=] { bytewiseMemSet(destPointer, U8(value), numBytes); });
 }

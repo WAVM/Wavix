@@ -84,21 +84,37 @@ static FileType getFileTypeFromMode(mode_t mode)
 	case S_IFREG: return FileType::file;
 	case S_IFDIR: return FileType::directory;
 	case S_IFLNK: return FileType::symbolicLink;
+
 	case S_IFSOCK:
-		// return FileType::datagramSocket;
-		// return FileType::streamSocket;
-		WAVM_UNREACHABLE();
-		break;
 	default: return FileType::unknown;
 	};
 }
+
+#ifdef _DIRENT_HAVE_D_TYPE
+static FileType getFileTypeFromDirEntType(U8 type)
+{
+	switch(type)
+	{
+	case DT_BLK: return FileType::blockDevice;
+	case DT_CHR: return FileType::characterDevice;
+	case DT_DIR: return FileType::directory;
+	case DT_FIFO: return FileType::pipe;
+	case DT_LNK: return FileType::symbolicLink;
+	case DT_REG: return FileType::file;
+
+	case DT_SOCK:
+	case DT_UNKNOWN:
+	default: return FileType::unknown;
+	};
+}
+#endif
 
 static I128 timeToNS(time_t time)
 {
 	// time_t might be a long, and I128 doesn't have a long constructor, so coerce it to an integer
 	// type first.
 	const U64 timeInt = U64(time);
-	return assumeNoOverflow(I128(timeInt) * 1000000000);
+	return I128(timeInt) * 1000000000;
 }
 
 static void getFileInfoFromStatus(const struct stat& status, FileInfo& outInfo)
@@ -167,19 +183,7 @@ struct POSIXDirEntStream : DirEntStream
 			outEntry.fileNumber = dirent->d_ino;
 			outEntry.name = dirent->d_name;
 #ifdef _DIRENT_HAVE_D_TYPE
-			switch(dirent->d_type)
-			{
-			case DT_BLK: outEntry.type = FileType::blockDevice; break;
-			case DT_CHR: outEntry.type = FileType::characterDevice; break;
-			case DT_DIR: outEntry.type = FileType::directory; break;
-			case DT_FIFO: outEntry.type = FileType::pipe; break;
-			case DT_LNK: outEntry.type = FileType::symbolicLink; break;
-			case DT_REG: outEntry.type = FileType::file; break;
-			case DT_SOCK: outEntry.type = FileType::streamSocket; break;
-			case DT_UNKNOWN: outEntry.type = FileType::unknown; break;
-
-			default: WAVM_UNREACHABLE();
-			};
+			outEntry.type = getFileTypeFromDirEntType(dirent->d_type);
 #else
 			outEntry.type = FileType::unknown;
 #endif
@@ -209,7 +213,7 @@ struct POSIXDirEntStream : DirEntStream
 	virtual U64 tell() override
 	{
 		const long offset = telldir(dir);
-		errorUnless(offset >= 0 && (unsigned long)offset <= UINT64_MAX);
+		errorUnless(offset >= 0 && (LONG_MAX <= UINT64_MAX || (unsigned long)offset <= UINT64_MAX));
 		if(U64(offset) > maxValidOffset) { maxValidOffset = U64(offset); }
 		return U64(offset);
 	}
@@ -582,11 +586,44 @@ VFD* Platform::getStdFD(StdDevice device)
 	};
 }
 
-Result Platform::openHostFile(const std::string& pathName,
-							  FileAccessMode accessMode,
-							  FileCreateMode createMode,
-							  VFD*& outFD,
-							  const VFDFlags& vfsFlags)
+struct POSIXFS : HostFS
+{
+	virtual Result open(const std::string& absolutePathName,
+						FileAccessMode accessMode,
+						FileCreateMode createMode,
+						VFD*& outFD,
+						const VFDFlags& flags = VFDFlags{}) override;
+
+	virtual Result getInfo(const std::string& absolutePathName, FileInfo& outInfo) override;
+	virtual Result setFileTimes(const std::string& absolutePathName,
+								bool setLastAccessTime,
+								I128 lastAccessTime,
+								bool setLastWriteTime,
+								I128 lastWriteTime) override;
+
+	virtual Result openDir(const std::string& absolutePathName, DirEntStream*& outStream) override;
+
+	virtual Result unlinkFile(const std::string& absolutePathName) override;
+	virtual Result removeDir(const std::string& absolutePathName) override;
+	virtual Result createDir(const std::string& absolutePathName) override;
+
+	static POSIXFS& get()
+	{
+		static POSIXFS posixFS;
+		return posixFS;
+	}
+
+protected:
+	POSIXFS() {}
+};
+
+PLATFORM_API HostFS& Platform::getHostFS() { return POSIXFS::get(); }
+
+Result POSIXFS::open(const std::string& pathName,
+					 FileAccessMode accessMode,
+					 FileCreateMode createMode,
+					 VFD*& outFD,
+					 const VFDFlags& vfsFlags)
 {
 	U32 flags = 0;
 	switch(accessMode)
@@ -612,14 +649,14 @@ Result Platform::openHostFile(const std::string& pathName,
 
 	flags |= translateVFDFlags(vfsFlags);
 
-	const I32 fd = open(pathName.c_str(), flags, mode);
+	const I32 fd = ::open(pathName.c_str(), flags, mode);
 	if(fd == -1) { return asVFSResult(errno); }
 
 	outFD = new POSIXFD(fd);
 	return Result::success;
 }
 
-Result Platform::getHostFileInfo(const std::string& pathName, VFS::FileInfo& outInfo)
+Result POSIXFS::getInfo(const std::string& pathName, VFS::FileInfo& outInfo)
 {
 	struct stat fileStatus;
 
@@ -629,11 +666,11 @@ Result Platform::getHostFileInfo(const std::string& pathName, VFS::FileInfo& out
 	return Result::success;
 }
 
-Result Platform::setHostFileTimes(const std::string& pathName,
-								  bool setLastAccessTime,
-								  I128 lastAccessTime,
-								  bool setLastWriteTime,
-								  I128 lastWriteTime)
+Result POSIXFS::setFileTimes(const std::string& pathName,
+							 bool setLastAccessTime,
+							 I128 lastAccessTime,
+							 bool setLastWriteTime,
+							 I128 lastWriteTime)
 {
 	struct timespec timespecs[2];
 
@@ -655,7 +692,7 @@ Result Platform::setHostFileTimes(const std::string& pathName,
 																	: asVFSResult(errno);
 }
 
-Result Platform::openHostDir(const std::string& pathName, DirEntStream*& outStream)
+Result POSIXFS::openDir(const std::string& pathName, DirEntStream*& outStream)
 {
 	DIR* dir = opendir(pathName.c_str());
 	if(!dir) { return asVFSResult(errno); }
@@ -664,18 +701,18 @@ Result Platform::openHostDir(const std::string& pathName, DirEntStream*& outStre
 	return Result::success;
 }
 
-Result Platform::unlinkHostFile(const std::string& pathName)
+Result POSIXFS::unlinkFile(const std::string& pathName)
 {
 	return !unlink(pathName.c_str()) ? VFS::Result::success : asVFSResult(errno);
 }
 
-Result Platform::removeHostDir(const std::string& pathName)
+Result POSIXFS::removeDir(const std::string& pathName)
 {
 	return !unlinkat(AT_FDCWD, pathName.c_str(), AT_REMOVEDIR) ? Result::success
 															   : asVFSResult(errno);
 }
 
-Result Platform::createHostDir(const std::string& pathName)
+Result POSIXFS::createDir(const std::string& pathName)
 {
 	return !mkdir(pathName.c_str(), 0666) ? Result::success : asVFSResult(errno);
 }
