@@ -40,8 +40,8 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 	if(address != 0 || fd != -1) { throwException(ExceptionTypes::calledUnimplementedIntrinsic); }
 
 	Memory* memory = currentThread->process->memory;
-	Iptr basePageIndex = growMemory(memory, numPages);
-	if(basePageIndex == -1) { return -ErrNo::enomem; }
+	Uptr basePageIndex = 0;
+	if(!growMemory(memory, numPages, &basePageIndex)) { return -ErrNo::enomem; }
 
 	return coerce32bitAddressSigned(Uptr(basePageIndex) * IR::numBytesPerPage);
 }
@@ -103,8 +103,8 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 	// Round newNumBytes up to the next multiple of the page size.
 	const Uptr newNumPages = (newNumBytes + IR::numBytesPerPage - 1) / IR::numBytesPerPage;
 
-	const Iptr newPageIndex = growMemory(memory, newNumPages);
-	if(newPageIndex < 0) { return -ErrNo::enomem; }
+	Uptr newPageIndex = 0;
+	if(!growMemory(memory, newNumPages, &newPageIndex)) { return -ErrNo::enomem; }
 
 	newAddress = coerce32bitAddress(Uptr(newPageIndex) * IR::numBytesPerPage);
 
