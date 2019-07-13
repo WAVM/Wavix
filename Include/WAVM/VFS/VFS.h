@@ -140,7 +140,7 @@ namespace WAVM { namespace VFS {
 		/* Resource exhaustion errors */ \
 		v(outOfSystemFDs, "Out of system file descriptors") \
 		v(outOfProcessFDs, "Out of process file descriptors") \
-		V(outOfMemory, "Out of memory") \
+		v(outOfMemory, "Out of memory") \
 		v(outOfQuota, "Out of quota") \
 		v(outOfFreeSpace, "Out of free space") \
 		v(outOfLinksToParentDir, "Out of links to parent directory") \
@@ -189,22 +189,13 @@ namespace WAVM { namespace VFS {
 
 		virtual Result readv(const IOReadBuffer* buffers,
 							 Uptr numBuffers,
-							 Uptr* outNumBytesRead = nullptr)
+							 Uptr* outNumBytesRead = nullptr,
+							 const U64* offset = nullptr)
 			= 0;
 		virtual Result writev(const IOWriteBuffer* buffers,
 							  Uptr numBuffers,
-							  Uptr* outNumBytesWritten = nullptr)
-			= 0;
-
-		virtual Result preadv(const IOReadBuffer* buffers,
-							  Uptr numBuffers,
-							  U64 offset,
-							  Uptr* outNumBytesRead = nullptr)
-			= 0;
-		virtual Result pwritev(const IOWriteBuffer* buffers,
-							   Uptr numBuffers,
-							   U64 offset,
-							   Uptr* outNumBytesWritten = nullptr)
+							  Uptr* outNumBytesWritten = nullptr,
+							  const U64* offset = nullptr)
 			= 0;
 
 		virtual Result sync(SyncType type) = 0;
@@ -221,15 +212,21 @@ namespace WAVM { namespace VFS {
 
 		virtual Result openDir(DirEntStream*& outStream) = 0;
 
-		Result read(void* outData, Uptr numBytes, Uptr* outNumBytesRead = nullptr)
+		Result read(void* outData,
+					Uptr numBytes,
+					Uptr* outNumBytesRead = nullptr,
+					U64* offset = nullptr)
 		{
 			IOReadBuffer buffer{outData, numBytes};
-			return readv(&buffer, 1, outNumBytesRead);
+			return readv(&buffer, 1, outNumBytesRead, offset);
 		}
-		Result write(const void* data, Uptr numBytes, Uptr* outNumBytesWritten = nullptr)
+		Result write(const void* data,
+					 Uptr numBytes,
+					 Uptr* outNumBytesWritten = nullptr,
+					 U64* offset = nullptr)
 		{
 			IOWriteBuffer buffer{data, numBytes};
-			return writev(&buffer, 1, outNumBytesWritten);
+			return writev(&buffer, 1, outNumBytesWritten, offset);
 		}
 
 	protected:
@@ -240,26 +237,27 @@ namespace WAVM { namespace VFS {
 	{
 		virtual ~FileSystem() {}
 
-		virtual Result open(const std::string& absolutePathName,
+		virtual Result open(const std::string& path,
 							FileAccessMode accessMode,
 							FileCreateMode createMode,
 							VFD*& outFD,
 							const VFDFlags& flags = VFDFlags{})
 			= 0;
 
-		virtual Result getInfo(const std::string& absolutePathName, FileInfo& outInfo) = 0;
-		virtual Result setFileTimes(const std::string& absolutePathName,
+		virtual Result getFileInfo(const std::string& path, FileInfo& outInfo) = 0;
+		virtual Result setFileTimes(const std::string& path,
 									bool setLastAccessTime,
 									I128 lastAccessTime,
 									bool setLastWriteTime,
 									I128 lastWriteTime)
 			= 0;
 
-		virtual Result openDir(const std::string& absolutePathName, DirEntStream*& outStream) = 0;
+		virtual Result openDir(const std::string& path, DirEntStream*& outStream) = 0;
 
-		virtual Result unlinkFile(const std::string& absolutePathName) = 0;
-		virtual Result removeDir(const std::string& absolutePathName) = 0;
-		virtual Result createDir(const std::string& absolutePathName) = 0;
+		virtual Result unlinkFile(const std::string& path) = 0;
+		virtual Result removeDir(const std::string& path) = 0;
+		virtual Result createDir(const std::string& path) = 0;
+
 	};
 
 	VFS_API const char* describeResult(Result result);

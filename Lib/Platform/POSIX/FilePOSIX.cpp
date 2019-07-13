@@ -1,3 +1,7 @@
+#ifdef _GNU_SOURCE
+#define _FILE_OFFSET_BITS 64
+#endif
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -14,6 +18,8 @@
 #include "WAVM/Inline/I128.h"
 #include "WAVM/Platform/File.h"
 #include "WAVM/VFS/VFS.h"
+
+#define FILE_OFFSET_IS_64BIT (sizeof(off_t) == 8)
 
 using namespace WAVM;
 using namespace WAVM::Platform;
@@ -266,11 +272,9 @@ struct POSIXFD : VFD
 		default: WAVM_UNREACHABLE();
 		};
 
-#ifdef __linux__
-		const I64 result = lseek64(fd, offset, whence);
-#else
-		const I64 result = lseek(fd, reinterpret_cast<off_t>(offset), whence);
-#endif
+		if(!FILE_OFFSET_IS_64BIT && (offset < INT32_MIN || offset > INT32_MAX))
+		{ return Result::invalidOffset; }
+		const I64 result = lseek(fd, off_t(offset), whence);
 		if(result == -1) { return errno == EINVAL ? Result::invalidOffset : asVFSResult(errno); }
 
 		if(outAbsoluteOffset) { *outAbsoluteOffset = U64(result); }
@@ -278,7 +282,8 @@ struct POSIXFD : VFD
 	}
 	virtual Result readv(const IOReadBuffer* buffers,
 						 Uptr numBuffers,
-						 Uptr* outNumBytesRead = nullptr) override
+						 Uptr* outNumBytesRead = nullptr,
+						 const U64* offset = nullptr) override
 	{
 		if(outNumBytesRead) { *outNumBytesRead = 0; }
 
@@ -288,16 +293,69 @@ struct POSIXFD : VFD
 			return Result::tooManyBuffers;
 		}
 
-		// Do the read.
-		ssize_t result = ::readv(fd, (const struct iovec*)buffers, numBuffers);
-		if(result == -1) { return asVFSResult(errno); }
+		if(offset == nullptr)
+		{
+			// Do the read.
+			ssize_t result = ::readv(fd, (const struct iovec*)buffers, numBuffers);
+			if(result == -1) { return asVFSResult(errno); }
 
-		if(outNumBytesRead) { *outNumBytesRead = result; }
-		return Result::success;
+			if(outNumBytesRead) { *outNumBytesRead = result; }
+			return Result::success;
+		}
+		else
+		{
+			if(!FILE_OFFSET_IS_64BIT && *offset > INT32_MAX) { return Result::invalidOffset; }
+
+			// Count the number of bytes in all the buffers.
+			Uptr numBufferBytes = 0;
+			for(Uptr bufferIndex = 0; bufferIndex < numBuffers; ++bufferIndex)
+			{
+				const IOReadBuffer& buffer = buffers[bufferIndex];
+				if(numBufferBytes + buffer.numBytes < numBufferBytes)
+				{ return Result::tooManyBufferBytes; }
+				numBufferBytes += buffer.numBytes;
+			}
+			if(numBufferBytes > UINT32_MAX) { return Result::tooManyBufferBytes; }
+
+			// Allocate a combined buffer.
+			U8* combinedBuffer = (U8*)malloc(numBufferBytes);
+			if(!combinedBuffer) { return Result::outOfMemory; }
+
+			// Do the read.
+			Result vfsResult = Result::success;
+			const ssize_t result = pread(fd, combinedBuffer, numBufferBytes, off_t(*offset));
+			if(result < 0) { vfsResult = asVFSResult(errno); }
+			else
+			{
+				const Uptr numBytesRead = Uptr(result);
+
+				// Copy the contents of the combined buffer to the individual buffers.
+				Uptr numBytesCopied = 0;
+				for(Uptr bufferIndex = 0; bufferIndex < numBuffers && numBytesCopied < numBytesRead;
+					++bufferIndex)
+				{
+					const IOReadBuffer& buffer = buffers[bufferIndex];
+					const Uptr numBytesToCopy
+						= std::min(buffer.numBytes, numBytesRead - numBytesCopied);
+					if(numBytesToCopy)
+					{ memcpy(buffer.data, combinedBuffer + numBytesCopied, numBytesToCopy); }
+					numBytesCopied += numBytesToCopy;
+				}
+
+				// Write the total number of bytes read.
+				if(outNumBytesRead) { *outNumBytesRead = numBytesRead; }
+			}
+
+			// Free the combined buffer.
+			free(combinedBuffer);
+
+			return vfsResult;
+		}
 	}
 	virtual Result writev(const IOWriteBuffer* buffers,
 						  Uptr numBuffers,
-						  Uptr* outNumBytesWritten = nullptr) override
+						  Uptr* outNumBytesWritten = nullptr,
+						  const U64* offset = nullptr) override
 	{
 		if(outNumBytesWritten) { *outNumBytesWritten = 0; }
 
@@ -307,135 +365,58 @@ struct POSIXFD : VFD
 			return Result::tooManyBuffers;
 		}
 
-		ssize_t result = ::writev(fd, (const struct iovec*)buffers, numBuffers);
-		if(result == -1) { return asVFSResult(errno); }
-
-		if(outNumBytesWritten) { *outNumBytesWritten = result; }
-		return Result::success;
-	}
-	virtual Result preadv(const IOReadBuffer* buffers,
-						  Uptr numBuffers,
-						  U64 offset,
-						  Uptr* outNumBytesRead = nullptr) override
-	{
-		if(outNumBytesRead) { *outNumBytesRead = 0; }
-
-		if(numBuffers == 0) { return Result::success; }
-		else if(numBuffers > IOV_MAX)
+		if(offset == nullptr)
 		{
-			return Result::tooManyBuffers;
+			ssize_t result = ::writev(fd, (const struct iovec*)buffers, numBuffers);
+			if(result == -1) { return asVFSResult(errno); }
+
+			if(outNumBytesWritten) { *outNumBytesWritten = result; }
+			return Result::success;
 		}
-
-#ifndef __linux__
-		// If pread64 isn't available, fail before allocating the combined buffer.
-		if(offset > UINT32_MAX) { return Result::invalidOffset; }
-#endif
-
-		// Count the number of bytes in all the buffers.
-		Uptr numBufferBytes = 0;
-		for(Uptr bufferIndex = 0; bufferIndex < numBuffers; ++bufferIndex)
+		else
 		{
-			const IOReadBuffer& buffer = buffers[bufferIndex];
-			if(numBufferBytes + buffer.numBytes < numBufferBytes)
-			{ return Result::tooManyBufferBytes; }
-			numBufferBytes += buffer.numBytes;
-		}
-		if(numBufferBytes > UINT32_MAX) { return Result::tooManyBufferBytes; }
+			if(!FILE_OFFSET_IS_64BIT && *offset > INT32_MAX) { return Result::invalidOffset; }
 
-		// Allocate a combined buffer.
-		U8* combinedBuffer = (U8*)malloc(numBufferBytes);
-		if(!combinedBuffer) { return Result::outOfMemory; }
-
-		// Do the read.
-#ifdef __linux__
-		ssize_t result = pread64(fd, combinedBuffer, numBufferBytes, offset);
-#else
-		ssize_t result = pread(fd, combinedBuffer, numBufferBytes, U32(offset));
-#endif
-		if(result >= 0)
-		{
-			const Uptr numBytesRead = Uptr(result);
-
-			// Copy the contents of the combined buffer to the individual buffers.
-			Uptr numBytesCopied = 0;
-			for(Uptr bufferIndex = 0; bufferIndex < numBuffers && numBytesCopied < numBytesRead;
-				++bufferIndex)
+			// Count the number of bytes in all the buffers.
+			Uptr numBufferBytes = 0;
+			for(Uptr bufferIndex = 0; bufferIndex < numBuffers; ++bufferIndex)
 			{
-				const IOReadBuffer& buffer = buffers[bufferIndex];
+				const IOWriteBuffer& buffer = buffers[bufferIndex];
+				if(numBufferBytes + buffer.numBytes < numBufferBytes)
+				{ return Result::tooManyBufferBytes; }
+				numBufferBytes += buffer.numBytes;
+			}
+			if(numBufferBytes > UINT32_MAX) { return Result::tooManyBufferBytes; }
+
+			// Allocate a combined buffer.
+			U8* combinedBuffer = (U8*)malloc(numBufferBytes);
+			if(!combinedBuffer) { return Result::outOfMemory; }
+
+			// Copy the individual buffers into the combined buffer.
+			Uptr numBytesCopied = 0;
+			for(Uptr bufferIndex = 0; bufferIndex < numBuffers; ++bufferIndex)
+			{
+				const IOWriteBuffer& buffer = buffers[bufferIndex];
 				const Uptr numBytesToCopy
-					= std::min(buffer.numBytes, numBytesRead - numBytesCopied);
+					= std::min(buffer.numBytes, numBufferBytes - numBytesCopied);
 				if(numBytesToCopy)
-				{ memcpy(buffer.data, combinedBuffer + numBytesCopied, numBytesToCopy); }
+				{ memcpy(combinedBuffer + numBytesCopied, buffer.data, numBytesToCopy); }
 				numBytesCopied += numBytesToCopy;
 			}
 
-			// Write the total number of bytes read.
-			if(outNumBytesRead) { *outNumBytesRead = numBytesRead; }
+			// Do the write.
+			Result vfsResult = Result::success;
+			ssize_t result = pwrite(fd, combinedBuffer, numBufferBytes, off_t(*offset));
+			if(result < 0) { vfsResult = asVFSResult(errno); }
+
+			// Write the total number of bytes writte.
+			if(outNumBytesWritten) { *outNumBytesWritten = Uptr(result); }
+
+			// Free the combined buffer.
+			free(combinedBuffer);
+
+			return vfsResult;
 		}
-
-		// Free the combined buffer.
-		free(combinedBuffer);
-
-		return result >= 0 ? Result::success : asVFSResult(errno);
-	}
-	virtual Result pwritev(const IOWriteBuffer* buffers,
-						   Uptr numBuffers,
-						   U64 offset,
-						   Uptr* outNumBytesWritten = nullptr) override
-	{
-		if(outNumBytesWritten) { *outNumBytesWritten = 0; }
-
-		if(numBuffers == 0) { return Result::success; }
-		else if(numBuffers > IOV_MAX)
-		{
-			return Result::tooManyBuffers;
-		}
-
-#ifndef __linux__
-		// If pwrite64 isn't available, fail before allocating the combined buffer.
-		if(offset > UINT32_MAX) { return Result::invalidOffset; }
-#endif
-
-		// Count the number of bytes in all the buffers.
-		Uptr numBufferBytes = 0;
-		for(Uptr bufferIndex = 0; bufferIndex < numBuffers; ++bufferIndex)
-		{
-			const IOWriteBuffer& buffer = buffers[bufferIndex];
-			if(numBufferBytes + buffer.numBytes < numBufferBytes)
-			{ return Result::tooManyBufferBytes; }
-			numBufferBytes += buffer.numBytes;
-		}
-		if(numBufferBytes > UINT32_MAX) { return Result::tooManyBufferBytes; }
-
-		// Allocate a combined buffer.
-		U8* combinedBuffer = (U8*)malloc(numBufferBytes);
-		if(!combinedBuffer) { return Result::outOfMemory; }
-
-		// Copy the individual buffers into the combined buffer.
-		Uptr numBytesCopied = 0;
-		for(Uptr bufferIndex = 0; bufferIndex < numBuffers; ++bufferIndex)
-		{
-			const IOWriteBuffer& buffer = buffers[bufferIndex];
-			const Uptr numBytesToCopy = std::min(buffer.numBytes, numBufferBytes - numBytesCopied);
-			if(numBytesToCopy)
-			{ memcpy(combinedBuffer + numBytesCopied, buffer.data, numBytesToCopy); }
-			numBytesCopied += numBytesToCopy;
-		}
-
-		// Do the write.
-#ifdef __linux__
-		ssize_t result = pwrite64(fd, combinedBuffer, numBufferBytes, offset);
-#else
-		ssize_t result = pwrite(fd, combinedBuffer, numBufferBytes, U32(offset));
-#endif
-
-		// Write the total number of bytes writte.
-		if(outNumBytesWritten) { *outNumBytesWritten = Uptr(result); }
-
-		// Free the combined buffer.
-		free(combinedBuffer);
-
-		return result >= 0 ? Result::success : asVFSResult(errno);
 	}
 	virtual Result sync(SyncType syncType) override
 	{
@@ -502,12 +483,9 @@ struct POSIXFD : VFD
 
 	virtual Result setFileSize(U64 numBytes) override
 	{
-#ifdef __linux__
-		int result = ftruncate64(fd, numBytes);
-#else
-		if(numBytes > UINT32_MAX) { return Result::exceededFileSizeLimit; }
-		int result = ftruncate(fd, U32(numBytes));
-#endif
+		if(!FILE_OFFSET_IS_64BIT && numBytes > INT32_MAX) { return Result::exceededFileSizeLimit; }
+
+		int result = ftruncate(fd, off_t(numBytes));
 		return result == 0 ? Result::success : asVFSResult(errno);
 	}
 	virtual Result setFileTimes(bool setLastAccessTime,
@@ -588,24 +566,24 @@ VFD* Platform::getStdFD(StdDevice device)
 
 struct POSIXFS : HostFS
 {
-	virtual Result open(const std::string& absolutePathName,
+	virtual Result open(const std::string& path,
 						FileAccessMode accessMode,
 						FileCreateMode createMode,
 						VFD*& outFD,
 						const VFDFlags& flags = VFDFlags{}) override;
 
-	virtual Result getInfo(const std::string& absolutePathName, FileInfo& outInfo) override;
-	virtual Result setFileTimes(const std::string& absolutePathName,
+	virtual Result getFileInfo(const std::string& path, FileInfo& outInfo) override;
+	virtual Result setFileTimes(const std::string& path,
 								bool setLastAccessTime,
 								I128 lastAccessTime,
 								bool setLastWriteTime,
 								I128 lastWriteTime) override;
 
-	virtual Result openDir(const std::string& absolutePathName, DirEntStream*& outStream) override;
+	virtual Result openDir(const std::string& path, DirEntStream*& outStream) override;
 
-	virtual Result unlinkFile(const std::string& absolutePathName) override;
-	virtual Result removeDir(const std::string& absolutePathName) override;
-	virtual Result createDir(const std::string& absolutePathName) override;
+	virtual Result unlinkFile(const std::string& path) override;
+	virtual Result removeDir(const std::string& path) override;
+	virtual Result createDir(const std::string& path) override;
 
 	static POSIXFS& get()
 	{
@@ -619,7 +597,7 @@ protected:
 
 PLATFORM_API HostFS& Platform::getHostFS() { return POSIXFS::get(); }
 
-Result POSIXFS::open(const std::string& pathName,
+Result POSIXFS::open(const std::string& path,
 					 FileAccessMode accessMode,
 					 FileCreateMode createMode,
 					 VFD*& outFD,
@@ -649,24 +627,24 @@ Result POSIXFS::open(const std::string& pathName,
 
 	flags |= translateVFDFlags(vfsFlags);
 
-	const I32 fd = ::open(pathName.c_str(), flags, mode);
+	const I32 fd = ::open(path.c_str(), flags, mode);
 	if(fd == -1) { return asVFSResult(errno); }
 
 	outFD = new POSIXFD(fd);
 	return Result::success;
 }
 
-Result POSIXFS::getInfo(const std::string& pathName, VFS::FileInfo& outInfo)
+Result POSIXFS::getFileInfo(const std::string& path, VFS::FileInfo& outInfo)
 {
 	struct stat fileStatus;
 
-	if(stat(pathName.c_str(), &fileStatus)) { return asVFSResult(errno); }
+	if(stat(path.c_str(), &fileStatus)) { return asVFSResult(errno); }
 
 	getFileInfoFromStatus(fileStatus, outInfo);
 	return Result::success;
 }
 
-Result POSIXFS::setFileTimes(const std::string& pathName,
+Result POSIXFS::setFileTimes(const std::string& path,
 							 bool setLastAccessTime,
 							 I128 lastAccessTime,
 							 bool setLastWriteTime,
@@ -688,33 +666,32 @@ Result POSIXFS::setFileTimes(const std::string& pathName,
 		timespecs[1].tv_nsec = U32(lastWriteTime % 1000000000);
 	}
 
-	return utimensat(AT_FDCWD, pathName.c_str(), timespecs, 0) == 0 ? Result::success
-																	: asVFSResult(errno);
+	return utimensat(AT_FDCWD, path.c_str(), timespecs, 0) == 0 ? Result::success
+																: asVFSResult(errno);
 }
 
-Result POSIXFS::openDir(const std::string& pathName, DirEntStream*& outStream)
+Result POSIXFS::openDir(const std::string& path, DirEntStream*& outStream)
 {
-	DIR* dir = opendir(pathName.c_str());
+	DIR* dir = opendir(path.c_str());
 	if(!dir) { return asVFSResult(errno); }
 
 	outStream = new POSIXDirEntStream(dir);
 	return Result::success;
 }
 
-Result POSIXFS::unlinkFile(const std::string& pathName)
+Result POSIXFS::unlinkFile(const std::string& path)
 {
-	return !unlink(pathName.c_str()) ? VFS::Result::success : asVFSResult(errno);
+	return !unlink(path.c_str()) ? VFS::Result::success : asVFSResult(errno);
 }
 
-Result POSIXFS::removeDir(const std::string& pathName)
+Result POSIXFS::removeDir(const std::string& path)
 {
-	return !unlinkat(AT_FDCWD, pathName.c_str(), AT_REMOVEDIR) ? Result::success
-															   : asVFSResult(errno);
+	return !unlinkat(AT_FDCWD, path.c_str(), AT_REMOVEDIR) ? Result::success : asVFSResult(errno);
 }
 
-Result POSIXFS::createDir(const std::string& pathName)
+Result POSIXFS::createDir(const std::string& path)
 {
-	return !mkdir(pathName.c_str(), 0666) ? Result::success : asVFSResult(errno);
+	return !mkdir(path.c_str(), 0666) ? Result::success : asVFSResult(errno);
 }
 
 std::string Platform::getCurrentWorkingDirectory()

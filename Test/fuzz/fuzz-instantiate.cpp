@@ -2,7 +2,7 @@
 #include <string>
 #include <utility>
 #include <vector>
-
+#include "FuzzTargetCommonMain.h"
 #include "WAVM/IR/IR.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/Operators.h"
@@ -19,10 +19,12 @@
 #include "WAVM/Runtime/Runtime.h"
 #include "WAVM/WASM/WASM.h"
 
+#if !WAVM_ENABLE_LIBFUZZER
+#include "WAVM/WASTPrint/WASTPrint.h"
+#endif
+
 using namespace WAVM;
-using namespace WAVM::IR;
 using namespace WAVM::Runtime;
-using namespace WAVM::WASM;
 
 extern "C" I32 LLVMFuzzerTestOneInput(const U8* data, Uptr numBytes)
 {
@@ -32,40 +34,36 @@ extern "C" I32 LLVMFuzzerTestOneInput(const U8* data, Uptr numBytes)
 	module.featureSpec.maxDataSegments = 65536;
 	if(!WASM::loadBinaryModule(data, numBytes, module, Log::debug)) { return 0; }
 
+#if !WAVM_ENABLE_LIBFUZZER
+	std::string wastString = WAST::print(module);
+	Log::printf(Log::Category::debug, "Disassembly:\n%s\n", wastString.c_str());
+#endif
+
+	// Use a resource quota to limit the amount of memory a single instance can allocate.
+	ResourceQuotaRef resourceQuota = createResourceQuota();
+	setResourceQuotaMaxTableElems(resourceQuota, 65536);
+	setResourceQuotaMaxMemoryPages(resourceQuota, 8192);
+
 	GCPointer<Compartment> compartment = createCompartment();
-	NullResolver nullResolver;
-	StubResolver stubResolver(compartment, nullResolver, StubResolver::FunctionBehavior::zero);
-	LinkResult linkResult = linkModule(module, stubResolver);
-	if(linkResult.success)
 	{
-		catchRuntimeExceptions(
-			[&] {
-				instantiateModule(compartment,
-								  compileModule(module),
-								  std::move(linkResult.resolvedImports),
-								  "fuzz");
-			},
-			[&](Exception* exception) { destroyException(exception); });
+		NullResolver nullResolver;
+		StubResolver stubResolver(
+			compartment, nullResolver, StubResolver::FunctionBehavior::zero, false);
+		LinkResult linkResult = linkModule(module, stubResolver);
+		if(linkResult.success)
+		{
+			catchRuntimeExceptions(
+				[&] {
+					instantiateModule(compartment,
+									  compileModule(module),
+									  std::move(linkResult.resolvedImports),
+									  "fuzz",
+									  resourceQuota);
+				},
+				[&](Exception* exception) { destroyException(exception); });
+		}
 	}
 	errorUnless(tryCollectCompartment(std::move(compartment)));
 
 	return 0;
 }
-
-#if !WAVM_ENABLE_LIBFUZZER
-I32 main(int argc, char** argv)
-{
-	if(argc != 2)
-	{
-		Log::printf(Log::error, "Usage: FuzzInstantiate in.wasm\n");
-		return EXIT_FAILURE;
-	}
-	const char* inputFilename = argv[1];
-
-	std::vector<U8> wasmBytes;
-	if(!loadFile(inputFilename, wasmBytes)) { return EXIT_FAILURE; }
-
-	LLVMFuzzerTestOneInput(wasmBytes.data(), wasmBytes.size());
-	return EXIT_SUCCESS;
-}
-#endif

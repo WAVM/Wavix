@@ -64,17 +64,31 @@ static HashMap<std::string, const char*> runtimeSymbolMap = {
 #endif
 };
 
+// wavm_probe_stack can't be looked up by dladdr when WAVM_USE_STATIC_LINKING=1, so get a reference
+// to it directly.
+#ifndef _WIN32
+extern "C" void wavm_probe_stack();
+#endif
+
 llvm::JITEvaluatedSymbol LLVMJIT::resolveJITImport(llvm::StringRef name)
 {
-	// Allow some intrinsics used by LLVM
-	const char* const* runtimeSymbolName = runtimeSymbolMap.get(name.str());
-	if(!runtimeSymbolName) { return llvm::JITEvaluatedSymbol(nullptr); }
+	void* addr = nullptr;
+#ifndef _WIN32
+	if(name == "wavm_probe_stack") { addr = (void*)&wavm_probe_stack; }
+	else
+#endif
+	{
+		// Allow some intrinsics used by LLVM
+		const char* const* runtimeSymbolName = runtimeSymbolMap.get(name.str());
+		if(!runtimeSymbolName) { return llvm::JITEvaluatedSymbol(nullptr); }
 
-	void* addr = llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(*runtimeSymbolName);
+		addr = llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(*runtimeSymbolName);
+	}
+
 	if(!addr)
 	{
 		Errors::fatalf("LLVM generated code references undefined external symbol: %s",
-					   *runtimeSymbolName);
+					   name.str().c_str());
 	}
 	return llvm::JITEvaluatedSymbol(reinterpret_cast<Uptr>(addr), llvm::JITSymbolFlags::None);
 }
@@ -137,4 +151,12 @@ LLVMContext::LLVMContext()
 	typedZeroConstants[(Uptr)ValueType::v128] = emitLiteral(*this, V128());
 	typedZeroConstants[(Uptr)ValueType::anyref] = typedZeroConstants[(Uptr)ValueType::funcref]
 		= typedZeroConstants[(Uptr)ValueType::nullref] = llvm::Constant::getNullValue(anyrefType);
+}
+
+TargetSpec LLVMJIT::getHostTargetSpec()
+{
+	TargetSpec result;
+	result.triple = llvm::sys::getProcessTriple();
+	result.cpu = llvm::sys::getHostCPUName();
+	return result;
 }

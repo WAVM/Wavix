@@ -361,8 +361,7 @@ static __wasi_errno_t readImpl(Process* process,
 			{
 				// Do the read.
 				result = asWASIErrNo(
-					offset ? fde->vfd->preadv(vfsReadBuffers, numIOVs, *offset, &outNumBytesRead)
-						   : fde->vfd->readv(vfsReadBuffers, numIOVs, &outNumBytesRead));
+					fde->vfd->readv(vfsReadBuffers, numIOVs, &outNumBytesRead, offset));
 			}
 		},
 		[&](Exception* exception) {
@@ -420,9 +419,7 @@ static __wasi_errno_t writeImpl(Process* process,
 			{
 				// Do the writes.
 				result = asWASIErrNo(
-					offset
-						? fde->vfd->pwritev(vfsWriteBuffers, numIOVs, *offset, &outNumBytesWritten)
-						: fde->vfd->writev(vfsWriteBuffers, numIOVs, &outNumBytesWritten));
+					fde->vfd->writev(vfsWriteBuffers, numIOVs, &outNumBytesWritten, offset));
 			}
 		},
 		[&](Exception* exception) {
@@ -1195,7 +1192,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wasiFile,
 	if(pathError != __WASI_ESUCCESS) { return TRACE_SYSCALL_RETURN(pathError); }
 
 	FileInfo fileInfo;
-	const VFS::Result result = process->fileSystem->getInfo(canonicalPath, fileInfo);
+	const VFS::Result result = process->fileSystem->getFileInfo(canonicalPath, fileInfo);
 	if(result != VFS::Result::success) { return TRACE_SYSCALL_RETURN(asWASIErrNo(result)); }
 
 	__wasi_filestat_t& fileStat = memoryRef<__wasi_filestat_t>(process->memory, filestatAddress);
