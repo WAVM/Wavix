@@ -23,6 +23,21 @@
 (module (func (v128.const f32x4 nan:0x1 nan:0x1 nan:0x1 nan:0x1) drop))
 (module (func (v128.const f32x4 nan:0x7f_ffff nan:0x7f_ffff nan:0x7f_ffff nan:0x7f_ffff) drop))
 
+;; Non-splat cases
+
+(module (func (v128.const i8x16  0xFF  0xFF  0xFF  0xFF  0xFF  0xFF  0xFF  0xFF
+                                -0x80 -0x80 -0x80 -0x80 -0x80 -0x80 -0x80 -0x80) drop))
+(module (func (v128.const i8x16  0xFF  0xFF  0xFF  0xFF   255   255   255   255
+                                -0x80 -0x80 -0x80 -0x80 -0x80 -0x80 -0x80 -0x80) drop))
+(module (func (v128.const i8x16  0xFF  0xFF  0xFF  0xFF   255   255   255   255
+                                -0x80 -0x80 -0x80 -0x80  -128  -128  -128  -128) drop))
+(module (func (v128.const i16x8 0xFF 0xFF  0xFF  0xFF -0x8000 -0x8000 -0x8000 -0x8000) drop))
+(module (func (v128.const i16x8 0xFF 0xFF 65535 65535 -0x8000 -0x8000 -0x8000 -0x8000) drop))
+(module (func (v128.const i16x8 0xFF 0xFF 65535 65535 -0x8000 -0x8000  -32768  -32768) drop))
+(module (func (v128.const i32x4 0xffffffff 0xffffffff -0x80000000 -0x80000000) drop))
+(module (func (v128.const i32x4 0xffffffff 4294967295 -0x80000000 -0x80000000) drop))
+(module (func (v128.const i32x4 0xffffffff 4294967295 -0x80000000 -2147483648) drop))
+
 
 ;; Constant out of range (int literal is too large)
 
@@ -333,3 +348,329 @@
 (assert_return (invoke "global.get_g1") (v128.const i32x4 2 2 2 2))
 (assert_return (invoke "global.get_g2") (v128.const i32x4 3 3 3 3))
 (assert_return (invoke "global.get_g3") (v128.const i32x4 4 4 4 4))
+
+
+;; Test integer literal parsing.
+
+(module
+  (func (export "i32x4.test") (result v128) (return (v128.const i32x4 0x0bAdD00D 0x0bAdD00D 0x0bAdD00D 0x0bAdD00D)))
+  (func (export "i32x4.smax") (result v128) (return (v128.const i32x4 0x7fffffff 0x7fffffff 0x7fffffff 0x7fffffff)))
+  (func (export "i32x4.neg_smax") (result v128) (return (v128.const i32x4 -0x7fffffff -0x7fffffff -0x7fffffff -0x7fffffff)))
+  (func (export "i32x4.inc_smin") (result v128) (return (i32x4.add (v128.const i32x4 -0x80000000 -0x80000000 -0x80000000 -0x80000000) (v128.const i32x4 1 1 1 1))))
+  (func (export "i32x4.neg_zero") (result v128) (return (v128.const i32x4 -0x0 -0x0 -0x0 -0x0)))
+  (func (export "i32x4.not_octal") (result v128) (return (v128.const i32x4 010 010 010 010)))
+  (func (export "i32x4.plus_sign") (result v128) (return (v128.const i32x4 +42 +42 +42 +42)))
+
+  (func (export "i32x4-dec-sep1") (result v128) (v128.const i32x4 1_000_000 1_000_000 1_000_000 1_000_000))
+  (func (export "i32x4-dec-sep2") (result v128) (v128.const i32x4 1_0_0_0 1_0_0_0 1_0_0_0 1_0_0_0))
+  (func (export "i32x4-hex-sep1") (result v128) (v128.const i32x4 0xa_0f_00_99 0xa_0f_00_99 0xa_0f_00_99 0xa_0f_00_99))
+  (func (export "i32x4-hex-sep2") (result v128) (v128.const i32x4 0x1_a_A_0_f 0x1_a_A_0_f 0x1_a_A_0_f 0x1_a_A_0_f))
+)
+
+(assert_return (invoke "i32x4.test") (v128.const i32x4 195940365 195940365 195940365 195940365))
+(assert_return (invoke "i32x4.smax") (v128.const i32x4 2147483647 2147483647 2147483647 2147483647))
+(assert_return (invoke "i32x4.neg_smax") (v128.const i32x4 -2147483647 -2147483647 -2147483647 -2147483647))
+(assert_return (invoke "i32x4.inc_smin") (v128.const i32x4 -2147483647 -2147483647 -2147483647 -2147483647))
+(assert_return (invoke "i32x4.neg_zero") (v128.const i32x4 0 0 0 0))
+(assert_return (invoke "i32x4.not_octal") (v128.const i32x4 10 10 10 10))
+(assert_return (invoke "i32x4.plus_sign") (v128.const i32x4 42 42 42 42))
+
+(assert_return (invoke "i32x4-dec-sep1") (v128.const i32x4 1000000 1000000 1000000 1000000))
+(assert_return (invoke "i32x4-dec-sep2") (v128.const i32x4 1000 1000 1000 1000))
+(assert_return (invoke "i32x4-hex-sep1") (v128.const i32x4 0xa0f0099 0xa0f0099 0xa0f0099 0xa0f0099))
+(assert_return (invoke "i32x4-hex-sep2") (v128.const i32x4 0x1aa0f 0x1aa0f 0x1aa0f 0x1aa0f))
+
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 _100 _100 _100 _100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 +_100 +_100 +_100 +_100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 -_100 -_100 -_100 -_100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 99_ 99_ 99_ 99_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 1__000 1__000 1__000 1__000))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 _0x100 _0x100 _0x100 _0x100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 0_x100 0_x100 0_x100 0_x100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 0x_100 0x_100 0x_100 0x_100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 0x00_ 0x00_ 0x00_ 0x00_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const i32x4 0xff__ffff 0xff__ffff 0xff__ffff 0xff__ffff))")
+  "unknown operator"
+)
+
+
+;; Test floating-point literal parsing.
+
+(module
+  (func (export "f32-dec-sep1") (result v128) (v128.const f32x4 1_000_000 1_000_000 1_000_000 1_000_000))
+  (func (export "f32-dec-sep2") (result v128) (v128.const f32x4 1_0_0_0 1_0_0_0 1_0_0_0 1_0_0_0))
+  (func (export "f32-dec-sep3") (result v128) (v128.const f32x4 100_3.141_592 100_3.141_592 100_3.141_592 100_3.141_592))
+  (func (export "f32-dec-sep4") (result v128) (v128.const f32x4 99e+1_3 99e+1_3 99e+1_3 99e+1_3))
+  (func (export "f32-dec-sep5") (result v128) (v128.const f32x4 122_000.11_3_54E0_2_3 122_000.11_3_54E0_2_3 122_000.11_3_54E0_2_3 122_000.11_3_54E0_2_3))
+  (func (export "f32-hex-sep1") (result v128) (v128.const f32x4 0xa_0f_00_99 0xa_0f_00_99 0xa_0f_00_99 0xa_0f_00_99))
+  (func (export "f32-hex-sep2") (result v128) (v128.const f32x4 0x1_a_A_0_f 0x1_a_A_0_f 0x1_a_A_0_f 0x1_a_A_0_f))
+  (func (export "f32-hex-sep3") (result v128) (v128.const f32x4 0xa0_ff.f141_a59a 0xa0_ff.f141_a59a 0xa0_ff.f141_a59a 0xa0_ff.f141_a59a))
+  (func (export "f32-hex-sep4") (result v128) (v128.const f32x4 0xf0P+1_3 0xf0P+1_3 0xf0P+1_3 0xf0P+1_3))
+  (func (export "f32-hex-sep5") (result v128) (v128.const f32x4 0x2a_f00a.1f_3_eep2_3 0x2a_f00a.1f_3_eep2_3 0x2a_f00a.1f_3_eep2_3 0x2a_f00a.1f_3_eep2_3))
+)
+
+(assert_return (invoke "f32-dec-sep1") (v128.const f32x4 1000000 1000000 1000000 1000000))
+(assert_return (invoke "f32-dec-sep2") (v128.const f32x4 1000 1000 1000 1000))
+(assert_return (invoke "f32-dec-sep3") (v128.const f32x4 1003.141592 1003.141592 1003.141592 1003.141592))
+(assert_return (invoke "f32-dec-sep4") (v128.const f32x4 99e+13 99e+13 99e+13 99e+13))
+(assert_return (invoke "f32-dec-sep5") (v128.const f32x4 122000.11354e23 122000.11354e23 122000.11354e23 122000.11354e23))
+(assert_return (invoke "f32-hex-sep1") (v128.const f32x4 0xa0f0099 0xa0f0099 0xa0f0099 0xa0f0099))
+(assert_return (invoke "f32-hex-sep2") (v128.const f32x4 0x1aa0f 0x1aa0f 0x1aa0f 0x1aa0f))
+(assert_return (invoke "f32-hex-sep3") (v128.const f32x4 0xa0ff.f141a59a 0xa0ff.f141a59a 0xa0ff.f141a59a 0xa0ff.f141a59a))
+(assert_return (invoke "f32-hex-sep4") (v128.const f32x4 0xf0P+13 0xf0P+13 0xf0P+13 0xf0P+13))
+(assert_return (invoke "f32-hex-sep5") (v128.const f32x4 0x2af00a.1f3eep23 0x2af00a.1f3eep23 0x2af00a.1f3eep23 0x2af00a.1f3eep23))
+
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 _100 _100 _100 _100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 +_100 +_100 +_100 +_100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 -_100 -_100 -_100 -_100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 99_ 99_ 99_ 99_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1__000 1__000 1__000 1__000))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 _1.0 _1.0 _1.0 _1.0))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1.0_ 1.0_ 1.0_ 1.0_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1_.0 1_.0 1_.0 1_.0))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1._0 1._0 1._0 1._0))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 _1e1 _1e1 _1e1 _1e1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1e1_ 1e1_ 1e1_ 1e1_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1_e1 1_e1 1_e1 1_e1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1e_1 1e_1 1e_1 1e_1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 _1.0e1 _1.0e1 _1.0e1 _1.0e1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1.0e1_ 1.0e1_ 1.0e1_ 1.0e1_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1.0_e1 1.0_e1 1.0_e1 1.0_e1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1.0e_1 1.0e_1 1.0e_1 1.0e_1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1.0e+_1 1.0e+_1 1.0e+_1 1.0e+_1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 1.0e_+1 1.0e_+1 1.0e_+1 1.0e_+1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 _0x100 _0x100 _0x100 _0x100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0_x100 0_x100 0_x100 0_x100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x_100 0x_100 0x_100 0x_100))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x00_ 0x00_ 0x00_ 0x00_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0xff__ffff 0xff__ffff 0xff__ffff 0xff__ffff))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x_1.0 0x_1.0 0x_1.0 0x_1.0))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1.0_ 0x1.0_ 0x1.0_ 0x1.0_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1_.0 0x1_.0 0x1_.0 0x1_.0))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1._0 0x1._0 0x1._0 0x1._0))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x_1p1 0x_1p1 0x_1p1 0x_1p1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1p1_ 0x1p1_ 0x1p1_ 0x1p1_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1_p1 0x1_p1 0x1_p1 0x1_p1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1p_1 0x1p_1 0x1p_1 0x1p_1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x_1.0p1 0x_1.0p1 0x_1.0p1 0x_1.0p1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1.0p1_ 0x1.0p1_ 0x1.0p1_ 0x1.0p1_))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1.0_p1 0x1.0_p1 0x1.0_p1 0x1.0_p1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1.0p_1 0x1.0p_1 0x1.0p_1 0x1.0p_1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1.0p+_1 0x1.0p+_1 0x1.0p+_1 0x1.0p+_1))")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(global v128 (v128.const f32x4 0x1.0p_+1 0x1.0p_+1 0x1.0p_+1 0x1.0p_+1))")
+  "unknown operator"
+)
+
+
+;; Test parsing an integer from binary
+
+(module binary
+  "\00asm" "\01\00\00\00"
+  "\01\05\01"                                ;; type   section
+  "\60\00\01\7b"                             ;; type 0 (func)
+  "\03\02\01\00"                             ;; func   section
+  "\07\0f\01\0b"                             ;; export section
+  "\70\61\72\73\65\5f\69\38\78\31\36\00\00"  ;; export name (parse_i8x16)
+  "\0a\16\01"                                ;; code   section
+  "\14\00\fd\02"                             ;; func body
+  "\00\00\00\00"                             ;; data lane 0~3   (0,    0,    0,    0)
+  "\80\80\80\80"                             ;; data lane 4~7   (-128, -128, -128, -128)
+  "\ff\ff\ff\ff"                             ;; data lane 8~11  (0xff, 0xff, 0xff, 0xff)
+  "\ff\ff\ff\ff"                             ;; data lane 12~15 (255,  255,  255,  255)
+  "\0b"                                      ;; end
+)
+(assert_return (invoke "parse_i8x16") (v128.const i8x16 0 0 0 0 -128 -128 -128 -128 0xff 0xff 0xff 0xff 255 255 255 255))
+
+(module binary
+  "\00asm" "\01\00\00\00"
+  "\01\05\01"                                ;; type   section
+  "\60\00\01\7b"                             ;; type 0 (func)
+  "\03\02\01\00"                             ;; func   section
+  "\07\0f\01\0b"                             ;; export section
+  "\70\61\72\73\65\5f\69\31\36\78\38\00\00"  ;; export name (parse_i16x8)
+  "\0a\16\01"                                ;; code   section
+  "\14\00\fd\02"                             ;; func body
+  "\00\00\00\00"                             ;; data lane 0, 1 (0,      0)
+  "\00\80\00\80"                             ;; data lane 2, 3 (-32768, -32768)
+  "\ff\ff\ff\ff"                             ;; data lane 4, 5 (65535,  65535)
+  "\ff\ff\ff\ff"                             ;; data lane 6, 7 (0xffff, 0xffff)
+  "\0b"                                      ;; end
+)
+(assert_return (invoke "parse_i16x8") (v128.const i16x8 0 0 -32768 -32768 65535 65535 0xffff 0xffff))
+
+(module binary
+  "\00asm" "\01\00\00\00"
+  "\01\05\01"                                ;; type   section
+  "\60\00\01\7b"                             ;; type 0 (func)
+  "\03\02\01\00"                             ;; func   section
+  "\07\0f\01\0b"                             ;; export section
+  "\70\61\72\73\65\5f\69\33\32\78\34\00\00"  ;; export name (parse_i32x4)
+  "\0a\16\01"                                ;; code   section
+  "\14\00\fd\02"                             ;; func body
+  "\d1\ff\ff\ff"                             ;; data lane 0 (4294967249)
+  "\d1\ff\ff\ff"                             ;; data lane 1 (4294967249)
+  "\d1\ff\ff\ff"                             ;; data lane 2 (4294967249)
+  "\d1\ff\ff\ff"                             ;; data lane 3 (4294967249)
+  "\0b"                                      ;; end
+)
+(assert_return (invoke "parse_i32x4") (v128.const i32x4 4294967249 4294967249 4294967249 4294967249))
+
+
+;; Test parsing a float from binary
+
+(module binary
+  "\00asm" "\01\00\00\00"
+  "\01\05\01"                                ;; type   section
+  "\60\00\01\7b"                             ;; type 0 (func)
+  "\03\02\01\00"                             ;; func   section
+  "\07\0f\01\0b"                             ;; export section
+  "\70\61\72\73\65\5f\66\33\32\78\34\00\00"  ;; export name (parse_f32x4)
+  "\0a\16\01"                                ;; code   section
+  "\14\00\fd\02"                             ;; func body
+  "\00\00\80\4f"                             ;; data lane 0 (4294967249)
+  "\00\00\80\4f"                             ;; data lane 1 (4294967249)
+  "\00\00\80\4f"                             ;; data lane 2 (4294967249)
+  "\00\00\80\4f"                             ;; data lane 3 (4294967249)
+  "\0b"                                      ;; end
+)
+(assert_return (invoke "parse_f32x4") (v128.const f32x4 4294967249 4294967249 4294967249 4294967249))
