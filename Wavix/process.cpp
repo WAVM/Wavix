@@ -180,8 +180,9 @@ inline bool loadBinaryModuleFromFile(const char* wasmFilename, IR::Module& outMo
 
 ModuleInstance* loadModule(Process* process, const char* hostFilename)
 {
+	IR::Module module(FeatureSpec(true));
+
 	// Load the module.
-	IR::Module module;
 	if(!loadBinaryModuleFromFile(hostFilename, module)) { return nullptr; }
 
 	// Link the module with the Wavix intrinsics.
