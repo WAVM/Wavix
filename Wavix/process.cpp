@@ -3,6 +3,7 @@
 #include <new>
 #include <utility>
 
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/Types.h"
 #include "WAVM/IR/Validate.h"
