@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "WAVM/IR/IR.h"
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/Types.h"
 #include "WAVM/Inline/Assert.h"
 #include "WAVM/Inline/BasicTypes.h"
@@ -274,9 +275,7 @@ namespace WAVM { namespace IR {
 
 		Uptr startFunctionIndex;
 
-		Module() : startFunctionIndex(UINTPTR_MAX) {}
-
-		Module(const FeatureSpec& inFeatureSpec)
+		Module(const FeatureSpec& inFeatureSpec = FeatureSpec())
 		: featureSpec(inFeatureSpec), startFunctionIndex(UINTPTR_MAX)
 		{
 		}

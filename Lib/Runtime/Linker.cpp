@@ -1,4 +1,5 @@
 #include "WAVM/Runtime/Linker.h"
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/Validate.h"
 #include "WAVM/Inline/Assert.h"
@@ -69,15 +70,22 @@ bool Runtime::StubResolver::resolve(const std::string& moduleName,
 		encoder.end();
 
 		// Generate a module for the stub function.
-		IR::Module stubIRModule;
+		IR::Module stubIRModule(FeatureSpec(true));
 		DisassemblyNames stubModuleNames;
 		stubIRModule.types.push_back(asFunctionType(type));
 		stubIRModule.functions.defs.push_back({{0}, {}, std::move(codeStream.getBytes()), {}});
 		stubIRModule.exports.push_back({"importStub", IR::ExternKind::function, 0});
 		stubModuleNames.functions.push_back({"importStub: " + exportName, {}, {}});
 		IR::setDisassemblyNames(stubIRModule, stubModuleNames);
-		IR::validatePreCodeSections(stubIRModule);
-		IR::validatePostCodeSections(stubIRModule);
+		try
+		{
+			IR::validatePreCodeSections(stubIRModule);
+			IR::validatePostCodeSections(stubIRModule);
+		}
+		catch(const ValidationException& exception)
+		{
+			Errors::fatalf("Stub module failed validation: %s", exception.message.c_str());
+		}
 
 		// Instantiate the module and return the stub function instance.
 		auto stubModule = compileModule(stubIRModule);

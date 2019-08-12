@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string>
 
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/CLI.h"
@@ -60,7 +61,7 @@ int main(int argc, char** argv)
 	}
 
 	// Load the WASM file.
-	IR::Module module;
+	IR::Module module(IR::FeatureSpec(true));
 	module.featureSpec.quotedNamesInTextFormat = enableQuotedNames;
 	if(!loadBinaryModuleFromFile(inputFilename, module)) { return EXIT_FAILURE; }
 

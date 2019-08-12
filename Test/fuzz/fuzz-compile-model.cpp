@@ -2,6 +2,7 @@
 #include <vector>
 #include "FuzzTargetCommonMain.h"
 #include "RandomModule.h"
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/Inline/Assert.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/Config.h"
@@ -33,16 +34,17 @@ static void compileModule(const IR::Module& module, RandomStream& random)
 
 	const LLVMJIT::TargetSpec& targetSpec = possibleTargetSpecs[random.get(numPossibleTargets - 1)];
 
-	std::vector<U8> objectCode;
-	errorUnless(LLVMJIT::compileModule(module, targetSpec, objectCode)
-				== LLVMJIT::CompileResult::success);
+	errorUnless(LLVMJIT::validateTarget(targetSpec, FeatureSpec(true))
+				== LLVMJIT::TargetValidationResult::valid);
+
+	std::vector<U8> objectCode = LLVMJIT::compileModule(module, targetSpec);
 }
 
 extern "C" I32 LLVMFuzzerTestOneInput(const U8* data, Uptr numBytes)
 {
 	RandomStream random(data, numBytes);
 
-	IR::Module module;
+	IR::Module module(FeatureSpec(true));
 	generateValidModule(module, random);
 
 #if !WAVM_ENABLE_LIBFUZZER

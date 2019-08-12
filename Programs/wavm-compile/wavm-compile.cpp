@@ -1,6 +1,7 @@
 #include <string>
 #include <vector>
 
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/CLI.h"
@@ -53,9 +54,15 @@ static void showHelp()
 				"Usage: wavm-compile [options] <in.wast|wasm> <out.wasm>\n"
 				"  -h|--help                 Display this message\n"
 				"  --target-triple <triple>  Set the target triple (default: %s)\n"
-				"  --target-cpu    <triple>  Set the target CPU (default: %s)\n",
+				"  --target-cpu <cpu>        Set the target CPU (default: %s)\n"
+				"  --enable <feature>        Enable the specified feature. See the list of\n"
+				"                            supported features below.\n"
+				"\n"
+				"Features:\n"
+				"%s\n",
 				hostTargetSpec.triple.c_str(),
-				hostTargetSpec.cpu.c_str());
+				hostTargetSpec.cpu.c_str(),
+				getFeatureListHelpText());
 }
 
 int main(int argc, char** argv)
@@ -68,6 +75,7 @@ int main(int argc, char** argv)
 	const char* inputFilename = nullptr;
 	const char* outputFilename = nullptr;
 	LLVMJIT::TargetSpec targetSpec = LLVMJIT::getHostTargetSpec();
+	IR::FeatureSpec featureSpec;
 	for(int argIndex = 1; argIndex < argc; ++argIndex)
 	{
 		if(!strcmp(argv[argIndex], "-h") || !strcmp(argv[argIndex], "--help"))
@@ -95,6 +103,21 @@ int main(int argc, char** argv)
 			++argIndex;
 			targetSpec.cpu = argv[argIndex];
 		}
+		else if(!strcmp(argv[argIndex], "--enable"))
+		{
+			++argIndex;
+			if(argIndex == argc)
+			{
+				Log::printf(Log::error, "Expected feature name following '--enable'.\n");
+				return EXIT_FAILURE;
+			}
+
+			if(!parseAndSetFeature(argv[argIndex], featureSpec, true))
+			{
+				Log::printf(Log::error, "Unknown feature '%s'.\n", argv[argIndex]);
+				return EXIT_FAILURE;
+			}
+		}
 		else if(!inputFilename)
 		{
 			inputFilename = argv[argIndex];
@@ -116,25 +139,36 @@ int main(int argc, char** argv)
 		return EXIT_FAILURE;
 	}
 
-	IR::Module irModule;
-
-	// Load the module IR.
-	if(!loadModule(inputFilename, irModule)) { return EXIT_FAILURE; }
-
-	// Compile the module's IR.
-	std::vector<U8> objectCode;
-	switch(LLVMJIT::compileModule(irModule, targetSpec, objectCode))
+	// Validate the target.
+	switch(LLVMJIT::validateTarget(targetSpec, featureSpec))
 	{
-	case LLVMJIT::CompileResult::success: break;
-	case LLVMJIT::CompileResult::invalidTargetSpec:
+	case LLVMJIT::TargetValidationResult::valid: break;
+
+	case LLVMJIT::TargetValidationResult::invalidTargetSpec:
 		Log::printf(Log::error,
 					"Target triple (%s) or CPU (%s) is invalid.\n",
 					targetSpec.triple.c_str(),
 					targetSpec.cpu.c_str());
 		return EXIT_FAILURE;
+	case LLVMJIT::TargetValidationResult::unsupportedArchitecture:
+		Log::printf(Log::error, "WAVM doesn't support the target architecture.\n");
+		return EXIT_FAILURE;
+	case LLVMJIT::TargetValidationResult::x86CPUDoesNotSupportSSE41:
+		Log::printf(Log::error,
+					"Target X86 CPU (%s) does not support SSE 4.1, which"
+					" WAVM requires for WebAssembly SIMD code.\n",
+					targetSpec.cpu.c_str());
+		return EXIT_FAILURE;
 
 	default: WAVM_UNREACHABLE();
 	};
+
+	// Load the module IR.
+	IR::Module irModule(featureSpec);
+	if(!loadModule(inputFilename, irModule)) { return EXIT_FAILURE; }
+
+	// Compile the module's IR.
+	std::vector<U8> objectCode = LLVMJIT::compileModule(irModule, targetSpec);
 
 	// Extract the compiled object code and add it to the IR module as a user section.
 	irModule.userSections.push_back({"wavm.precompiled_object", objectCode});

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/Inline/Assert.h"
 #include "WAVM/Inline/BasicTypes.h"
@@ -198,7 +199,7 @@ int main(int argc, char** argv)
 	std::vector<WAST::Error> testErrors;
 
 	// Parse the test script.
-	IR::FeatureSpec featureSpec;
+	IR::FeatureSpec featureSpec(true);
 	featureSpec.requireSharedFlagForAtomicOperators = true;
 	WAST::parseTestCommands((const char*)testScriptBytes.data(),
 							testScriptBytes.size(),

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/IR.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/Inline/BasicTypes.h"
@@ -68,7 +69,7 @@ int main(int argc, char** argv)
 	}
 
 	// Load the WAST module.
-	IR::Module module;
+	IR::Module module(IR::FeatureSpec(true));
 	module.featureSpec.extendedNamesSection = !omitExtendedNames;
 	if(!loadTextModuleFromFile(inputFilename, module)) { return EXIT_FAILURE; }
 

@@ -230,7 +230,7 @@
 /* Reference type operators                                                                                                                                   */ \
 	visitOp(0x00d0, ref_null                  , "ref.null"                  , NoImm                     , WAVM_NULLARY(nullref)     , referenceTypes         )   \
 	visitOp(0x00d1, ref_is_null               , "ref.is_null"               , NoImm                     , WAVM_UNARY(anyref,i32)    , referenceTypes         )   \
-	visitOp(0x00d2, ref_func                  , "ref.func"                  , FunctionImm               , WAVM_NULLARY(funcref)     , functionRefInstruction )   \
+	visitOp(0x00d2, ref_func                  , "ref.func"                  , FunctionImm               , WAVM_NULLARY(funcref)     , referenceTypes         )   \
 /* Saturating float->int truncation operators                                                                                                                 */ \
 	visitOp(0xfc00, i32_trunc_sat_f32_s       , "i32.trunc_sat_f32_s"       , NoImm                     , WAVM_UNARY(f32,i32)       , nonTrappingFloatToInt  )   \
 	visitOp(0xfc01, i32_trunc_sat_f32_u       , "i32.trunc_sat_f32_u"       , NoImm                     , WAVM_UNARY(f32,i32)       , nonTrappingFloatToInt  )   \
@@ -437,6 +437,11 @@
 /* v128 shuffles                                                                                                                                              */ \
 	visitOp(0xfdc0, v8x16_swizzle             , "v8x16.swizzle"             , NoImm                     , WAVM_BINARY(v128,v128)    , simd                   )   \
 	visitOp(0xfdc1, v8x16_shuffle             , "v8x16.shuffle"             , ShuffleImm<16>            , WAVM_BINARY(v128,v128)    , simd                   )   \
+/* v128 load-and-splat instructions                                                                                                                           */ \
+	visitOp(0xfdc2, i8x16_load_splat          , "i8x16.load_splat"          , LoadOrStoreImm<0>         , WAVM_LOAD(v128)           , simd                   )   \
+	visitOp(0xfdc3, i16x8_load_splat          , "i16x8.load_splat"          , LoadOrStoreImm<1>         , WAVM_LOAD(v128)           , simd                   )   \
+	visitOp(0xfdc4, i32x4_load_splat          , "i32x4.load_splat"          , LoadOrStoreImm<2>         , WAVM_LOAD(v128)           , simd                   )   \
+	visitOp(0xfdc5, i64x2_load_splat          , "i64x2.load_splat"          , LoadOrStoreImm<3>         , WAVM_LOAD(v128)           , simd                   )   \
 /* v128 integer narrow/widen conversions                                                                                                                      */ \
 	visitOp(0xfdc6, i8x16_narrow_i16x8_s      , "i8x16.narrow_i16x8_s"      , NoImm                     , WAVM_BINARY(v128,v128)    , simd                   )   \
 	visitOp(0xfdc7, i8x16_narrow_i16x8_u      , "i8x16.narrow_i16x8_u"      , NoImm                     , WAVM_BINARY(v128,v128)    , simd                   )   \
@@ -454,6 +459,8 @@
 	visitOp(0xfe00, atomic_notify             , "atomic.notify"             , AtomicLoadOrStoreImm<2>   , WAVM_BINARY(i32,i32)      , atomics                )   \
 	visitOp(0xfe01, i32_atomic_wait           , "i32.atomic.wait"           , AtomicLoadOrStoreImm<2>   , WAVM_WAIT(i32)            , atomics                )   \
 	visitOp(0xfe02, i64_atomic_wait           , "i64.atomic.wait"           , AtomicLoadOrStoreImm<3>   , WAVM_WAIT(i64)            , atomics                )   \
+/* Atomic fence                                                                                                                                               */ \
+	visitOp(0xfe03, atomic_fence              , "atomic.fence"              , NoImm                     , WAVM_NONE                 , atomics                )   \
 /* Atomic load/store                                                                                                                                          */ \
 	visitOp(0xfe10, i32_atomic_load           , "i32.atomic.load"           , AtomicLoadOrStoreImm<2>   , WAVM_LOAD(i32)            , atomics                )   \
 	visitOp(0xfe11, i64_atomic_load           , "i64.atomic.load"           , AtomicLoadOrStoreImm<3>   , WAVM_LOAD(i64)            , atomics                )   \

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "WAVM/Emscripten/Emscripten.h"
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/Operators.h"
 #include "WAVM/IR/Types.h"
@@ -18,6 +19,7 @@
 #include "WAVM/Inline/HashMap.h"
 #include "WAVM/Inline/Serialization.h"
 #include "WAVM/Inline/Timing.h"
+#include "WAVM/LLVMJIT/LLVMJIT.h"
 #include "WAVM/Logging/Logging.h"
 #include "WAVM/Platform/File.h"
 #include "WAVM/Platform/Memory.h"
@@ -174,19 +176,32 @@ static void showHelp()
 				"  <program file>        The WebAssembly module (.wast/.wasm) to run\n"
 				"  [program arguments]   The arguments to pass to the WebAssembly function\n"
 				"\n"
-				"  [options]:\n"
+				"Options:\n"
 				"  -h|--help             Display this message\n"
 				"  -d|--debug            Write additional debug information to stdout\n"
 				"  -f|--function name    Specify function name to run in module (default:main)\n"
-				"  --enable-thread-test  Enable ThreadTest intrinsics\n"
-				"  --precompiled         Use precompiled object code in programfile\n"
+				"  --precompiled         Use precompiled object code in program file\n"
 				"  --metrics             Write benchmarking information to stdout\n"
-				"  --sys=<system>        Specifies the system to host the module:\n"
-				"                        bare, emscripten, or wasi. The default is to detect\n"
+				"  --enable <feature>    Enable the specified feature. See the list of supported\n"
+				"                        features below.\n"
+				"  --enable-thread-test  Enable the WAVM thread testing intrinsics.\n"
+				"                        Not for production use.\n"
+				"  --sys=<system>        Specifies the system to host the module. See the list\n"
+				"                        of supported sytems below. The default is to detect\n"
 				"                        the system based on the module imports/exports.\n"
 				"  --mount-root=<dir>    Mounts <dir> as the WASI root directory\n"
 				"  --wasi-trace=<level>  Sets the level of WASI tracing:\n"
-				"                        syscalls or syscalls-with-callstacks\n");
+				"                        - syscalls\n"
+				"                        - syscalls-with-callstacks\n"
+				"\n"
+				"Systems:\n"
+				"  bare        A minimal runtime system.\n"
+				"  emscripten  A system that emulates the Emscripten runtime.\n"
+				"  wasi        A system that implements the WASI ABI.\n"
+				"\n"
+				"Features:\n"
+				"%s\n",
+				getFeatureListHelpText());
 }
 
 template<Uptr numPrefixChars>
@@ -205,6 +220,8 @@ enum class System
 
 struct State
 {
+	IR::FeatureSpec featureSpec{false};
+
 	// Command-line options.
 	const char* filename = nullptr;
 	const char* functionName = nullptr;
@@ -286,6 +303,21 @@ struct State
 			{
 				enableThreadTest = true;
 			}
+			else if(!strcmp(*nextArg, "--enable"))
+			{
+				++nextArg;
+				if(!*nextArg)
+				{
+					Log::printf(Log::error, "Expected feature name following '--enable'.\n");
+					return false;
+				}
+
+				if(!parseAndSetFeature(*nextArg, featureSpec, true))
+				{
+					Log::printf(Log::error, "Unknown feature '%s'.\n", *nextArg);
+					return false;
+				}
+			}
 			else if(!strcmp(*nextArg, "--precompiled"))
 			{
 				precompiled = true;
@@ -338,6 +370,24 @@ struct State
 		}
 
 		while(*nextArg) { runArgs.push_back(*nextArg++); };
+
+		// Check that the requested features are supported by the host CPU.
+		switch(LLVMJIT::validateTarget(LLVMJIT::getHostTargetSpec(), featureSpec))
+		{
+		case LLVMJIT::TargetValidationResult::valid: break;
+
+		case LLVMJIT::TargetValidationResult::unsupportedArchitecture:
+			Log::printf(Log::error, "Host architecture is not supported by WAVM.");
+			return false;
+		case LLVMJIT::TargetValidationResult::x86CPUDoesNotSupportSSE41:
+			Log::printf(Log::error,
+						"Host X86 CPU does not support SSE 4.1, which"
+						" WAVM requires for WebAssembly SIMD code.\n");
+			return false;
+
+		case LLVMJIT::TargetValidationResult::invalidTargetSpec:
+		default: WAVM_UNREACHABLE();
+		};
 
 		return true;
 	}
@@ -428,7 +478,7 @@ struct State
 		if(!parseCommandLine(argv)) { return EXIT_FAILURE; }
 
 		// Load the module.
-		IR::Module irModule;
+		IR::Module irModule(featureSpec);
 		if(!loadModule(filename, irModule)) { return EXIT_FAILURE; }
 
 		// Compile the module.
@@ -511,8 +561,8 @@ struct State
 							"'%s' expects %" PRIuPTR " argument(s), but command line had %" PRIuPTR
 							".\n",
 							functionName,
-							functionType.params().size(),
-							runArgs.size());
+							Uptr(functionType.params().size()),
+							Uptr(runArgs.size()));
 				return EXIT_FAILURE;
 			}
 
@@ -634,6 +684,12 @@ struct State
 		{
 			// If either the WASM or WASI start functions call the WASI exit API, they will throw a
 			// WASI::ExitException. Catch it here, and return the exit code.
+			result = int(exitException.exitCode);
+		}
+		catch(const Emscripten::ExitException& exitException)
+		{
+			// If either the WASM or WASI start functions call the Emscripten exit API, they will
+			// throw an Emscripten::ExitException. Catch it here, and return the exit code.
 			result = int(exitException.exitCode);
 		}
 

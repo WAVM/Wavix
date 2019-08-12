@@ -6,6 +6,7 @@
 
 #include "Lexer.h"
 #include "Parse.h"
+#include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/IR.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/Types.h"
@@ -456,8 +457,7 @@ static Command* parseCommand(CursorState* cursor, const IR::FeatureSpec& feature
 				++cursor->nextToken;
 
 				std::string internalModuleName;
-				Module module;
-				module.featureSpec = featureSpec;
+				Module module(featureSpec);
 				ParseState* outerParseState = cursor->parseState;
 				ParseState malformedModuleParseState(outerParseState->string,
 													 outerParseState->lineInfo);
