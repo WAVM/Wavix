@@ -72,7 +72,7 @@ namespace Wavix {
 			va_list argList;
 			va_start(argList, argFormat);
 			Log::printf(Log::debug,
-						"SYSCALL(%" PRIxPTR "): %s",
+						"SYSCALL(%" WAVM_PRIxPTR "): %s",
 						reinterpret_cast<Uptr>(currentThread),
 						syscallName);
 			Log::vprintf(Log::debug, argFormat, argList);
@@ -96,7 +96,7 @@ namespace Wavix {
 			va_list argList;
 			va_start(argList, returnFormat);
 			Log::printf(Log::debug,
-						"SYSCALL(%" PRIxPTR "): %s -> ",
+						"SYSCALL(%" WAVM_PRIxPTR "): %s -> ",
 						reinterpret_cast<Uptr>(currentThread),
 						syscallName);
 			Log::vprintf(Log::debug, returnFormat, argList);
