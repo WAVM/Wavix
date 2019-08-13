@@ -24,7 +24,7 @@
 #include "WAVM/Platform/Thread.h"
 #include "WAVM/Runtime/Intrinsics.h"
 #include "WAVM/Runtime/Linker.h"
-#include "WAVM/Runtime/RuntimeData.h"
+#include "WAVM/RuntimeABI/RuntimeABI.h"
 #include "WAVM/VFS/VFS.h"
 #include "WAVM/WASM/WASM.h"
 #include "errno.h"
