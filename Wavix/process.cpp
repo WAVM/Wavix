@@ -320,10 +320,10 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_exit", I32, __syscall_ex
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
-						  "__syscall_exit_group",
-						  I32,
-						  __syscall_exit_group,
-						  I32 exitCode)
+							   "__syscall_exit_group",
+							   I32,
+							   __syscall_exit_group,
+							   I32 exitCode)
 {
 	traceSyscallf("exit_group", "(%i)", exitCode);
 
@@ -331,10 +331,10 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
-											  "__syscall_fork",
-											  I32,
-											  __syscall_fork,
-											  I32 dummy)
+												   "__syscall_fork",
+												   I32,
+												   __syscall_fork,
+												   I32 dummy)
 {
 	Process* originalProcess = currentProcess;
 	wavmAssert(originalProcess);
@@ -416,12 +416,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
-						  "__syscall_execve",
-						  I32,
-						  __syscall_execve,
-						  U32 pathAddress,
-						  U32 argsAddress,
-						  U32 envsAddress)
+							   "__syscall_execve",
+							   I32,
+							   __syscall_execve,
+							   U32 pathAddress,
+							   U32 argsAddress,
+							   U32 envsAddress)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -520,12 +520,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_getppid", I32, __syscall
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
-						  "__syscall_sched_getaffinity",
-						  I32,
-						  __syscall_sched_getaffinity,
-						  I32 a,
-						  I32 b,
-						  I32 c)
+							   "__syscall_sched_getaffinity",
+							   I32,
+							   __syscall_sched_getaffinity,
+							   I32 a,
+							   I32 b,
+							   I32 c)
 {
 	traceSyscallf("sched_getaffinity", "(%i,%i,%i)", a, b, c);
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
@@ -540,13 +540,13 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 #define WAVIX_WNOWAIT 0x1000000
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
-						  "__syscall_wait4",
-						  I32,
-						  __syscall_wait4,
-						  I32 pid,
-						  U32 statusAddress,
-						  U32 options,
-						  U32 rusageAddress)
+							   "__syscall_wait4",
+							   I32,
+							   __syscall_wait4,
+							   I32 pid,
+							   U32 statusAddress,
+							   U32 options,
+							   U32 rusageAddress)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -612,11 +612,11 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess, "__syscall_gettid", I32, __syscall_
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
-						  "__syscall_tkill",
-						  I32,
-						  __syscall_tkill,
-						  U32 threadId,
-						  I32 signalNumber)
+							   "__syscall_tkill",
+							   I32,
+							   __syscall_tkill,
+							   U32 threadId,
+							   I32 signalNumber)
 {
 	traceSyscallf("tkill", "(%i,%i)", threadId, signalNumber);
 
@@ -624,12 +624,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
-						  "__syscall_rt_sigprocmask",
-						  I32,
-						  __syscall_rt_sigprocmask,
-						  I32 how,
-						  U32 setAddress,
-						  U32 oldSetAddress)
+							   "__syscall_rt_sigprocmask",
+							   I32,
+							   __syscall_rt_sigprocmask,
+							   I32 how,
+							   U32 setAddress,
+							   U32 oldSetAddress)
 {
 	traceSyscallf("rt_sigprocmask", "(%i, 0x%08x, 0x%08x)", how, setAddress, oldSetAddress);
 	return 0;

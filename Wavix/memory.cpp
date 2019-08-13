@@ -16,15 +16,15 @@ namespace Wavix {
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
-						  "__syscall_mmap",
-						  I32,
-						  __syscall_mmap,
-						  U32 address,
-						  U32 numBytes,
-						  U32 prot,
-						  U32 flags,
-						  I32 fd,
-						  U32 offset)
+							   "__syscall_mmap",
+							   I32,
+							   __syscall_mmap,
+							   U32 address,
+							   U32 numBytes,
+							   U32 prot,
+							   U32 flags,
+							   I32 fd,
+							   U32 offset)
 {
 	traceSyscallf("mmap",
 				  "(address=0x%08x, numBytes=%u, prot=0x%x, flags=0x%x, fd=%i, offset=%u)",
@@ -47,11 +47,11 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
-						  "__syscall_munmap",
-						  I32,
-						  __syscall_munmap,
-						  U32 address,
-						  U32 numBytes)
+							   "__syscall_munmap",
+							   I32,
+							   __syscall_munmap,
+							   U32 address,
+							   U32 numBytes)
 {
 	traceSyscallf("munmap", "(address=0x%08x, numBytes=%u)", address, numBytes);
 
@@ -76,14 +76,14 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 #define WAVIX_MREMAP_FIXED 2
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
-						  "__syscall_mremap",
-						  I32,
-						  __syscall_mremap,
-						  U32 oldAddress,
-						  U32 oldNumBytes,
-						  U32 newNumBytes,
-						  U32 flags,
-						  U32 newAddress)
+							   "__syscall_mremap",
+							   I32,
+							   __syscall_mremap,
+							   U32 oldAddress,
+							   U32 oldNumBytes,
+							   U32 newNumBytes,
+							   U32 flags,
+							   U32 newAddress)
 {
 	traceSyscallf(
 		"mremap",
@@ -131,12 +131,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
 #define WAVIX_MADV_DONTNEED 4
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixMemory,
-						  "__syscall_madvise",
-						  I32,
-						  __syscall_madvise,
-						  U32 address,
-						  U32 numBytes,
-						  U32 advice)
+							   "__syscall_madvise",
+							   I32,
+							   __syscall_madvise,
+							   U32 address,
+							   U32 numBytes,
+							   U32 advice)
 {
 	traceSyscallf("madvise", "(address=0x%08x, numBytes=%u, advise=%u)", address, numBytes, advice);
 

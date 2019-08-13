@@ -132,12 +132,12 @@ namespace OpenFlags {
 };
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_open",
-						  I32,
-						  __syscall_open,
-						  U32 pathAddress,
-						  U32 flags,
-						  U32 mode)
+							   "__syscall_open",
+							   I32,
+							   __syscall_open,
+							   U32 pathAddress,
+							   U32 flags,
+							   U32 mode)
 {
 	Memory* memory = currentThread->process->memory;
 	std::string pathString = readUserString(memory, pathAddress);
@@ -214,24 +214,24 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_openat",
-						  I32,
-						  __syscall_openat,
-						  I32 dirfd,
-						  U32 pathAddress,
-						  U32 flags,
-						  U32 mode)
+							   "__syscall_openat",
+							   I32,
+							   __syscall_openat,
+							   I32 dirfd,
+							   U32 pathAddress,
+							   U32 flags,
+							   U32 mode)
 {
 	traceSyscallf("openat", "");
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_creat",
-						  I32,
-						  __syscall_creat,
-						  U32 pathAddress,
-						  U32 mode)
+							   "__syscall_creat",
+							   I32,
+							   __syscall_creat,
+							   U32 pathAddress,
+							   U32 mode)
 {
 	traceSyscallf("creat", "");
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
@@ -256,14 +256,14 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_close", I32, __syscall_clos
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_llseek",
-						  I32,
-						  __syscall_llseek,
-						  I32 fd,
-						  U32 offsetHigh,
-						  U32 offsetLow,
-						  U32 resultAddress,
-						  U32 whence)
+							   "__syscall_llseek",
+							   I32,
+							   __syscall_llseek,
+							   I32 fd,
+							   U32 offsetHigh,
+							   U32 offsetLow,
+							   U32 resultAddress,
+							   U32 whence)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -293,12 +293,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_read",
-						  I32,
-						  __syscall_read,
-						  I32 fd,
-						  U32 bufferAddress,
-						  U32 numBytes)
+							   "__syscall_read",
+							   I32,
+							   __syscall_read,
+							   I32 fd,
+							   U32 bufferAddress,
+							   U32 numBytes)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -321,12 +321,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_write",
-						  I32,
-						  __syscall_write,
-						  I32 fd,
-						  U32 bufferAddress,
-						  U32 numBytes)
+							   "__syscall_write",
+							   I32,
+							   __syscall_write,
+							   I32 fd,
+							   U32 bufferAddress,
+							   U32 numBytes)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -349,12 +349,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_readv",
-						  I32,
-						  __syscall_readv,
-						  I32 fd,
-						  U32 iosAddress,
-						  U32 numIos)
+							   "__syscall_readv",
+							   I32,
+							   __syscall_readv,
+							   I32 fd,
+							   U32 iosAddress,
+							   U32 numIos)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -398,12 +398,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_writev",
-						  I32,
-						  __syscall_writev,
-						  I32 fd,
-						  U32 iosAddress,
-						  U32 numIOs)
+							   "__syscall_writev",
+							   I32,
+							   __syscall_writev,
+							   I32 fd,
+							   U32 iosAddress,
+							   U32 numIOs)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -512,12 +512,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_fdatasync", I32, __syscall_
 #define WAVIX_O_WRONLY 01
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_fcntl64",
-						  I32,
-						  __syscall_fcntl64,
-						  I32 fd,
-						  U32 cmd,
-						  U32 arg)
+							   "__syscall_fcntl64",
+							   I32,
+							   __syscall_fcntl64,
+							   I32 fd,
+							   U32 cmd,
+							   U32 arg)
 {
 	traceSyscallf("fnctl64", "(%i,%i,%i)", fd, cmd, arg);
 	switch(cmd)
@@ -563,11 +563,11 @@ struct wavix_stat
 };
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_stat64",
-						  I32,
-						  __syscall_stat64,
-						  U32 pathAddress,
-						  U32 resultAddress)
+							   "__syscall_stat64",
+							   I32,
+							   __syscall_stat64,
+							   U32 pathAddress,
+							   U32 resultAddress)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -587,11 +587,11 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_lstat64",
-						  I32,
-						  __syscall_lstat64,
-						  U32 pathAddress,
-						  U32 resultAddress)
+							   "__syscall_lstat64",
+							   I32,
+							   __syscall_lstat64,
+							   U32 pathAddress,
+							   U32 resultAddress)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -611,11 +611,11 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_fstat64",
-						  I32,
-						  __syscall_fstat64,
-						  I32 fd,
-						  U32 resultAddress)
+							   "__syscall_fstat64",
+							   I32,
+							   __syscall_fstat64,
+							   I32 fd,
+							   U32 resultAddress)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -628,13 +628,13 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_faccessat",
-						  I32,
-						  __syscall_faccessat,
-						  I32 dirfd,
-						  U32 pathAddress,
-						  U32 mode,
-						  U32 flags)
+							   "__syscall_faccessat",
+							   I32,
+							   __syscall_faccessat,
+							   I32 dirfd,
+							   U32 pathAddress,
+							   U32 mode,
+							   U32 flags)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -690,12 +690,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_dup2", I32, __syscall_dup2,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_readlink",
-						  I32,
-						  __syscall_readlink,
-						  U32 pathAddress,
-						  U32 bufferAddress,
-						  U32 numBufferBytes)
+							   "__syscall_readlink",
+							   I32,
+							   __syscall_readlink,
+							   U32 pathAddress,
+							   U32 bufferAddress,
+							   U32 numBufferBytes)
 {
 	Memory* memory = currentThread->process->memory;
 
@@ -723,24 +723,24 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_rename", I32, __syscall_ren
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_chown32",
-						  I32,
-						  __syscall_chown32,
-						  I32 a,
-						  I32 b,
-						  I32 c)
+							   "__syscall_chown32",
+							   I32,
+							   __syscall_chown32,
+							   I32 a,
+							   I32 b,
+							   I32 c)
 {
 	traceSyscallf("chown32", "(%i,%i,%i)", a, b, c);
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_getdents64",
-						  I32,
-						  __syscall_getdents64,
-						  I32 a,
-						  I32 b,
-						  I32 c)
+							   "__syscall_getdents64",
+							   I32,
+							   __syscall_getdents64,
+							   I32 a,
+							   I32 b,
+							   I32 c)
 {
 	traceSyscallf("getdents64", "(%i,%i,%i)", a, b, c);
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
@@ -752,22 +752,28 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_pipe", I32, __syscall_pipe,
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
-WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile, "__syscall_poll", I32, __syscall_poll, I32 a, I32 b, I32 c)
+WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
+							   "__syscall_poll",
+							   I32,
+							   __syscall_poll,
+							   I32 a,
+							   I32 b,
+							   I32 c)
 {
 	traceSyscallf("poll", "(%i,%i,%i)", a, b, c);
 	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_pselect6",
-						  I32,
-						  __syscall_pselect6,
-						  I32 a,
-						  I32 b,
-						  I32 c,
-						  I32 d,
-						  I32 e,
-						  I32 f)
+							   "__syscall_pselect6",
+							   I32,
+							   __syscall_pselect6,
+							   I32 a,
+							   I32 b,
+							   I32 c,
+							   I32 d,
+							   I32 e,
+							   I32 f)
 {
 	traceSyscallf("pselect", "(%i,0x%08x,0x%08x,0x%08x,0x%08x,0x%08x)", a, b, c, d, e, f);
 	// throwException(ExceptionTypes::calledUnimplementedIntrinsic);
@@ -775,14 +781,14 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall__newselect",
-						  I32,
-						  __syscall__newselect,
-						  I32 a,
-						  I32 b,
-						  I32 c,
-						  I32 d,
-						  I32 e)
+							   "__syscall__newselect",
+							   I32,
+							   __syscall__newselect,
+							   I32 a,
+							   I32 b,
+							   I32 c,
+							   I32 d,
+							   I32 e)
 {
 	traceSyscallf("_newselect", "(%i,0x%08x,0x%08x,0x%08x,0x%08x)", a, b, c, d, e);
 	// throwException(ExceptionTypes::calledUnimplementedIntrinsic);
@@ -792,15 +798,15 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 #define TIOCGWINSZ 0x5413
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
-						  "__syscall_ioctl",
-						  I32,
-						  __syscall_ioctl,
-						  I32 fd,
-						  U32 request,
-						  U32 arg0,
-						  U32 arg1,
-						  U32 arg2,
-						  U32 arg3)
+							   "__syscall_ioctl",
+							   I32,
+							   __syscall_ioctl,
+							   I32 fd,
+							   U32 request,
+							   U32 arg0,
+							   U32 arg1,
+							   U32 arg2,
+							   U32 arg3)
 {
 	Memory* memory = currentThread->process->memory;
 
