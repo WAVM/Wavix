@@ -9,6 +9,7 @@
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/Errors.h"
 #include "WAVM/Inline/Lock.h"
+#include "WAVM/Inline/Time.h"
 #include "WAVM/Platform/Defines.h"
 #include "WAVM/Platform/File.h"
 #include "WAVM/Platform/Intrinsic.h"
@@ -462,7 +463,7 @@ int main(int argc, const char** argv)
 		process->waiters.push_back(initThread);
 	}
 
-	while(!initThread->wakeEvent.wait(UINT64_MAX)) {};
+	while(!initThread->wakeEvent.wait(Time::infinity())) {};
 
 	{
 		Lock<Platform::Mutex> waiterLock(process->waitersMutex);

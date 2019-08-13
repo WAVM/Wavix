@@ -14,10 +14,10 @@
 #include "WAVM/Inline/Errors.h"
 #include "WAVM/Inline/Hash.h"
 #include "WAVM/Inline/HashMap.h"
-#include "WAVM/Inline/I128.h"
 #include "WAVM/Inline/IndexMap.h"
 #include "WAVM/Inline/Lock.h"
 #include "WAVM/Inline/Serialization.h"
+#include "WAVM/Inline/Time.h"
 #include "WAVM/Logging/Logging.h"
 #include "WAVM/Platform/File.h"
 #include "WAVM/Platform/Mutex.h"
@@ -591,7 +591,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
 			child->waiters.push_back(currentThread);
 		}
 
-		while(!currentThread->wakeEvent.wait(I128::nan())) {};
+		while(!currentThread->wakeEvent.wait(Time::infinity())) {};
 
 		for(Process* child : waiteeProcesses)
 		{
