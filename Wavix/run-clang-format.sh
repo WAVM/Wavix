@@ -1,1 +1,1 @@
-find . \( -iname "*.h" -o -iname "*.cpp" \) | xargs clang-format-7 -i
+find . \( -iname "*.h" -o -iname "*.cpp" \) | xargs clang-format-9 -i

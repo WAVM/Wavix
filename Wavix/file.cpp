@@ -69,14 +69,12 @@ static bool parsePath(const std::string& pathString, Path& outPath)
 	{
 		switch(*nextChar)
 		{
-		case '/':
-		{
+		case '/': {
 			++nextChar;
 			if(nextComponent.size()) { outPath.components.emplace_back(std::move(nextComponent)); }
 			break;
 		}
-		default:
-		{
+		default: {
 			U32 codePoint = 0;
 			const U8* codePointStart = nextChar;
 			if(!Unicode::decodeUTF8CodePoint(nextChar, endChar, codePoint)) { return false; }
@@ -813,8 +811,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 	traceSyscallf("ioctl", "(%i,%i)", fd, request);
 	switch(request)
 	{
-	case TIOCGWINSZ:
-	{
+	case TIOCGWINSZ: {
 		struct WinSize
 		{
 			unsigned short ws_row;    /* rows, in characters */
