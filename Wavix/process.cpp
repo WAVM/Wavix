@@ -139,17 +139,18 @@ inline bool loadBinaryModuleFromFile(const char* wasmFilename, IR::Module& outMo
 		{ return false; }
 
 		U64 numFileBytes = 0;
-		errorUnless(vfd->seek(0, VFS::SeekOrigin::end, &numFileBytes) == VFS::Result::success);
+		WAVM_ERROR_UNLESS(vfd->seek(0, VFS::SeekOrigin::end, &numFileBytes)
+						  == VFS::Result::success);
 		if(numFileBytes > UINTPTR_MAX)
 		{
-			errorUnless(vfd->close() == VFS::Result::success);
+			WAVM_ERROR_UNLESS(vfd->close() == VFS::Result::success);
 			return false;
 		}
 
 		std::unique_ptr<U8[]> fileContents{new U8[numFileBytes]};
-		errorUnless(vfd->seek(0, VFS::SeekOrigin::begin) == VFS::Result::success);
-		errorUnless(vfd->read(fileContents.get(), numFileBytes) == VFS::Result::success);
-		errorUnless(vfd->close() == VFS::Result::success);
+		WAVM_ERROR_UNLESS(vfd->seek(0, VFS::SeekOrigin::begin) == VFS::Result::success);
+		WAVM_ERROR_UNLESS(vfd->read(fileContents.get(), numFileBytes) == VFS::Result::success);
+		WAVM_ERROR_UNLESS(vfd->close() == VFS::Result::success);
 
 		Serialization::MemoryInputStream stream(fileContents.get(), numFileBytes);
 		WASM::serialize(stream, outModule);
@@ -337,7 +338,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 												   I32 dummy)
 {
 	Process* originalProcess = currentProcess;
-	wavmAssert(originalProcess);
+	WAVM_ASSERT(originalProcess);
 
 	traceSyscallf("fork", "");
 
@@ -349,12 +350,12 @@ WAVM_DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 
 	// Look up the new process's memory and table objects by finding the objects with the same IDs
 	// as the original process's memory and table objects in the cloned compartment.
-	wavmAssert(originalProcess->memory);
-	wavmAssert(originalProcess->table);
+	WAVM_ASSERT(originalProcess->memory);
+	WAVM_ASSERT(originalProcess->table);
 	newProcess->memory = remapToClonedCompartment(originalProcess->memory, newProcess->compartment);
 	newProcess->table = remapToClonedCompartment(originalProcess->table, newProcess->compartment);
-	wavmAssert(newProcess->memory);
-	wavmAssert(newProcess->table);
+	WAVM_ASSERT(newProcess->memory);
+	WAVM_ASSERT(newProcess->table);
 
 	newProcess->parent = originalProcess;
 	{

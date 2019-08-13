@@ -205,7 +205,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
 	I32 fd = currentProcess->files.add(-1, vfd);
 	if(fd == -1)
 	{
-		errorUnless(vfd->close() == VFS::Result::success);
+		WAVM_ERROR_UNLESS(vfd->close() == VFS::Result::success);
 		traceSyscallReturnf("open", "EMFILE (exhausted fd index space)");
 		return -ErrNo::emfile;
 	}
