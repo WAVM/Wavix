@@ -91,7 +91,7 @@ static I64 mainThreadEntry(void* threadVoid)
 {
 	setCurrentThreadAndProcess((Thread*)threadVoid);
 
-	catchRuntimeExceptionsOnRelocatableStack(
+	catchRuntimeExceptions(
 		[]() {
 			I64 result;
 			try
@@ -342,78 +342,7 @@ WAVM_DEFINE_INTRINSIC_FUNCTION_WITH_CONTEXT_SWITCH(wavix,
 
 	traceSyscallf("fork", "");
 
-	// Create a new process with a clone of the original's runtime compartment.
-	auto newProcess = new Process;
-	newProcess->compartment = cloneCompartment(originalProcess->compartment);
-	newProcess->args = originalProcess->args;
-	newProcess->envs = originalProcess->envs;
-
-	// Look up the new process's memory and table objects by finding the objects with the same IDs
-	// as the original process's memory and table objects in the cloned compartment.
-	WAVM_ASSERT(originalProcess->memory);
-	WAVM_ASSERT(originalProcess->table);
-	newProcess->memory = remapToClonedCompartment(originalProcess->memory, newProcess->compartment);
-	newProcess->table = remapToClonedCompartment(originalProcess->table, newProcess->compartment);
-	WAVM_ASSERT(newProcess->memory);
-	WAVM_ASSERT(newProcess->table);
-
-	newProcess->parent = originalProcess;
-	{
-		Lock<Platform::Mutex> childrenLock(originalProcess->childrenMutex);
-		originalProcess->children.push_back(newProcess);
-	}
-
-	// Copy the original process's working directory and open files to the new process.
-	{
-		Lock<Platform::Mutex> cwdLock(originalProcess->cwdMutex);
-		newProcess->cwd = originalProcess->cwd;
-	}
-	{
-		Lock<Platform::Mutex> filesLock(originalProcess->filesMutex);
-		newProcess->files = originalProcess->files;
-	}
-
-	// Allocate a PID for the new process.
-	{
-		Lock<Platform::Mutex> processesLock(processesMutex);
-		newProcess->id = processes.add(-1, newProcess);
-		if(newProcess->id == -1)
-		{
-			return Intrinsics::resultInContextRuntimeData<I32>(contextRuntimeData, -ErrNo::eagain);
-		}
-	}
-
-	// Add the process to the PID->process hash table.
-	pidToProcessMap.addOrFail(newProcess->id, newProcess);
-
-	// Create a new Wavix Thread with a clone of the original's runtime context.
-	auto newContext
-		= cloneContext(getContextFromRuntimeData(contextRuntimeData), newProcess->compartment);
-	Thread* newThread = new Thread(newProcess,
-								   newContext,
-								   getCurrentThread()->startFunction,
-								   getCurrentThread()->mainFunction);
-	newProcess->threads.push_back(newThread);
-
-	// Fork the current platform thread.
-	Platform::Thread* platformThread = Platform::forkCurrentThread();
-	if(platformThread)
-	{ return Intrinsics::resultInContextRuntimeData<I32>(contextRuntimeData, 1); }
-	else
-	{
-		// Move the newProcess pointer into the thread-local currentProcess variable. Since some
-		// compilers will cache a pointer to thread-local data that's accessed multiple times in one
-		// function, and currentProcess is accessed before calling forkCurrentThread, we can't
-		// directly write to it in this function in case the compiler tries to write to the original
-		// thread's currentProcess variable. Instead, call a WAVM_FORCENOINLINE function
-		// (setCurrentProcess) to set the variable.
-		setCurrentThreadAndProcess(newThread);
-
-		// Switch the contextRuntimeData to point to the new context's runtime data.
-		contextRuntimeData = getContextRuntimeData(newContext);
-
-		return Intrinsics::resultInContextRuntimeData<I32>(contextRuntimeData, 0);
-	}
+	throwException(ExceptionTypes::calledUnimplementedIntrinsic);
 }
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixProcess,
