@@ -98,13 +98,16 @@ static I64 mainThreadEntry(void* threadVoid)
 			{
 				if(getCurrentThread()->startFunction)
 				{
-					invokeFunctionUnchecked(
-						getCurrentThread()->context, getCurrentThread()->startFunction, nullptr);
+					invokeFunction(getCurrentThread()->context, getCurrentThread()->startFunction);
 				}
 
-				result = invokeFunctionUnchecked(
-							 getCurrentThread()->context, getCurrentThread()->mainFunction, nullptr)
-							 ->i64;
+				UntaggedValue resultValue;
+				invokeFunction(getCurrentThread()->context,
+							   getCurrentThread()->mainFunction,
+							   FunctionType({ValueType::i64}, {}),
+							   nullptr,
+							   &resultValue);
+				result = resultValue.i64;
 			}
 			catch(ExitThreadException const& exitThreadException)
 			{
