@@ -80,7 +80,7 @@ namespace Wavix {
 			va_end(argList);
 
 			Platform::CallStack callStack = Platform::captureCallStack(2);
-			if(callStack.stackFrames.size() > 4) { callStack.stackFrames.resize(4); }
+			if(callStack.frames.size() > 4) { callStack.frames.resize(4); }
 			std::vector<std::string> callStackFrameDescriptions
 				= Runtime::describeCallStack(callStack);
 			for(const std::string& frameDescription : callStackFrameDescriptions)
