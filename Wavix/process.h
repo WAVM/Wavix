@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
-
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/IndexMap.h"
 #include "WAVM/Platform/Mutex.h"

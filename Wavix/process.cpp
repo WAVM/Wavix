@@ -1,8 +1,8 @@
+#include "process.h"
 #include <algorithm>
 #include <memory>
 #include <new>
 #include <utility>
-
 #include "WAVM/IR/FeatureSpec.h"
 #include "WAVM/IR/Module.h"
 #include "WAVM/IR/Types.h"
@@ -28,7 +28,6 @@
 #include "WAVM/VFS/VFS.h"
 #include "WAVM/WASM/WASM.h"
 #include "errno.h"
-#include "process.h"
 #include "wavix.h"
 
 using namespace WAVM::IR;

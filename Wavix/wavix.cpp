@@ -1,11 +1,9 @@
 #include "wavix.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <algorithm>
 #include <atomic>
 #include <memory>
-
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/Errors.h"
 #include "WAVM/Inline/Lock.h"

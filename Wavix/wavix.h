@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
-
 #include "./errno.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Logging/Logging.h"

@@ -1,15 +1,14 @@
+#include "WAVM/Platform/File.h"
 #include <string.h>
 #include <string>
 #include <utility>
 #include <vector>
-
 #include "WAVM/Inline/Assert.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Inline/IndexMap.h"
 #include "WAVM/Inline/Lock.h"
 #include "WAVM/Inline/Unicode.h"
 #include "WAVM/Logging/Logging.h"
-#include "WAVM/Platform/File.h"
 #include "WAVM/Runtime/Intrinsics.h"
 #include "WAVM/Runtime/Runtime.h"
 #include "errno.h"

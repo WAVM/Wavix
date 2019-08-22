@@ -1,5 +1,4 @@
 #include <algorithm>
-
 #include "WAVM/IR/IR.h"
 #include "WAVM/Inline/BasicTypes.h"
 #include "WAVM/Runtime/Intrinsics.h"
