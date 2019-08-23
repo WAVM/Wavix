@@ -249,10 +249,7 @@ Thread* executeModule(Process* process, ModuleInstance* moduleInstance)
 	Thread* mainThread = new Thread(process, mainContext, startFunction, mainFunction);
 
 	// Start the process's main thread.
-	enum
-	{
-		mainThreadNumStackBytes = 1 * 1024 * 1024
-	};
+	static constexpr Uptr mainThreadNumStackBytes = 1 * 1024 * 1024;
 	Platform::createThread(mainThreadNumStackBytes, &mainThreadEntry, mainThread);
 
 	return mainThread;

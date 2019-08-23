@@ -110,22 +110,19 @@ static std::string resolvePath(const std::string& cwd, const std::string& home, 
 }
 
 namespace OpenFlags {
-	enum
-	{
-		readOnly = 0x0000,
-		writeOnly = 0x0001,
-		readWrite = 0x0002,
-		accessModeMask = 0x0003,
+	static constexpr U32 readOnly = 0x0000;
+	static constexpr U32 writeOnly = 0x0001;
+	static constexpr U32 readWrite = 0x0002;
+	static constexpr U32 accessModeMask = 0x0003;
 
-		create = 0x0040,
-		exclusive = 0x0080,
-		truncate = 0x0200,
-		createModeMask = create | exclusive | truncate,
+	static constexpr U32 create = 0x0040;
+	static constexpr U32 exclusive = 0x0080;
+	static constexpr U32 truncate = 0x0200;
+	static constexpr U32 createModeMask = create | exclusive | truncate;
 
-		// noCTTY = 0x0100,
-		// append = 0x0400,
-		// nonBlocking = 0x0800,
-	};
+	// noCTTY = 0x0100,
+	// append = 0x0400,
+	// nonBlocking = 0x0800,
 };
 
 WAVM_DEFINE_INTRINSIC_FUNCTION(wavixFile,
